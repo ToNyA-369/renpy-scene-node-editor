@@ -1,0 +1,13 @@
+{
+  "ID": "event_demo_drink_full",
+  "Name": "體力已滿",
+  "Trigger": "Action:喝水",
+  "Priority": 5,
+  "Weight": 1,
+  "Once": false,
+  "Conditions": [],
+  "Effects": [],
+  "Content": "content_demo_drink_full",
+  "End up": "REDO",
+  "Next Node": null
+}

@@ -1,0 +1,602 @@
+init -100 python:
+    import json
+
+    SCENE_STATS_FILE = "DATA/Stats.json"
+    SCENE_NODE_ROOT = "SCENENODE/"
+    SCENE_NODE_FILE = "/Node.json"
+    SCENE_OPTIONS_FILE = "/Options.json"
+    SCENE_EVENT_MARKER = "/EVENTPOOL/"
+
+
+    def scene_read_json(path):
+        handle = renpy.file(path, encoding="utf-8-sig")
+        try:
+            return json.load(handle)
+        finally:
+            handle.close()
+
+
+    def scene_load_catalog():
+        files = set(renpy.list_files())
+        stats = scene_read_json(SCENE_STATS_FILE) if SCENE_STATS_FILE in files else {}
+        nodes = {}
+        node_directories = {}
+
+        for path in sorted(files):
+            if not path.startswith(SCENE_NODE_ROOT) or not path.endswith(SCENE_NODE_FILE):
+                continue
+            node = scene_read_json(path)
+            node_id = str(node.get("ID") or "").strip()
+            if not node_id:
+                raise Exception("Scene Node is missing an ID: {}".format(path))
+            if node_id in nodes:
+                raise Exception("Duplicate Scene Node ID: {}".format(node_id))
+            nodes[node_id] = node
+            node_directories[path[:-len(SCENE_NODE_FILE)]] = node_id
+
+        events = dict((node_id, []) for node_id in nodes)
+        for path in sorted(files):
+            if not path.startswith(SCENE_NODE_ROOT) or SCENE_EVENT_MARKER not in path or not path.endswith(".json"):
+                continue
+            directory = path.split(SCENE_EVENT_MARKER, 1)[0]
+            node_id = node_directories.get(directory)
+            if node_id is not None:
+                events[node_id].append(scene_read_json(path))
+
+        options = {}
+        for directory, node_id in node_directories.items():
+            options_path = directory + SCENE_OPTIONS_FILE
+            if options_path in files:
+                options[node_id] = scene_read_json(options_path)
+            else:
+                options[node_id] = {"Version": 1, "Canvas": {}, "Elements": []}
+
+        return {
+            "stats": stats,
+            "nodes": nodes,
+            "events": events,
+            "options": options,
+        }
+
+
+    scene_catalog = scene_load_catalog()
+
+
+    def scene_reload_catalog():
+        global scene_catalog
+        scene_catalog = scene_load_catalog()
+        return scene_catalog
+
+
+    def scene_reset_state():
+        global scene_stats
+        global scene_tags_permanent
+        global scene_tags_daily
+        global scene_tags_weekly
+        global scene_stack
+        global scene_active_screen
+        global scene_local_audio
+        global scene_option_adjustments
+
+        scene_stats = dict(
+            (stat_id, settings.get("Init", 0))
+            for stat_id, settings in scene_catalog["stats"].items()
+        )
+        scene_tags_permanent = []
+        scene_tags_daily = []
+        scene_tags_weekly = []
+        scene_stack = []
+        scene_active_screen = None
+        scene_local_audio = {}
+        scene_option_adjustments = {}
+
+
+    def scene_get_stat(stat_id, default=0):
+        return scene_stats.get(stat_id, default)
+
+
+    def scene_has_tag(tag_id):
+        return (
+            tag_id in scene_tags_permanent
+            or tag_id in scene_tags_daily
+            or tag_id in scene_tags_weekly
+        )
+
+
+    def scene_add_tag(tag_id, scope="permanent"):
+        global scene_tags_permanent
+        global scene_tags_daily
+        global scene_tags_weekly
+
+        scene_tags_permanent = [item for item in scene_tags_permanent if item != tag_id]
+        scene_tags_daily = [item for item in scene_tags_daily if item != tag_id]
+        scene_tags_weekly = [item for item in scene_tags_weekly if item != tag_id]
+
+        if scope == "permanent":
+            scene_tags_permanent = scene_tags_permanent + [tag_id]
+        elif scope == "daily":
+            scene_tags_daily = scene_tags_daily + [tag_id]
+        elif scope == "weekly":
+            scene_tags_weekly = scene_tags_weekly + [tag_id]
+        else:
+            raise Exception("Unknown tag scope: {}".format(scope))
+
+
+    def scene_remove_tag(tag_id):
+        global scene_tags_permanent
+        global scene_tags_daily
+        global scene_tags_weekly
+
+        scene_tags_permanent = [item for item in scene_tags_permanent if item != tag_id]
+        scene_tags_daily = [item for item in scene_tags_daily if item != tag_id]
+        scene_tags_weekly = [item for item in scene_tags_weekly if item != tag_id]
+
+
+    def scene_reset_tags(scope):
+        global scene_tags_daily
+        global scene_tags_weekly
+
+        if scope == "daily":
+            scene_tags_daily = []
+        elif scope == "weekly":
+            scene_tags_weekly = []
+        else:
+            raise Exception("Only daily and weekly tags can be reset.")
+
+
+    def scene_condition_matches(condition):
+        condition_type = str(condition.get("type") or "").lower()
+        operation = str(condition.get("op") or "")
+
+        if condition_type == "tag":
+            if operation == "has":
+                return scene_has_tag(condition.get("id"))
+            if operation == "not_has":
+                return not scene_has_tag(condition.get("id"))
+            return False
+
+        if condition_type != "stat":
+            return False
+
+        stat_id = condition.get("id")
+        if stat_id not in scene_stats:
+            return False
+        left = scene_stats[stat_id]
+        right = condition.get("value")
+
+        try:
+            if operation == ">":
+                return left > right
+            if operation == ">=":
+                return left >= right
+            if operation == "<":
+                return left < right
+            if operation == "<=":
+                return left <= right
+            if operation == "==":
+                return left == right
+            if operation == "!=":
+                return left != right
+        except TypeError:
+            return False
+        return False
+
+
+    def scene_conditions_match(conditions):
+        return all(scene_condition_matches(item) for item in (conditions or []))
+
+
+    def scene_event_once_tag(event):
+        return "once:{}".format(event.get("ID"))
+
+
+    def scene_event_matches(event, trigger):
+        if event.get("Trigger") != trigger:
+            return False
+        if event.get("Once") and scene_has_tag(scene_event_once_tag(event)):
+            return False
+        return all(scene_condition_matches(item) for item in event.get("Conditions", []))
+
+
+    def scene_weighted_pair(pairs):
+        available = []
+        total = 0.0
+        for value, raw_weight in pairs:
+            try:
+                weight = float(raw_weight)
+            except (TypeError, ValueError):
+                continue
+            if weight <= 0:
+                continue
+            available.append((value, weight))
+            total += weight
+
+        if not available:
+            return None
+
+        threshold = renpy.random.random() * total
+        cursor = 0.0
+        for value, weight in available:
+            cursor += weight
+            if threshold < cursor:
+                return value
+        return available[-1][0]
+
+
+    def scene_weighted_value(value):
+        if value is None or isinstance(value, str):
+            return value
+        if hasattr(value, "items"):
+            return scene_weighted_pair(value.items())
+        raise Exception("Weighted value must be null, a string, or an object.")
+
+
+    def scene_select_event(node_id, trigger):
+        matches = [
+            event
+            for event in scene_catalog["events"].get(node_id, [])
+            if scene_event_matches(event, trigger)
+        ]
+        if not matches:
+            return None
+
+        priority = min(int(event.get("Priority", 5)) for event in matches)
+        candidates = [event for event in matches if int(event.get("Priority", 5)) == priority]
+        return scene_weighted_pair(
+            (event, event.get("Weight", 1))
+            for event in candidates
+        )
+
+
+    def scene_prepare_event(node_id, event):
+        return {
+            "node_id": node_id,
+            "event": event,
+            "content": scene_weighted_value(event.get("Content")),
+            "end_up": event.get("End up", "REDO"),
+            "next_node": scene_weighted_value(event.get("Next Node")),
+        }
+
+
+    def scene_track_local_audio(node_id, channel, persistent):
+        global scene_local_audio
+
+        updated = dict((key, list(value)) for key, value in scene_local_audio.items())
+        for key in list(updated):
+            updated[key] = [item for item in updated[key] if item != channel]
+            if not updated[key]:
+                del updated[key]
+        if not persistent:
+            updated[node_id] = updated.get(node_id, []) + [channel]
+        scene_local_audio = updated
+
+
+    def scene_release_node_audio(node_id):
+        global scene_local_audio
+
+        channels = scene_local_audio.get(node_id, [])
+        for channel in channels:
+            renpy.music.stop(channel=channel)
+        scene_local_audio = dict(
+            (key, list(value))
+            for key, value in scene_local_audio.items()
+            if key != node_id
+        )
+
+
+    def scene_apply_stat_effect(effect):
+        global scene_stats
+
+        stat_id = effect.get("id")
+        if stat_id not in scene_catalog["stats"]:
+            raise Exception("Unknown Stat ID: {}".format(stat_id))
+
+        operation = effect.get("op")
+        value = effect.get("value", 0)
+        current = scene_stats.get(stat_id, scene_catalog["stats"][stat_id].get("Init", 0))
+
+        if operation == "set":
+            result = value
+        elif operation == "+":
+            result = current + value
+        elif operation == "-":
+            result = current - value
+        elif operation == "*":
+            result = current * value
+        elif operation == "/":
+            if value == 0:
+                raise Exception("Stat effect cannot divide by zero: {}".format(stat_id))
+            result = current / value
+        else:
+            raise Exception("Unknown Stat operation: {}".format(operation))
+
+        settings = scene_catalog["stats"][stat_id]
+        result = max(settings.get("Min", result), min(settings.get("Max", result), result))
+        updated = dict(scene_stats)
+        updated[stat_id] = result
+        scene_stats = updated
+
+
+    def scene_apply_audio_effect(node_id, effect):
+        effect_type = str(effect.get("type") or "").lower()
+        channel = "music" if effect_type == "bgm" else "sound"
+        operation = str(effect.get("op") or "play").lower()
+
+        if operation == "stop":
+            renpy.music.stop(channel=channel, fadeout=effect.get("fadeout"))
+            scene_track_local_audio(node_id, channel, True)
+            return
+        if operation != "play":
+            raise Exception("Unknown audio operation: {}".format(operation))
+
+        filename = effect.get("id")
+        if not filename:
+            raise Exception("Audio play effect is missing an id.")
+        loop = effect.get("loop", effect_type == "bgm")
+        renpy.music.play(
+            filename,
+            channel=channel,
+            loop=loop,
+            fadein=effect.get("fadein", 0),
+            fadeout=effect.get("fadeout"),
+            if_changed=effect.get("if_changed", True),
+        )
+        scene_track_local_audio(node_id, channel, bool(effect.get("persistent", False)))
+
+
+    def scene_apply_effect(node_id, effect):
+        effect_type = str(effect.get("type") or "").lower()
+        if effect_type == "stat":
+            scene_apply_stat_effect(effect)
+        elif effect_type == "tag":
+            operation = effect.get("op")
+            if operation == "add":
+                scene_add_tag(effect.get("id"), effect.get("scope", "permanent"))
+            elif operation == "remove":
+                scene_remove_tag(effect.get("id"))
+            else:
+                raise Exception("Unknown Tag operation: {}".format(operation))
+        elif effect_type in ("bgm", "se"):
+            scene_apply_audio_effect(node_id, effect)
+        else:
+            raise Exception("Unknown Effect type: {}".format(effect_type))
+
+
+    def scene_apply_prepared(prepared):
+        event = prepared["event"]
+        if event.get("Once"):
+            scene_add_tag(scene_event_once_tag(event), "permanent")
+        for effect in event.get("Effects", []):
+            scene_apply_effect(prepared["node_id"], effect)
+
+
+    def scene_get_node(node_id):
+        try:
+            return scene_catalog["nodes"][node_id]
+        except KeyError:
+            raise Exception("Unknown Scene Node ID: {}".format(node_id))
+
+
+    def scene_current_node_id():
+        return scene_stack[-1] if scene_stack else None
+
+
+    def scene_current_node():
+        node_id = scene_current_node_id()
+        return scene_get_node(node_id) if node_id else {}
+
+
+    def scene_begin(root_node):
+        global scene_stack
+
+        scene_reset_state()
+        scene_get_node(root_node)
+        scene_stack = [root_node]
+
+
+    def scene_show_current_node():
+        global scene_active_screen
+
+        node = scene_current_node()
+        background = str(node.get("Background") or "").strip()
+        if background and renpy.has_image(background):
+            renpy.scene()
+            renpy.show(background)
+
+        screen_name = str(node.get("Screen") or "").strip()
+        if screen_name:
+            renpy.show_screen(screen_name, _tag="scene_runtime")
+            scene_active_screen = screen_name
+        elif scene_active_screen:
+            renpy.hide_screen("scene_runtime")
+            scene_active_screen = None
+
+
+    def scene_resolve_prepared(prepared):
+        global scene_stack
+
+        end_up = prepared["end_up"]
+        if end_up == "REDO":
+            return
+
+        scene_release_node_audio(prepared["node_id"])
+        if end_up == "GOTO":
+            next_node = prepared["next_node"]
+            if not next_node:
+                raise Exception("GOTO Event did not select a Next Node.")
+            scene_get_node(next_node)
+            scene_stack = scene_stack + [next_node]
+        elif end_up == "EXIT":
+            scene_stack = scene_stack[:-1]
+        else:
+            raise Exception("Unknown End up value: {}".format(end_up))
+
+
+    def scene_option_screen(node):
+        return str(node.get("Option Screen") or "option_{}".format(node.get("ID")))
+
+
+    def scene_option_data(node_id):
+        return scene_catalog["options"].get(
+            node_id,
+            {"Version": 1, "Canvas": {}, "Elements": []},
+        )
+
+
+    def scene_option_mode(node_id, node):
+        mode = str(node.get("Option Mode") or "").upper()
+        if mode in ("DATA", "CUSTOM"):
+            return mode
+        return "DATA" if scene_option_data(node_id).get("Elements") else "CUSTOM"
+
+
+    def scene_option_visible_elements(node_id):
+        return [
+            element
+            for element in scene_option_data(node_id).get("Elements", [])
+            if scene_conditions_match(element.get("Visible Conditions", []))
+        ]
+
+
+    def scene_option_visible_items(element):
+        return [
+            item
+            for item in element.get("Items", [])
+            if scene_conditions_match(item.get("Visible Conditions", []))
+        ]
+
+
+    def scene_option_enabled(element, item=None):
+        if not scene_conditions_match(element.get("Enabled Conditions", [])):
+            return False
+        if item is not None:
+            return scene_conditions_match(item.get("Enabled Conditions", []))
+        return True
+
+
+    def scene_option_scale(node_id):
+        canvas = scene_option_data(node_id).get("Canvas", {})
+        width = max(1.0, float(canvas.get("Width", 1920)))
+        height = max(1.0, float(canvas.get("Height", 1080)))
+        return (
+            float(config.screen_width) / width,
+            float(config.screen_height) / height,
+        )
+
+
+    def scene_option_rect(node_id, element):
+        layout = element.get("Layout", {})
+        scale_x, scale_y = scene_option_scale(node_id)
+        return (
+            int(round(float(layout.get("X", 0)) * scale_x)),
+            int(round(float(layout.get("Y", 0)) * scale_y)),
+            max(1, int(round(float(layout.get("Width", 1)) * scale_x))),
+            max(1, int(round(float(layout.get("Height", 1)) * scale_y))),
+        )
+
+
+    def scene_option_pixel(node_id, value, axis="uniform"):
+        scale_x, scale_y = scene_option_scale(node_id)
+        scale = scale_x if axis == "x" else scale_y if axis == "y" else min(scale_x, scale_y)
+        return max(1, int(round(float(value) * scale)))
+
+
+    def scene_option_item_style(element, item, key, default):
+        override = item.get("Style Override", {}) if item else {}
+        return override.get(key, element.get("Style", {}).get(key, default))
+
+
+    def scene_option_image(path, width, height, fit="CONTAIN", opacity=1.0, tint="#ffffff", zoom=1.0):
+        if not path:
+            return Solid("#00000000", xsize=width, ysize=height)
+        fit_name = str(fit or "CONTAIN").lower()
+        properties = {
+            "xysize": (width, height),
+            "alpha": float(opacity),
+            "matrixcolor": TintMatrix(tint),
+        }
+        if fit_name != "stretch":
+            properties["fit"] = fit_name
+        if float(zoom) != 1.0:
+            properties["zoom"] = float(zoom)
+        return Transform(path, **properties)
+
+
+    def scene_option_prepare_adjustments(node_id):
+        global scene_option_adjustments
+
+        updated = dict(scene_option_adjustments)
+        for element in scene_option_data(node_id).get("Elements", []):
+            if element.get("Type") != "TEXTBOX":
+                continue
+            key = "{}:{}".format(node_id, element.get("ID"))
+            remember = str(element.get("List", {}).get("Remember Scroll") or "RESET").upper()
+            if remember == "RESET" or key not in updated:
+                updated[key] = ui.adjustment()
+        scene_option_adjustments = updated
+
+
+    def scene_option_adjustment(node_id, element):
+        key = "{}:{}".format(node_id, element.get("ID"))
+        return scene_option_adjustments.get(key)
+
+
+    def scene_call_option_screen(node_id, node):
+        if scene_option_mode(node_id, node) == "DATA":
+            scene_option_prepare_adjustments(node_id)
+            return renpy.call_screen("scene_option_renderer", node_id=node_id)
+        return renpy.call_screen(scene_option_screen(node))
+
+
+    def scene_missing_event(node_id, trigger):
+        raise Exception(
+            "No Event matched Trigger {!r} in Scene Node {!r}. Add an unconditional fallback Event.".format(
+                trigger,
+                node_id,
+            )
+        )
+
+
+    def scene_cleanup_ui():
+        global scene_active_screen
+
+        if scene_active_screen:
+            renpy.hide_screen("scene_runtime")
+        scene_active_screen = None
+
+
+default scene_stats = {}
+default scene_tags_permanent = []
+default scene_tags_daily = []
+default scene_tags_weekly = []
+default scene_stack = []
+default scene_active_screen = None
+default scene_local_audio = {}
+default scene_option_adjustments = {}
+
+
+label scene_runtime_start(root_node):
+    $ scene_begin(root_node)
+
+    while scene_stack:
+        $ _scene_node_id = scene_current_node_id()
+        $ _scene_node = scene_current_node()
+        $ scene_show_current_node()
+        $ _scene_event = scene_select_event(_scene_node_id, "Auto")
+
+        if _scene_event is None:
+            $ _scene_trigger = scene_call_option_screen(_scene_node_id, _scene_node)
+            $ _scene_event = scene_select_event(_scene_node_id, _scene_trigger)
+            if _scene_event is None:
+                $ scene_missing_event(_scene_node_id, _scene_trigger)
+
+        $ _scene_prepared = scene_prepare_event(_scene_node_id, _scene_event)
+        $ scene_apply_prepared(_scene_prepared)
+
+        if _scene_prepared["content"]:
+            call expression _scene_prepared["content"]
+
+        $ scene_resolve_prepared(_scene_prepared)
+
+    $ scene_cleanup_ui()
+    return

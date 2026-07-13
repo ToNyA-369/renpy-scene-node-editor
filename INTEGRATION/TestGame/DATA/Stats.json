@@ -1,0 +1,14 @@
+{
+  "stat_money_demo": {
+    "Name": "金錢",
+    "Max": 999,
+    "Min": 0,
+    "Init": 20
+  },
+  "stat_energy_demo": {
+    "Name": "體力",
+    "Max": 100,
+    "Min": 0,
+    "Init": 60
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "ID": "event_demo_walk_tired",
+  "Name": "體力不足",
+  "Trigger": "Action:散步",
+  "Priority": 5,
+  "Weight": 1,
+  "Once": false,
+  "Conditions": [],
+  "Effects": [],
+  "Content": "content_demo_walk_tired",
+  "End up": "REDO",
+  "Next Node": null
+}

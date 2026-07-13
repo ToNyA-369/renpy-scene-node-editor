@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>Scene Node Editor</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar" id="sidebar">
+      <div class="brand-row">
+        <div class="brand-mark" aria-hidden="true">SN</div>
+        <div class="brand-copy">
+          <strong>Scene Node Editor</strong>
+          <span id="projectName">讀取專案中</span>
+        </div>
+        <button class="icon-button mobile-only" id="closeSidebar" type="button" title="關閉節點列表" aria-label="關閉節點列表">×</button>
+      </div>
+
+      <div class="sidebar-tools">
+        <label class="search-field">
+          <span class="visually-hidden">搜尋節點</span>
+          <input id="nodeSearch" type="search" placeholder="搜尋節點">
+        </label>
+        <button class="primary-button compact" id="newNodeButton" type="button"><span aria-hidden="true">＋</span> 新增節點</button>
+      </div>
+
+      <nav class="node-list" id="nodeList" aria-label="Scene Node 列表"></nav>
+
+      <div class="sidebar-footer">
+        <button class="quiet-button" id="refreshProject" type="button" title="重新掃描專案">重新掃描</button>
+        <span id="projectSummary">0 個節點</span>
+      </div>
+    </aside>
+
+    <div class="sidebar-scrim" id="sidebarScrim"></div>
+
+    <main class="main-area">
+      <header class="topbar">
+        <button class="icon-button mobile-only" id="openSidebar" type="button" title="開啟節點列表" aria-label="開啟節點列表">☰</button>
+        <div class="context-title">
+          <span class="context-kicker" id="nodePath">尚未選擇節點</span>
+          <h1 id="nodeTitle">Scene Node Editor</h1>
+        </div>
+        <div class="topbar-actions">
+          <span class="save-state" id="saveState" role="status">已同步</span>
+          <button class="quiet-button" id="validateButton" type="button">檢查專案</button>
+        </div>
+      </header>
+
+      <nav class="tabbar" id="tabbar" aria-label="編輯器分頁">
+        <button class="tab active" type="button" data-tab="node">節點</button>
+        <button class="tab" type="button" data-tab="events">事件 <span class="tab-count" id="eventCount">0</span></button>
+        <button class="tab" type="button" data-tab="options">選項</button>
+        <button class="tab" type="button" data-tab="content">演出</button>
+        <button class="tab" type="button" data-tab="screens">畫面</button>
+        <button class="tab" type="button" data-tab="stats">數值</button>
+        <button class="tab" type="button" data-tab="validation">檢查 <span class="tab-count issue-count" id="issueCount">0</span></button>
+      </nav>
+
+      <section class="workspace" id="workspace">
+        <div class="empty-state" id="emptyState">
+          <div class="empty-symbol" aria-hidden="true">＋</div>
+          <h2>建立第一個 Scene Node</h2>
+          <button class="primary-button" id="emptyNewNodeButton" type="button">新增節點</button>
+        </div>
+
+        <section class="tab-panel active" data-panel="node" id="nodePanel"></section>
+        <section class="tab-panel" data-panel="events" id="eventsPanel"></section>
+        <section class="tab-panel" data-panel="options" id="optionsPanel"></section>
+        <section class="tab-panel" data-panel="content" id="contentPanel"></section>
+        <section class="tab-panel" data-panel="screens" id="screensPanel"></section>
+        <section class="tab-panel" data-panel="stats" id="statsPanel"></section>
+        <section class="tab-panel" data-panel="validation" id="validationPanel"></section>
+      </section>
+    </main>
+  </div>
+
+  <dialog class="dialog" id="nodeDialog">
+    <form method="dialog" id="nodeDialogForm">
+      <div class="dialog-header">
+        <div>
+          <span class="section-kicker">SCENENODE</span>
+          <h2>新增 Scene Node</h2>
+        </div>
+        <button class="icon-button" value="cancel" title="關閉" aria-label="關閉">×</button>
+      </div>
+      <div class="dialog-body form-stack">
+        <label class="field">
+          <span>節點名稱</span>
+          <input name="name" required placeholder="妹妹的房間">
+        </label>
+        <div class="form-grid two-columns">
+          <label class="field">
+            <span>Background</span>
+            <input name="background" placeholder="bedroomDay">
+          </label>
+          <label class="field">
+            <span>Screen</span>
+            <select name="screen" id="newNodeScreen"><option value="">None</option></select>
+          </label>
+        </div>
+      </div>
+      <div class="dialog-actions">
+        <button class="quiet-button" value="cancel">取消</button>
+        <button class="primary-button" id="createNodeConfirm" value="default">建立節點</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog class="dialog small-dialog" id="nameDialog">
+    <form method="dialog" id="nameDialogForm">
+      <div class="dialog-header">
+        <div>
+          <span class="section-kicker" id="nameDialogKicker">NEW FILE</span>
+          <h2 id="nameDialogTitle">新增文件</h2>
+        </div>
+        <button class="icon-button" value="cancel" title="關閉" aria-label="關閉">×</button>
+      </div>
+      <div class="dialog-body">
+        <label class="field">
+          <span id="nameDialogLabel">名稱</span>
+          <input id="nameDialogInput" name="name" required autocomplete="off">
+        </label>
+      </div>
+      <div class="dialog-actions">
+        <button class="quiet-button" value="cancel">取消</button>
+        <button class="primary-button" id="nameDialogConfirm" value="default">建立</button>
+      </div>
+    </form>
+  </dialog>
+
+  <datalist id="screenNames"></datalist>
+  <datalist id="statNames"></datalist>
+  <datalist id="nodeNames"></datalist>
+  <datalist id="contentNames"></datalist>
+  <datalist id="imageAssets"></datalist>
+
+  <div class="toast-region" id="toastRegion" aria-live="polite"></div>
+
+  <script src="/app.js" defer></script>
+</body>
+</html>

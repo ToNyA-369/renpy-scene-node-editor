@@ -1,0 +1,5 @@
+*.command text eol=lf
+*.py text eol=lf
+*.rpy text eol=lf
+*.json text eol=lf
+*.md text eol=lf

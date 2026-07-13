@@ -1,0 +1,30 @@
+{
+  "ID": "event_demo_drink_regular",
+  "Name": "一般喝水",
+  "Trigger": "Action:喝水",
+  "Priority": 3,
+  "Weight": 1,
+  "Once": false,
+  "Conditions": [
+    {
+      "type": "stat",
+      "id": "stat_energy_demo",
+      "op": "<",
+      "value": 100
+    }
+  ],
+  "Effects": [
+    {
+      "type": "stat",
+      "id": "stat_energy_demo",
+      "op": "+",
+      "value": 10
+    }
+  ],
+  "Content": {
+    "content_demo_drink_regular": 3,
+    "content_demo_drink_window": 1
+  },
+  "End up": "REDO",
+  "Next Node": null
+}

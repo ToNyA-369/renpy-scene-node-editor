@@ -1,0 +1,23 @@
+.DS_Store
+__pycache__/
+*.py[cod]
+*.rpyc
+*.rpyb
+*.tmp
+
+cache/
+saves/
+.scene-node-editor/
+.scene-node-trash/
+
+# Local authoring data is not part of the distributable editor.
+/DATA/
+/SCENENODE/
+/SCENESCREEN/
+/INTEGRATION/TestLauncher/
+/啟動編輯器.command
+
+# Historical design notes stay local; the repository ships the current spec.
+/Event 格式構想.md
+/其餘配置文件格式構想.md
+/遊戲架構發想過程.md

@@ -1,0 +1,13 @@
+{
+  "ID": "event_demo_room_arrive",
+  "Name": "首次進入房間",
+  "Trigger": "Auto",
+  "Priority": 2,
+  "Weight": 1,
+  "Once": true,
+  "Conditions": [],
+  "Effects": [],
+  "Content": "content_demo_room_arrive",
+  "End up": "REDO",
+  "Next Node": null
+}
