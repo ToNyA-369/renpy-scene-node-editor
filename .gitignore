@@ -17,6 +17,14 @@ saves/
 /INTEGRATION/TestLauncher/
 /啟動編輯器.command
 
+# The distributable Runtime lives under TestGame/FRAMEWORK. Local Ren'Py
+# authoring fixtures and creator content stay on this machine.
+/INTEGRATION/TestGame/DATA/
+/INTEGRATION/TestGame/SCENENODE/
+/INTEGRATION/TestGame/SCENESCREEN/
+/INTEGRATION/TestGame/script.rpy
+/INTEGRATION/TestGame/FRAMEWORK/runtime_test.rpy
+
 # Historical design notes stay local; the repository ships the current spec.
 /Event 格式構想.md
 /其餘配置文件格式構想.md

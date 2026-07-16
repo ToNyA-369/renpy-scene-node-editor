@@ -19,6 +19,9 @@ RUNTIME_FILES = ("runtime.rpy", "option_renderer.rpy")
 PROJECT_MARKERS = ("options.rpy", "gui.rpy", "script.rpy")
 PROJECT_LAUNCHER = "啟動 Scene Node 編輯器.command"
 
+sys.path.insert(0, str(EDITOR_SOURCE))
+from project_bootstrap import initialize_scene_project  # noqa: E402
+
 
 class InstallError(Exception):
     pass
@@ -123,6 +126,7 @@ def install(raw_target):
     stats_file = game_root / "DATA" / "Stats.json"
     if not stats_file.exists():
         stats_file.write_text("{}\n", encoding="utf-8")
+    initialize_scene_project(game_root)
 
     version = VERSION_FILE.read_text(encoding="utf-8").strip() if VERSION_FILE.exists() else "development"
     manifest = {

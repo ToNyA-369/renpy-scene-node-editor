@@ -10,28 +10,25 @@
 <body>
   <div class="app-shell">
     <aside class="sidebar" id="sidebar">
-      <div class="brand-row">
-        <div class="brand-mark" aria-hidden="true">SN</div>
-        <div class="brand-copy">
-          <strong>Scene Node Editor</strong>
-          <span id="projectName">讀取專案中</span>
-        </div>
-        <button class="icon-button mobile-only" id="closeSidebar" type="button" title="關閉節點列表" aria-label="關閉節點列表">×</button>
-      </div>
-
       <div class="sidebar-tools">
         <label class="search-field">
           <span class="visually-hidden">搜尋節點</span>
           <input id="nodeSearch" type="search" placeholder="搜尋節點">
         </label>
-        <button class="primary-button compact" id="newNodeButton" type="button"><span aria-hidden="true">＋</span> 新增節點</button>
+        <button class="node-add-button" id="newNodeButton" type="button" title="新增節點" aria-label="新增節點">＋</button>
       </div>
 
       <nav class="node-list" id="nodeList" aria-label="Scene Node 列表"></nav>
 
       <div class="sidebar-footer">
-        <button class="quiet-button" id="refreshProject" type="button" title="重新掃描專案">重新掃描</button>
-        <span id="projectSummary">0 個節點</span>
+        <div class="project-identity">
+          <strong id="projectName">讀取專案中</strong>
+          <span id="projectSummary">0 個節點</span>
+        </div>
+        <div class="sidebar-footer-actions">
+          <button class="icon-button" id="refreshProject" type="button" title="重新掃描專案" aria-label="重新掃描專案">↻</button>
+          <button class="icon-button" id="settingsButton" type="button" title="編輯器設定" aria-label="編輯器設定">⚙</button>
+        </div>
       </div>
     </aside>
 
@@ -39,26 +36,22 @@
 
     <main class="main-area">
       <header class="topbar">
-        <button class="icon-button mobile-only" id="openSidebar" type="button" title="開啟節點列表" aria-label="開啟節點列表">☰</button>
-        <div class="context-title">
+        <button class="context-title" id="openSidebar" type="button" title="切換節點列表" aria-label="切換節點列表">
           <span class="context-kicker" id="nodePath">尚未選擇節點</span>
           <h1 id="nodeTitle">Scene Node Editor</h1>
-        </div>
-        <div class="topbar-actions">
-          <span class="save-state" id="saveState" role="status">已同步</span>
-          <button class="quiet-button" id="validateButton" type="button">檢查專案</button>
-        </div>
+        </button>
+        <span class="save-state" id="saveState" role="status">已同步</span>
+        <nav class="tabbar" id="tabbar" aria-label="編輯器分頁">
+          <span class="tab-focus-indicator" id="tabFocusIndicator" aria-hidden="true"></span>
+          <button class="tab active" type="button" data-tab="node">節點</button>
+          <button class="tab" type="button" data-tab="events">事件 <span class="tab-count" id="eventCount">0</span></button>
+          <button class="tab" type="button" data-tab="options">選項</button>
+          <button class="tab" type="button" data-tab="content">演出</button>
+          <button class="tab" type="button" data-tab="screens">畫面</button>
+          <button class="tab" type="button" data-tab="stats">狀態</button>
+          <button class="tab" type="button" data-tab="validation">檢查 <span class="tab-count issue-count" id="issueCount">0</span></button>
+        </nav>
       </header>
-
-      <nav class="tabbar" id="tabbar" aria-label="編輯器分頁">
-        <button class="tab active" type="button" data-tab="node">節點</button>
-        <button class="tab" type="button" data-tab="events">事件 <span class="tab-count" id="eventCount">0</span></button>
-        <button class="tab" type="button" data-tab="options">選項</button>
-        <button class="tab" type="button" data-tab="content">演出</button>
-        <button class="tab" type="button" data-tab="screens">畫面</button>
-        <button class="tab" type="button" data-tab="stats">數值</button>
-        <button class="tab" type="button" data-tab="validation">檢查 <span class="tab-count issue-count" id="issueCount">0</span></button>
-      </nav>
 
       <section class="workspace" id="workspace">
         <div class="empty-state" id="emptyState">
@@ -85,17 +78,17 @@
           <span class="section-kicker">SCENENODE</span>
           <h2>新增 Scene Node</h2>
         </div>
-        <button class="icon-button" value="cancel" title="關閉" aria-label="關閉">×</button>
+        <button class="icon-button" type="button" data-close-dialog="nodeDialog" title="關閉" aria-label="關閉">×</button>
       </div>
       <div class="dialog-body form-stack">
         <label class="field">
           <span>節點名稱</span>
-          <input name="name" required placeholder="妹妹的房間">
+          <input name="name" required placeholder="請輸入節點顯示名稱">
         </label>
         <div class="form-grid two-columns">
           <label class="field">
             <span>Background</span>
-            <input name="background" placeholder="bedroomDay">
+            <input name="background" placeholder="請輸入背景資源 ID">
           </label>
           <label class="field">
             <span>Screen</span>
@@ -104,8 +97,8 @@
         </div>
       </div>
       <div class="dialog-actions">
-        <button class="quiet-button" value="cancel">取消</button>
-        <button class="primary-button" id="createNodeConfirm" value="default">建立節點</button>
+        <button class="quiet-button" type="button" data-close-dialog="nodeDialog">取消</button>
+        <button class="primary-button" id="createNodeConfirm" type="submit" value="default">建立節點</button>
       </div>
     </form>
   </dialog>
@@ -117,7 +110,7 @@
           <span class="section-kicker" id="nameDialogKicker">NEW FILE</span>
           <h2 id="nameDialogTitle">新增文件</h2>
         </div>
-        <button class="icon-button" value="cancel" title="關閉" aria-label="關閉">×</button>
+        <button class="icon-button" type="button" data-close-dialog="nameDialog" title="關閉" aria-label="關閉">×</button>
       </div>
       <div class="dialog-body">
         <label class="field">
@@ -126,8 +119,55 @@
         </label>
       </div>
       <div class="dialog-actions">
-        <button class="quiet-button" value="cancel">取消</button>
-        <button class="primary-button" id="nameDialogConfirm" value="default">建立</button>
+        <button class="quiet-button" type="button" data-close-dialog="nameDialog">取消</button>
+        <button class="primary-button" id="nameDialogConfirm" type="submit" value="default">建立</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog class="dialog settings-dialog" id="settingsDialog">
+    <form method="dialog" id="settingsForm">
+      <div class="dialog-header">
+        <div>
+          <span class="section-kicker">EDITOR</span>
+          <h2>編輯器設定</h2>
+        </div>
+        <button class="icon-button" type="button" data-close-dialog="settingsDialog" title="關閉" aria-label="關閉">×</button>
+      </div>
+      <div class="dialog-body settings-body">
+        <section class="settings-section">
+          <div class="settings-section-heading">
+            <strong>儲存與畫布</strong>
+          </div>
+          <label class="setting-row">
+            <span><strong>自動儲存</strong><small>停止輸入後自動寫入專案</small></span>
+            <input id="autosaveEnabled" type="checkbox">
+          </label>
+          <label class="setting-row">
+            <span><strong>儲存延遲</strong><small>連續輸入時等待多久再儲存</small></span>
+            <select id="autosaveDelay">
+              <option value="400">0.4 秒</option>
+              <option value="700">0.7 秒</option>
+              <option value="1200">1.2 秒</option>
+              <option value="2000">2 秒</option>
+            </select>
+          </label>
+          <label class="setting-row">
+            <span><strong>格線尺寸</strong><small>選項畫布的吸附間距</small></span>
+            <input id="gridSize" type="number" min="4" max="160" step="2">
+          </label>
+        </section>
+
+        <section class="settings-section">
+          <div class="settings-section-heading">
+            <strong>快捷鍵</strong>
+            <button class="quiet-button compact" id="resetShortcuts" type="button">恢復預設</button>
+          </div>
+          <div class="shortcut-list" id="shortcutList"></div>
+        </section>
+      </div>
+      <div class="dialog-actions">
+        <button class="primary-button" type="submit" value="default">完成</button>
       </div>
     </form>
   </dialog>
