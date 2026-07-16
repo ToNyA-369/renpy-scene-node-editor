@@ -14,6 +14,14 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path, PurePosixPath
 from urllib.parse import parse_qs, unquote, urlparse
 
+from project_bootstrap import (
+    DEFAULT_MEMORY_ID,
+    MEMORIES_RELATIVE,
+    PROJECT_CONFIG_RELATIVE,
+    initialize_scene_project,
+    runtime_start_calls,
+)
+
 
 EDITOR_ROOT = Path(__file__).resolve().parent
 STATIC_ROOT = EDITOR_ROOT / "static"
@@ -46,6 +54,7 @@ def ensure_project_structure():
     stats_path = PROJECT_ROOT / DATA_DIR / "Stats.json"
     if not stats_path.exists():
         write_json(stats_path, {})
+    initialize_scene_project(PROJECT_ROOT)
 
 
 def atomic_write(path, content):
@@ -111,6 +120,22 @@ def stats_path():
     return PROJECT_ROOT / DATA_DIR / "Stats.json"
 
 
+def memories_path():
+    return PROJECT_ROOT / MEMORIES_RELATIVE
+
+
+def scene_project_path():
+    return PROJECT_ROOT / PROJECT_CONFIG_RELATIVE
+
+
+def scene_project_config():
+    return read_json(scene_project_path(), {}) or {}
+
+
+def configured_root_node():
+    return str(scene_project_config().get("Root Node") or "").strip() or None
+
+
 def default_options():
     return {
         "Version": 1,
@@ -152,7 +177,87 @@ def validate_option_conditions(value, field):
         return []
     if not isinstance(value, list) or not all(isinstance(item, dict) for item in value):
         raise ApiError(HTTPStatus.BAD_REQUEST, f"{field} 必須是 object 陣列。")
-    return value
+    return [validate_condition(item, field) for item in value]
+
+
+def validate_condition(condition, field="Condition"):
+    result = dict(condition)
+    condition_type = str(result.get("type") or "stat").lower()
+    if condition_type == "tag":
+        condition_type = "memory"
+    result["type"] = condition_type
+
+    if condition_type == "stat":
+        result["id"] = clean_file_name(result.get("id"), "")
+        operation = str(result.get("op") or ">=")
+        if operation not in (">", ">=", "<", "<=", "==", "!="):
+            raise ApiError(HTTPStatus.BAD_REQUEST, f"{field} 的 Stat 判斷不合法。")
+        result["op"] = operation
+        result["value"] = number_setting(result.get("value", 0), 0, f"{field} 的值")
+        result.pop("bank", None)
+        return result
+
+    if condition_type == "memory":
+        result["bank"] = clean_file_name(result.get("bank") or DEFAULT_MEMORY_ID, "")
+        tag_id = str(result.get("id") or "").strip()
+        if not tag_id:
+            raise ApiError(HTTPStatus.BAD_REQUEST, f"{field} 的記憶標籤不可為空。")
+        result["id"] = tag_id
+        operation = str(result.get("op") or "has")
+        if operation not in ("has", "not_has"):
+            raise ApiError(HTTPStatus.BAD_REQUEST, f"{field} 的記憶判斷不合法。")
+        result["op"] = operation
+        result.pop("value", None)
+        result.pop("scope", None)
+        return result
+
+    raise ApiError(HTTPStatus.BAD_REQUEST, f"{field} 的類型不合法：{condition_type}。")
+
+
+def validate_effect(effect, field="Effect"):
+    result = dict(effect)
+    effect_type = str(result.get("type") or "stat").lower()
+    if effect_type == "tag":
+        effect_type = "memory"
+    result["type"] = effect_type
+
+    if effect_type == "stat":
+        result["id"] = clean_file_name(result.get("id"), "")
+        operation = str(result.get("op") or "+")
+        if operation not in ("set", "+", "-", "*", "/"):
+            raise ApiError(HTTPStatus.BAD_REQUEST, f"{field} 的 Stat 操作不合法。")
+        result["op"] = operation
+        result["value"] = number_setting(result.get("value", 0), 0, f"{field} 的值")
+        result.pop("bank", None)
+        return result
+
+    if effect_type == "memory":
+        result["bank"] = clean_file_name(result.get("bank") or DEFAULT_MEMORY_ID, "")
+        operation = str(result.get("op") or "add")
+        if operation not in ("add", "remove", "clear"):
+            raise ApiError(HTTPStatus.BAD_REQUEST, f"{field} 的記憶操作不合法。")
+        result["op"] = operation
+        if operation == "clear":
+            result.pop("id", None)
+        else:
+            tag_id = str(result.get("id") or "").strip()
+            if not tag_id:
+                raise ApiError(HTTPStatus.BAD_REQUEST, f"{field} 的記憶標籤不可為空。")
+            result["id"] = tag_id
+        result.pop("scope", None)
+        result.pop("value", None)
+        return result
+
+    if effect_type in ("bgm", "se"):
+        operation = str(result.get("op") or "play").lower()
+        if operation not in ("play", "stop"):
+            raise ApiError(HTTPStatus.BAD_REQUEST, f"{field} 的音效操作不合法。")
+        result["op"] = operation
+        if operation == "play" and not str(result.get("id") or "").strip():
+            raise ApiError(HTTPStatus.BAD_REQUEST, f"{field} 的資源 ID 不可為空。")
+        return result
+
+    raise ApiError(HTTPStatus.BAD_REQUEST, f"{field} 的類型不合法：{effect_type}。")
 
 
 def validate_option_style_override(value):
@@ -378,6 +483,12 @@ def node_summary(directory):
 def scan_nodes():
     root = PROJECT_ROOT / NODE_DIR
     nodes = [node_summary(path.parent) for path in root.rglob("Node.json")]
+    try:
+        root_node = configured_root_node()
+    except ApiError:
+        root_node = None
+    for node in nodes:
+        node["isRoot"] = bool(root_node and node["id"] == root_node)
     return sorted(nodes, key=lambda item: (item["path"].casefold(), item["id"].casefold()))
 
 
@@ -470,6 +581,24 @@ def validate_stats(data):
     return result
 
 
+def validate_memories(data):
+    if not isinstance(data, dict):
+        raise ApiError(HTTPStatus.BAD_REQUEST, "Memories 必須是 JSON object。")
+    result = {}
+    for raw_id, settings in data.items():
+        bank_id = clean_file_name(raw_id, "")
+        if not isinstance(settings, dict):
+            raise ApiError(HTTPStatus.BAD_REQUEST, f"記憶庫 {bank_id} 的設定必須是 object。")
+        name = str(settings.get("Name") or "").strip()
+        if not name:
+            raise ApiError(HTTPStatus.BAD_REQUEST, f"記憶庫 {bank_id} 的名稱不可為空。")
+        result[bank_id] = {"Name": name}
+    if DEFAULT_MEMORY_ID not in result:
+        raise ApiError(HTTPStatus.BAD_REQUEST, "不可移除預設 Memory 記憶庫。")
+    result[DEFAULT_MEMORY_ID]["Name"] = "Memory"
+    return result
+
+
 def validate_weight_map(value, field):
     if value is None:
         return
@@ -524,8 +653,8 @@ def validate_event(event):
         "Priority": priority,
         "Weight": weight,
         "Once": bool(event.get("Once", False)),
-        "Conditions": conditions,
-        "Effects": effects,
+        "Conditions": [validate_condition(item, "Event Condition") for item in conditions],
+        "Effects": [validate_effect(item, "Event Effect") for item in effects],
         "Content": content,
         "End up": end_up,
         "Next Node": next_node if end_up == "GOTO" else None,
@@ -556,10 +685,36 @@ def validate_project():
         issues.append({"level": "error", "location": "DATA/Stats.json", "message": exc.message})
         stats = {}
 
+    try:
+        memories = read_json(memories_path(), {}) or {}
+        memories = validate_memories(memories)
+    except ApiError as exc:
+        issues.append({"level": "error", "location": MEMORIES_RELATIVE.as_posix(), "message": exc.message})
+        memories = {}
+
     nodes = scan_nodes()
     node_ids = {item["id"] for item in nodes}
     labels, screens = all_rpy_symbols()
     seen_node_ids = set()
+
+    if scene_project_path().exists():
+        try:
+            root_node = configured_root_node()
+        except ApiError as exc:
+            issues.append({"level": "error", "location": PROJECT_CONFIG_RELATIVE.as_posix(), "message": exc.message})
+            root_node = None
+        if not root_node:
+            issues.append({"level": "error", "location": PROJECT_CONFIG_RELATIVE.as_posix(), "message": "尚未設定 Root Node。"})
+        elif root_node not in node_ids:
+            issues.append({"level": "error", "location": PROJECT_CONFIG_RELATIVE.as_posix(), "message": f"找不到 Root Node：{root_node}。"})
+        else:
+            calls = runtime_start_calls(PROJECT_ROOT)
+            if not calls["configured"] and root_node not in calls["explicitNodes"]:
+                issues.append({
+                    "level": "warning",
+                    "location": "script.rpy",
+                    "message": "Root Node 尚未連接到 scene_runtime_start()。",
+                })
 
     for summary in nodes:
         node_id = summary["id"]
@@ -605,9 +760,13 @@ def validate_project():
             for condition in event["Conditions"]:
                 if condition.get("type") == "stat" and condition.get("id") not in stats:
                     issues.append({"level": "warning", "location": event_location, "message": f"找不到 Stat：{condition.get('id', '')}。"})
+                if condition.get("type") == "memory" and condition.get("bank") not in memories:
+                    issues.append({"level": "warning", "location": event_location, "message": f"找不到記憶庫：{condition.get('bank', '')}。"})
             for effect in event["Effects"]:
                 if effect.get("type") == "stat" and effect.get("id") not in stats:
                     issues.append({"level": "warning", "location": event_location, "message": f"找不到 Stat：{effect.get('id', '')}。"})
+                if effect.get("type") == "memory" and effect.get("bank") not in memories:
+                    issues.append({"level": "warning", "location": event_location, "message": f"找不到記憶庫：{effect.get('bank', '')}。"})
 
             content = event["Content"]
             content_names = [content] if isinstance(content, str) else list(content or {})
@@ -620,6 +779,22 @@ def validate_project():
             for target_id in target_names:
                 if target_id not in node_ids:
                     issues.append({"level": "warning", "location": event_location, "message": f"找不到 Next Node：{target_id}。"})
+
+        for element in detail["options"].get("Elements", []):
+            condition_groups = [
+                element.get("Visible Conditions", []),
+                element.get("Enabled Conditions", []),
+            ]
+            for item in element.get("Items", []):
+                condition_groups.extend([
+                    item.get("Visible Conditions", []),
+                    item.get("Enabled Conditions", []),
+                ])
+            for condition in (item for group in condition_groups for item in group):
+                if condition.get("type") == "stat" and condition.get("id") not in stats:
+                    issues.append({"level": "warning", "location": f"{location}/{OPTIONS_FILE}", "message": f"找不到 Stat：{condition.get('id', '')}。"})
+                if condition.get("type") == "memory" and condition.get("bank") not in memories:
+                    issues.append({"level": "warning", "location": f"{location}/{OPTIONS_FILE}", "message": f"找不到記憶庫：{condition.get('bank', '')}。"})
 
     return issues
 
@@ -672,6 +847,17 @@ def save_node(payload):
         "Option Screen": str(node.get("Option Screen") or existing.get("Option Screen") or f"option_{node_id}"),
     })
     return node_summary(directory)
+
+
+def save_root_node(payload):
+    node_id = clean_file_name(payload.get("nodeId"), "")
+    if node_id not in {item["id"] for item in scan_nodes()}:
+        raise ApiError(HTTPStatus.NOT_FOUND, "找不到要設為 Root 的 Scene Node。")
+    config = scene_project_config()
+    config["Version"] = 1
+    config["Root Node"] = node_id
+    write_json(scene_project_path(), config)
+    return {"rootNodeId": node_id, "project": config}
 
 
 def save_event(payload):
@@ -759,6 +945,8 @@ def delete_node(relative):
     if not (directory / "Node.json").exists():
         raise ApiError(HTTPStatus.NOT_FOUND, "找不到指定的 Scene Node。")
     node = read_json(directory / "Node.json", {}) or {}
+    if node.get("ID") == configured_root_node():
+        raise ApiError(HTTPStatus.CONFLICT, "請先將其他 Scene Node 設為 Root，才能刪除目前的起始節點。")
     project_base = PROJECT_ROOT.parent if PROJECT_ROOT.name.casefold() == "game" else PROJECT_ROOT
     trash_root = project_base / ".scene-node-trash"
     trash_root.mkdir(parents=True, exist_ok=True)
@@ -796,10 +984,14 @@ class EditorHandler(BaseHTTPRequestHandler):
         try:
             parsed = urlparse(self.path)
             if parsed.path == "/api/project":
+                project = scene_project_config()
                 self.send_json({
                     "projectName": PROJECT_ROOT.name,
                     "projectPath": str(PROJECT_ROOT),
+                    "project": project,
+                    "rootNodeId": str(project.get("Root Node") or "").strip() or None,
                     "stats": read_json(stats_path(), {}) or {},
+                    "memories": read_json(memories_path(), {}) or {},
                     "nodes": scan_nodes(),
                     "screens": scan_screens(),
                     "images": scan_image_assets(),
@@ -878,8 +1070,18 @@ class EditorHandler(BaseHTTPRequestHandler):
                 write_json(stats_path(), stats)
                 self.send_json({"stats": stats})
                 return
+            if parsed.path == "/api/state":
+                stats = validate_stats(payload.get("stats"))
+                memories = validate_memories(payload.get("memories"))
+                write_json(stats_path(), stats)
+                write_json(memories_path(), memories)
+                self.send_json({"stats": stats, "memories": memories})
+                return
             if parsed.path == "/api/node":
                 self.send_json(save_node(payload))
+                return
+            if parsed.path == "/api/project/root":
+                self.send_json(save_root_node(payload))
                 return
             if parsed.path == "/api/options":
                 directory = node_path(payload.get("node"))

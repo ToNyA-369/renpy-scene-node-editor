@@ -1,7 +1,10 @@
 init -100 python:
     import json
 
+    SCENE_PROJECT_FILE = "DATA/SceneProject.json"
     SCENE_STATS_FILE = "DATA/Stats.json"
+    SCENE_MEMORIES_FILE = "DATA/Memories.json"
+    SCENE_DEFAULT_MEMORY = "memory"
     SCENE_NODE_ROOT = "SCENENODE/"
     SCENE_NODE_FILE = "/Node.json"
     SCENE_OPTIONS_FILE = "/Options.json"
@@ -18,7 +21,11 @@ init -100 python:
 
     def scene_load_catalog():
         files = set(renpy.list_files())
+        project = scene_read_json(SCENE_PROJECT_FILE) if SCENE_PROJECT_FILE in files else {}
         stats = scene_read_json(SCENE_STATS_FILE) if SCENE_STATS_FILE in files else {}
+        memories = scene_read_json(SCENE_MEMORIES_FILE) if SCENE_MEMORIES_FILE in files else {
+            SCENE_DEFAULT_MEMORY: {"Name": "Memory"},
+        }
         nodes = {}
         node_directories = {}
 
@@ -52,7 +59,9 @@ init -100 python:
                 options[node_id] = {"Version": 1, "Canvas": {}, "Elements": []}
 
         return {
+            "project": project,
             "stats": stats,
+            "memories": memories,
             "nodes": nodes,
             "events": events,
             "options": options,
@@ -70,9 +79,8 @@ init -100 python:
 
     def scene_reset_state():
         global scene_stats
-        global scene_tags_permanent
-        global scene_tags_daily
-        global scene_tags_weekly
+        global scene_memories
+        global scene_memory_legacy_migrated
         global scene_stack
         global scene_active_screen
         global scene_local_audio
@@ -82,9 +90,8 @@ init -100 python:
             (stat_id, settings.get("Init", 0))
             for stat_id, settings in scene_catalog["stats"].items()
         )
-        scene_tags_permanent = []
-        scene_tags_daily = []
-        scene_tags_weekly = []
+        scene_memories = dict((bank_id, []) for bank_id in scene_catalog["memories"])
+        scene_memory_legacy_migrated = True
         scene_stack = []
         scene_active_screen = None
         scene_local_audio = {}
@@ -95,64 +102,95 @@ init -100 python:
         return scene_stats.get(stat_id, default)
 
 
-    def scene_has_tag(tag_id):
-        return (
-            tag_id in scene_tags_permanent
-            or tag_id in scene_tags_daily
-            or tag_id in scene_tags_weekly
-        )
+    def scene_ensure_memory_state():
+        global scene_memories
+        global scene_memory_legacy_migrated
+
+        current = scene_memories if isinstance(scene_memories, dict) else {}
+        updated = dict((bank_id, list(tags)) for bank_id, tags in current.items())
+        for bank_id in scene_catalog["memories"]:
+            updated.setdefault(bank_id, [])
+
+        if not scene_memory_legacy_migrated:
+            legacy_tags = []
+            for variable in ("scene_tags_permanent", "scene_tags_daily", "scene_tags_weekly"):
+                for tag_id in getattr(renpy.store, variable, []) or []:
+                    if tag_id not in legacy_tags:
+                        legacy_tags.append(tag_id)
+            default_tags = updated.setdefault(SCENE_DEFAULT_MEMORY, [])
+            for tag_id in legacy_tags:
+                if tag_id not in default_tags:
+                    default_tags.append(tag_id)
+            scene_memory_legacy_migrated = True
+
+        scene_memories = updated
 
 
-    def scene_add_tag(tag_id, scope="permanent"):
-        global scene_tags_permanent
-        global scene_tags_daily
-        global scene_tags_weekly
-
-        scene_tags_permanent = [item for item in scene_tags_permanent if item != tag_id]
-        scene_tags_daily = [item for item in scene_tags_daily if item != tag_id]
-        scene_tags_weekly = [item for item in scene_tags_weekly if item != tag_id]
-
-        if scope == "permanent":
-            scene_tags_permanent = scene_tags_permanent + [tag_id]
-        elif scope == "daily":
-            scene_tags_daily = scene_tags_daily + [tag_id]
-        elif scope == "weekly":
-            scene_tags_weekly = scene_tags_weekly + [tag_id]
-        else:
-            raise Exception("Unknown tag scope: {}".format(scope))
+    def scene_memory_bank(bank_id):
+        bank_id = str(bank_id or SCENE_DEFAULT_MEMORY).strip()
+        if bank_id not in scene_catalog["memories"]:
+            raise Exception("Unknown Memory bank: {}".format(bank_id))
+        return bank_id
 
 
-    def scene_remove_tag(tag_id):
-        global scene_tags_permanent
-        global scene_tags_daily
-        global scene_tags_weekly
-
-        scene_tags_permanent = [item for item in scene_tags_permanent if item != tag_id]
-        scene_tags_daily = [item for item in scene_tags_daily if item != tag_id]
-        scene_tags_weekly = [item for item in scene_tags_weekly if item != tag_id]
+    def scene_memory_tag(tag_id):
+        tag_id = str(tag_id or "").strip()
+        if not tag_id:
+            raise Exception("Memory tag cannot be empty.")
+        return tag_id
 
 
-    def scene_reset_tags(scope):
-        global scene_tags_daily
-        global scene_tags_weekly
+    def scene_memory_has(bank_id, tag_id):
+        scene_ensure_memory_state()
+        bank_id = scene_memory_bank(bank_id)
+        tag_id = scene_memory_tag(tag_id)
+        return tag_id in scene_memories.get(bank_id, [])
 
-        if scope == "daily":
-            scene_tags_daily = []
-        elif scope == "weekly":
-            scene_tags_weekly = []
-        else:
-            raise Exception("Only daily and weekly tags can be reset.")
+
+    def scene_memory_add(bank_id, tag_id):
+        global scene_memories
+
+        scene_ensure_memory_state()
+        bank_id = scene_memory_bank(bank_id)
+        tag_id = scene_memory_tag(tag_id)
+        updated = dict((key, list(tags)) for key, tags in scene_memories.items())
+        tags = updated.setdefault(bank_id, [])
+        if tag_id not in tags:
+            tags.append(tag_id)
+        scene_memories = updated
+
+
+    def scene_memory_remove(bank_id, tag_id):
+        global scene_memories
+
+        scene_ensure_memory_state()
+        bank_id = scene_memory_bank(bank_id)
+        tag_id = scene_memory_tag(tag_id)
+        updated = dict((key, list(tags)) for key, tags in scene_memories.items())
+        updated[bank_id] = [item for item in updated.get(bank_id, []) if item != tag_id]
+        scene_memories = updated
+
+
+    def scene_memory_clear(bank_id):
+        global scene_memories
+
+        scene_ensure_memory_state()
+        bank_id = scene_memory_bank(bank_id)
+        updated = dict((key, list(tags)) for key, tags in scene_memories.items())
+        updated[bank_id] = []
+        scene_memories = updated
 
 
     def scene_condition_matches(condition):
         condition_type = str(condition.get("type") or "").lower()
         operation = str(condition.get("op") or "")
 
-        if condition_type == "tag":
+        if condition_type in ("memory", "tag"):
+            bank_id = condition.get("bank", SCENE_DEFAULT_MEMORY)
             if operation == "has":
-                return scene_has_tag(condition.get("id"))
+                return scene_memory_has(bank_id, condition.get("id"))
             if operation == "not_has":
-                return not scene_has_tag(condition.get("id"))
+                return not scene_memory_has(bank_id, condition.get("id"))
             return False
 
         if condition_type != "stat":
@@ -186,14 +224,14 @@ init -100 python:
         return all(scene_condition_matches(item) for item in (conditions or []))
 
 
-    def scene_event_once_tag(event):
+    def scene_event_once_memory(event):
         return "once:{}".format(event.get("ID"))
 
 
     def scene_event_matches(event, trigger):
         if event.get("Trigger") != trigger:
             return False
-        if event.get("Once") and scene_has_tag(scene_event_once_tag(event)):
+        if event.get("Once") and scene_memory_has(SCENE_DEFAULT_MEMORY, scene_event_once_memory(event)):
             return False
         return all(scene_condition_matches(item) for item in event.get("Conditions", []))
 
@@ -348,14 +386,17 @@ init -100 python:
         effect_type = str(effect.get("type") or "").lower()
         if effect_type == "stat":
             scene_apply_stat_effect(effect)
-        elif effect_type == "tag":
+        elif effect_type in ("memory", "tag"):
             operation = effect.get("op")
+            bank_id = effect.get("bank", SCENE_DEFAULT_MEMORY)
             if operation == "add":
-                scene_add_tag(effect.get("id"), effect.get("scope", "permanent"))
+                scene_memory_add(bank_id, effect.get("id"))
             elif operation == "remove":
-                scene_remove_tag(effect.get("id"))
+                scene_memory_remove(bank_id, effect.get("id"))
+            elif operation == "clear":
+                scene_memory_clear(bank_id)
             else:
-                raise Exception("Unknown Tag operation: {}".format(operation))
+                raise Exception("Unknown Memory operation: {}".format(operation))
         elif effect_type in ("bgm", "se"):
             scene_apply_audio_effect(node_id, effect)
         else:
@@ -365,7 +406,7 @@ init -100 python:
     def scene_apply_prepared(prepared):
         event = prepared["event"]
         if event.get("Once"):
-            scene_add_tag(scene_event_once_tag(event), "permanent")
+            scene_memory_add(SCENE_DEFAULT_MEMORY, scene_event_once_memory(event))
         for effect in event.get("Effects", []):
             scene_apply_effect(prepared["node_id"], effect)
 
@@ -386,10 +427,21 @@ init -100 python:
         return scene_get_node(node_id) if node_id else {}
 
 
-    def scene_begin(root_node):
+    def scene_default_root_node():
+        root_node = str(scene_catalog.get("project", {}).get("Root Node") or "").strip()
+        if not root_node:
+            raise Exception(
+                "No Root Node is configured. Set DATA/SceneProject.json or pass a Node ID to scene_runtime_start()."
+            )
+        return root_node
+
+
+    def scene_begin(root_node=None):
         global scene_stack
 
         scene_reset_state()
+        if root_node is None:
+            root_node = scene_default_root_node()
         scene_get_node(root_node)
         scene_stack = [root_node]
 
@@ -566,16 +618,15 @@ init -100 python:
 
 
 default scene_stats = {}
-default scene_tags_permanent = []
-default scene_tags_daily = []
-default scene_tags_weekly = []
+default scene_memories = {}
+default scene_memory_legacy_migrated = False
 default scene_stack = []
 default scene_active_screen = None
 default scene_local_audio = {}
 default scene_option_adjustments = {}
 
 
-label scene_runtime_start(root_node):
+label scene_runtime_start(root_node=None):
     $ scene_begin(root_node)
 
     while scene_stack:

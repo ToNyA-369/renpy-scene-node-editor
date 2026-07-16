@@ -1,8 +1,0 @@
-{
-  "ID": "node_demo_street",
-  "Name": "街道",
-  "Background": "",
-  "Screen": "screen_demo_scene",
-  "Option Mode": "DATA",
-  "Option Screen": "scene_option_renderer"
-}
