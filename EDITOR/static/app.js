@@ -15,11 +15,9 @@ const DEFAULT_SHORTCUTS = {
   tabEvents: "mod+2",
   tabOptions: "mod+3",
   tabContent: "mod+4",
-  tabScreens: "mod+5",
-  tabStats: "mod+6",
+  tabStats: "mod+5",
+  tabGraph: "mod+6",
   tabValidation: "mod+7",
-  optionElements: "alt+1",
-  optionInspector: "alt+2",
   grid: "g",
   snap: "s",
   sections: "mod+.",
@@ -37,11 +35,9 @@ const SHORTCUT_LABELS = {
   tabEvents: "前往事件",
   tabOptions: "前往選項",
   tabContent: "前往演出",
-  tabScreens: "前往畫面",
   tabStats: "前往狀態",
+  tabGraph: "前往關聯圖",
   tabValidation: "前往檢查",
-  optionElements: "切換選項元件列表",
-  optionInspector: "切換選項屬性",
   grid: "顯示或隱藏格線",
   snap: "開啟或關閉吸附",
   sections: "展開或收合區塊",
@@ -52,17 +48,28 @@ const TAB_SHORTCUT_ACTIONS = {
   tabEvents: "events",
   tabOptions: "options",
   tabContent: "content",
-  tabScreens: "screens",
   tabStats: "stats",
+  tabGraph: "graph",
   tabValidation: "validation",
 };
-const TAB_ORDER = ["node", "events", "options", "content", "screens", "stats", "validation"];
-const narrowOptionsMedia = window.matchMedia("(max-width: 760px)");
-
-function readEditorSettings() {
-  const fallback = { version: 4, autosave: true, autosaveDelay: 700, gridSize: 24, shortcuts: { ...DEFAULT_SHORTCUTS } };
+const TAB_ORDER = ["node", "events", "options", "content", "stats", "graph", "validation"];
+const EVENT_TRIGGER_MODES = [
+  { id: "Auto", name: "Auto" },
+  { id: "Action", name: "Option" },
+  { id: "Keyboard", name: "Keyboard" },
+  { id: "Mouse", name: "Mouse" },
+];
+const MOUSE_TRIGGER_CHOICES = [
+  { id: "Mouse:Left", name: "左鍵" },
+  { id: "Mouse:Middle", name: "中鍵" },
+  { id: "Mouse:Right", name: "右鍵" },
+  { id: "Mouse:WheelUp", name: "滾輪向上" },
+  { id: "Mouse:WheelDown", name: "滾輪向下" },
+];
+function normalizeEditorSettings(saved = {}) {
+  const fallback = { version: 8, autosave: true, autosaveDelay: 700, gridSize: 24, shortcuts: { ...DEFAULT_SHORTCUTS } };
   try {
-    const saved = JSON.parse(localStorage.getItem(SETTINGS_KEY) || "{}");
+    if (!saved || typeof saved !== "object" || Array.isArray(saved)) return fallback;
     const savedShortcuts = { ...(saved.shortcuts || {}) };
     const savedVersion = numberValue(saved.version, 1);
     if (savedVersion < 2) {
@@ -77,13 +84,29 @@ function readEditorSettings() {
       if (savedShortcuts.cyclePrevious === "mod+alt+left") savedShortcuts.cyclePrevious = DEFAULT_SHORTCUTS.cyclePrevious;
       if (savedShortcuts.cycleNext === "mod+alt+right") savedShortcuts.cycleNext = DEFAULT_SHORTCUTS.cycleNext;
     }
+    if (savedVersion < 5) {
+      delete savedShortcuts.tabScreens;
+      if (savedShortcuts.tabStats === "mod+6") savedShortcuts.tabStats = DEFAULT_SHORTCUTS.tabStats;
+      if (savedShortcuts.tabValidation === "mod+7") savedShortcuts.tabValidation = DEFAULT_SHORTCUTS.tabValidation;
+    }
+    if (savedVersion < 6 && savedShortcuts.tabValidation === "mod+6") {
+      savedShortcuts.tabValidation = DEFAULT_SHORTCUTS.tabValidation;
+    }
+    if (savedVersion < 7) {
+      delete savedShortcuts.optionElements;
+      delete savedShortcuts.optionInspector;
+    }
+    if (savedVersion < 8) {
+      delete savedShortcuts.optionFormMode;
+      delete savedShortcuts.optionCanvasMode;
+    }
     const shortcuts = { ...DEFAULT_SHORTCUTS, ...savedShortcuts };
     [...Object.keys(TAB_SHORTCUT_ACTIONS), "create"].forEach((action) => {
       const conflictsWithSaved = Object.entries(savedShortcuts).some(([savedAction, value]) => savedAction !== action && value === shortcuts[action]);
       if (!Object.hasOwn(savedShortcuts, action) && conflictsWithSaved) shortcuts[action] = "";
     });
     return {
-      version: 4,
+      version: 8,
       autosave: saved.autosave !== false,
       autosaveDelay: Math.max(200, numberValue(saved.autosaveDelay, fallback.autosaveDelay)),
       gridSize: Math.max(4, Math.min(160, numberValue(saved.gridSize, fallback.gridSize))),
@@ -94,12 +117,24 @@ function readEditorSettings() {
   }
 }
 
+function readEditorSettings() {
+  try {
+    return normalizeEditorSettings(JSON.parse(localStorage.getItem(SETTINGS_KEY) || "{}"));
+  } catch (_error) {
+    return normalizeEditorSettings();
+  }
+}
+
 const state = {
   projectName: "",
   projectPath: "",
   rootNodeId: null,
   nodes: [],
-  screens: [],
+  graph: { edges: [] },
+  graphViewBox: null,
+  graphLayoutSignature: "",
+  graphSearch: "",
+  screenNames: [],
   images: [],
   stats: {},
   statsDraft: {},
@@ -114,19 +149,14 @@ const state = {
   optionsDraft: null,
   selectedOptionElementId: null,
   selectedOptionItemId: null,
-  optionInspectorTab: "content",
+  optionWorkspaceMode: "form",
+  optionWorkspaceTransitioning: false,
   optionResizeObserver: null,
   selectedContent: null,
   selectedContentDisplayName: "",
   contentSource: "",
-  selectedScreen: null,
-  selectedScreenDisplayName: "",
-  screenSource: "",
   activeTab: "node",
-  nameDialogKind: null,
-  leftPanelHidden: { events: false, content: false, screens: false },
-  optionElementsHidden: narrowOptionsMedia.matches,
-  optionInspectorHidden: narrowOptionsMedia.matches,
+  leftPanelHidden: { events: false, content: false },
   optionGridVisible: localStorage.getItem(GRID_VISIBLE_KEY) !== "false",
   optionSnapEnabled: localStorage.getItem(SNAP_ENABLED_KEY) !== "false",
   editorSettings: readEditorSettings(),
@@ -138,6 +168,8 @@ let failedAutosave = null;
 let autosaveRetryTimer = null;
 let autosaveQueuedCount = 0;
 let autosaveInFlight = Promise.resolve(true);
+let editorSettingsSave = Promise.resolve(true);
+let editorSettingsSaveFailureNotified = false;
 let workspaceAnimationTimer = null;
 
 const dom = {
@@ -157,16 +189,13 @@ const dom = {
   eventsPanel: document.querySelector("#eventsPanel"),
   optionsPanel: document.querySelector("#optionsPanel"),
   contentPanel: document.querySelector("#contentPanel"),
-  screensPanel: document.querySelector("#screensPanel"),
   statsPanel: document.querySelector("#statsPanel"),
+  graphPanel: document.querySelector("#graphPanel"),
   validationPanel: document.querySelector("#validationPanel"),
   nodeDialog: document.querySelector("#nodeDialog"),
   nodeDialogForm: document.querySelector("#nodeDialogForm"),
   nameDialog: document.querySelector("#nameDialog"),
   nameDialogForm: document.querySelector("#nameDialogForm"),
-  nameDialogKicker: document.querySelector("#nameDialogKicker"),
-  nameDialogTitle: document.querySelector("#nameDialogTitle"),
-  nameDialogLabel: document.querySelector("#nameDialogLabel"),
   nameDialogInput: document.querySelector("#nameDialogInput"),
   settingsDialog: document.querySelector("#settingsDialog"),
   settingsForm: document.querySelector("#settingsForm"),
@@ -212,7 +241,34 @@ function setSaveState(message, kind = "", detail = "") {
   dom.saveState.title = detail;
 }
 
-function writeEditorSettings() {
+function writeEditorSettings({ notifyFailure = true } = {}) {
+  const snapshot = clone(state.editorSettings);
+  localStorage.setItem(SETTINGS_KEY, JSON.stringify(snapshot));
+  editorSettingsSave = editorSettingsSave.then(async () => {
+    try {
+      await api("/api/editor-settings", { method: "PUT", body: snapshot });
+      editorSettingsSaveFailureNotified = false;
+      return true;
+    } catch (error) {
+      if (notifyFailure && !editorSettingsSaveFailureNotified) {
+        toast(`編輯器設定未能儲存：${error.message}`, "error");
+        editorSettingsSaveFailureNotified = true;
+      }
+      return false;
+    }
+  });
+  return editorSettingsSave;
+}
+
+async function loadEditorSettings() {
+  try {
+    const saved = await api("/api/editor-settings");
+    if (saved && typeof saved === "object" && Object.keys(saved).length) {
+      state.editorSettings = normalizeEditorSettings(saved);
+    }
+  } catch (_error) {
+    // The current-origin local copy remains a fallback for older installations.
+  }
   localStorage.setItem(SETTINGS_KEY, JSON.stringify(state.editorSettings));
 }
 
@@ -293,16 +349,17 @@ async function runPendingAutosave() {
 
 async function flushAutosave() {
   if (!state.editorSettings.autosave) return true;
-  if (!pendingAutosave && failedAutosave) {
+  if (!pendingAutosave && failedAutosave?.retryable) {
     if (autosaveRetryTimer) window.clearTimeout(autosaveRetryTimer);
     autosaveRetryTimer = null;
     pendingAutosave = failedAutosave;
     failedAutosave = null;
   }
+  if (!pendingAutosave && failedAutosave) return false;
   while (pendingAutosave) {
     if (!await runPendingAutosave()) return false;
   }
-  return Boolean(await autosaveInFlight);
+  return Boolean(await autosaveInFlight) && !failedAutosave;
 }
 
 function toast(message, kind = "") {
@@ -362,6 +419,28 @@ function namedOptionTags(items, current, { includeNone = false } = {}) {
   }).join("");
 }
 
+function imageAssetChoices(current = "", leading = []) {
+  const imageDirectoryAssets = state.images.filter((path) => /^images\//i.test(path));
+  const choices = [...leading, ...imageDirectoryAssets.map((path) => ({ id: path, name: path }))];
+  if (current && !choices.some((choice) => choice.id === current)) {
+    choices.push({ id: current, name: `${current}（未找到）` });
+  }
+  return choices;
+}
+
+function nodeBackgroundOptionTags(current = "") {
+  return namedOptionTags(imageAssetChoices(current), current, { includeNone: true });
+}
+
+function canvasBackgroundOptionTags(current = "") {
+  const nodeBackground = state.nodeDetail?.node?.Background || "";
+  const inheritedLabel = nodeBackground ? `Node Background · ${nodeBackground}` : "Node Background · None";
+  return namedOptionTags(imageAssetChoices(current, [
+    { id: "", name: inheritedLabel },
+    { id: "__none__", name: "None" },
+  ]), current);
+}
+
 function actionTriggerName(trigger) {
   const value = String(trigger || "").trim();
   return value.startsWith("Action:") ? value.slice("Action:".length).trim() : value;
@@ -370,6 +449,126 @@ function actionTriggerName(trigger) {
 function actionTriggerValue(name) {
   const value = actionTriggerName(name);
   return value ? `Action:${value}` : "";
+}
+
+function eventTriggerMode(trigger) {
+  const value = String(trigger || "").trim();
+  if (value === "Auto") return "Auto";
+  if (value.startsWith("Keyboard:")) return "Keyboard";
+  if (value.startsWith("Mouse:")) return "Mouse";
+  return "Action";
+}
+
+function keyboardTriggerKeysym(trigger) {
+  const value = String(trigger || "").trim();
+  return value.startsWith("Keyboard:") ? value.slice("Keyboard:".length).trim() : "";
+}
+
+function keyboardKeysymFromEvent(event) {
+  const namedKeys = {
+    Space: "K_SPACE",
+    Enter: "K_RETURN",
+    Escape: "K_ESCAPE",
+    Tab: "K_TAB",
+    Backspace: "K_BACKSPACE",
+    Delete: "K_DELETE",
+    Insert: "K_INSERT",
+    Home: "K_HOME",
+    End: "K_END",
+    PageUp: "K_PAGEUP",
+    PageDown: "K_PAGEDOWN",
+    ArrowLeft: "K_LEFT",
+    ArrowRight: "K_RIGHT",
+    ArrowUp: "K_UP",
+    ArrowDown: "K_DOWN",
+    Minus: "K_MINUS",
+    Equal: "K_EQUALS",
+    BracketLeft: "K_LEFTBRACKET",
+    BracketRight: "K_RIGHTBRACKET",
+    Backslash: "K_BACKSLASH",
+    Semicolon: "K_SEMICOLON",
+    Quote: "K_QUOTE",
+    Backquote: "K_BACKQUOTE",
+    Comma: "K_COMMA",
+    Period: "K_PERIOD",
+    Slash: "K_SLASH",
+    NumpadEnter: "K_KP_ENTER",
+    NumpadAdd: "K_KP_PLUS",
+    NumpadSubtract: "K_KP_MINUS",
+    NumpadMultiply: "K_KP_MULTIPLY",
+    NumpadDivide: "K_KP_DIVIDE",
+    NumpadDecimal: "K_KP_PERIOD",
+  };
+  let key = namedKeys[event.code] || "";
+  const letter = event.code.match(/^Key([A-Z])$/)?.[1];
+  const digit = event.code.match(/^Digit([0-9])$/)?.[1];
+  const numpad = event.code.match(/^Numpad([0-9])$/)?.[1];
+  const functionKey = event.code.match(/^F([1-9]|1[0-2])$/)?.[1];
+  if (letter) key = `K_${letter.toLocaleLowerCase()}`;
+  else if (digit) key = `K_${digit}`;
+  else if (numpad) key = `K_KP${numpad}`;
+  else if (functionKey) key = `K_F${functionKey}`;
+  if (!key) return "";
+
+  const prefixes = [];
+  if (event.metaKey) prefixes.push("meta");
+  if (event.ctrlKey) prefixes.push("ctrl");
+  if (event.altKey) prefixes.push("alt");
+  if (event.shiftKey) prefixes.push("shift");
+  return [...prefixes, key].join("_");
+}
+
+function keyboardKeysymDisplay(keysym) {
+  const isMac = /Mac|iPhone|iPad/.test(navigator.platform);
+  const modifierLabels = {
+    meta: isMac ? "⌘" : "Meta",
+    ctrl: "Ctrl",
+    osctrl: isMac ? "⌥" : "Ctrl",
+    alt: isMac ? "⌥" : "Alt",
+    shift: isMac ? "⇧" : "Shift",
+    noshift: "No Shift",
+    anymod: "Any Modifier",
+    repeat: "Repeat",
+    anyrepeat: "Any Repeat",
+    keydown: "Key Down",
+    keyup: "Key Up",
+    caps: "Caps",
+    nocaps: "No Caps",
+    num: "Num",
+    nonum: "No Num",
+  };
+  const labels = [];
+  let remaining = String(keysym || "");
+  while (remaining.includes("_")) {
+    const modifier = Object.keys(modifierLabels).find((item) => remaining.startsWith(`${item}_`));
+    if (!modifier) break;
+    labels.push(modifierLabels[modifier]);
+    remaining = remaining.slice(modifier.length + 1);
+  }
+  const keyLabels = {
+    K_SPACE: "Space",
+    K_RETURN: "Enter",
+    K_ESCAPE: "Esc",
+    K_TAB: "Tab",
+    K_BACKSPACE: "Backspace",
+    K_DELETE: "Delete",
+    K_INSERT: "Insert",
+    K_HOME: "Home",
+    K_END: "End",
+    K_PAGEUP: "Page Up",
+    K_PAGEDOWN: "Page Down",
+    K_LEFT: "←",
+    K_RIGHT: "→",
+    K_UP: "↑",
+    K_DOWN: "↓",
+  };
+  let keyLabel = keyLabels[remaining];
+  if (!keyLabel && /^K_[a-z]$/.test(remaining)) keyLabel = remaining.slice(2).toLocaleUpperCase();
+  if (!keyLabel && /^K_[0-9]$/.test(remaining)) keyLabel = remaining.slice(2);
+  if (!keyLabel && /^K_F(?:[1-9]|1[0-2])$/.test(remaining)) keyLabel = remaining.slice(2);
+  if (!keyLabel) keyLabel = remaining.replace(/^K_/, "").replaceAll("_", " ");
+  if (keyLabel) labels.push(keyLabel);
+  return labels.join(isMac ? "" : " + ") || "按下鍵盤按鍵";
 }
 
 function statChoices() {
@@ -408,31 +607,248 @@ function nodeChoices() {
   return state.nodes.map((node) => ({ id: node.id, name: node.name || node.id }));
 }
 
-function screenChoices() {
-  const choices = [];
-  for (const file of state.screens) {
-    const symbols = file.screens?.length ? file.screens : [file.name];
-    for (const id of symbols) choices.push({ id, name: file.displayName || id });
-  }
-  return choices;
-}
-
 function contentChoices() {
   const choices = [];
   for (const file of state.nodeDetail?.contents || []) {
-    const labels = file.labels?.length ? file.labels : [file.name];
-    for (const id of labels) choices.push({ id, name: file.displayName || id });
+    for (const id of file.labels || []) {
+      choices.push({ id, name: id, file: file.file || `${file.name}.rpy` });
+    }
   }
   return choices;
 }
 
-function updateDatalists() {
-  const screenSymbols = new Set();
-  for (const file of state.screens) {
-    for (const name of file.screens || []) screenSymbols.add(name);
-    if (!(file.screens || []).length) screenSymbols.add(file.name);
+function contentLabelFile(label) {
+  return (state.nodeDetail?.contents || []).find((file) => (file.labels || []).includes(label)) || null;
+}
+
+function selectedOptionLabel(select) {
+  return select.selectedOptions?.[0]?.textContent?.trim()
+    || select.options?.[select.selectedIndex]?.textContent?.trim()
+    || "尚未選擇";
+}
+
+function closeSelectPickers(except = null) {
+  document.querySelectorAll(".select-choice-picker.open").forEach((picker) => {
+    if (picker === except) return;
+    picker.classList.remove("open");
+    picker.querySelector("[data-select-picker-toggle]")?.setAttribute("aria-expanded", "false");
+  });
+}
+
+function populateSelectMenu(select, picker) {
+  const menu = picker.querySelector(".select-choice-menu");
+  if (!menu) return;
+  menu.replaceChildren();
+  const appendOption = (option) => {
+    if (option.hidden) return;
+    const choice = document.createElement("button");
+    choice.type = "button";
+    choice.className = "select-choice-option";
+    choice.dataset.selectValue = option.value;
+    choice.textContent = option.textContent;
+    choice.disabled = option.disabled;
+    choice.setAttribute("role", "option");
+    choice.setAttribute("aria-selected", String(option.selected));
+    menu.append(choice);
+  };
+  [...select.children].forEach((child) => {
+    if (child.tagName === "OPTGROUP") {
+      const heading = document.createElement("div");
+      heading.className = "select-choice-group";
+      heading.textContent = child.label;
+      menu.append(heading);
+      [...child.children].forEach(appendOption);
+    } else if (child.tagName === "OPTION") {
+      appendOption(child);
+    }
+  });
+}
+
+function syncSelectPicker(select) {
+  const picker = select.closest(".select-choice-picker");
+  if (!picker) return;
+  const trigger = picker.querySelector("[data-select-picker-toggle]");
+  const label = trigger?.querySelector("strong");
+  if (label) label.textContent = selectedOptionLabel(select);
+  if (trigger) trigger.disabled = select.disabled;
+  populateSelectMenu(select, picker);
+}
+
+function positionSelectMenu(picker) {
+  const trigger = picker.querySelector("[data-select-picker-toggle]");
+  const menu = picker.querySelector(".select-choice-menu");
+  if (!trigger || !menu) return;
+  const rect = trigger.getBoundingClientRect();
+  const edge = 12;
+  const width = Math.min(Math.max(rect.width, 220), window.innerWidth - edge * 2);
+  menu.style.width = `${width}px`;
+  menu.style.left = `${Math.max(edge, Math.min(rect.left, window.innerWidth - width - edge))}px`;
+  menu.style.top = `${rect.bottom + 7}px`;
+  const height = Math.min(menu.scrollHeight, 320);
+  if (rect.bottom + 7 + height > window.innerHeight - edge && rect.top > height + edge) {
+    menu.style.top = `${rect.top - height - 7}px`;
   }
-  dom.screenNames.innerHTML = [...screenSymbols].sort().map((name) => `<option value="${escapeHtml(name)}"></option>`).join("");
+}
+
+function enhanceSelect(select) {
+  if (!(select instanceof HTMLSelectElement) || select.multiple || select.dataset.selectEnhanced) return;
+  select.dataset.selectEnhanced = "true";
+  const picker = document.createElement("div");
+  picker.className = "select-choice-picker";
+  const menuId = generateId("select_menu");
+  const fieldLabel = select.closest("label")?.querySelector("span")?.textContent?.trim();
+  const settingLabel = select.closest(".setting-row")?.querySelector("strong")?.textContent?.trim();
+  const label = select.getAttribute("aria-label") || select.title || settingLabel || fieldLabel || "選擇項目";
+  const trigger = document.createElement("button");
+  trigger.type = "button";
+  trigger.className = "content-choice-trigger select-choice-trigger";
+  trigger.dataset.selectPickerToggle = "";
+  trigger.setAttribute("aria-label", label);
+  trigger.setAttribute("aria-haspopup", "listbox");
+  trigger.setAttribute("aria-expanded", "false");
+  trigger.setAttribute("aria-controls", menuId);
+  trigger.innerHTML = `<span><strong></strong></span><i aria-hidden="true">⌄</i>`;
+  const menu = document.createElement("div");
+  menu.id = menuId;
+  menu.className = "select-choice-menu";
+  menu.setAttribute("role", "listbox");
+  menu.setAttribute("aria-label", label);
+
+  select.before(picker);
+  picker.append(select, trigger, menu);
+  select.classList.add("select-choice-native");
+  select.hidden = true;
+  select.tabIndex = -1;
+  select.setAttribute("aria-hidden", "true");
+  syncSelectPicker(select);
+
+  picker.addEventListener("click", (event) => {
+    const choice = event.target.closest("[data-select-value]");
+    if (choice && !choice.disabled) {
+      const changed = select.value !== choice.dataset.selectValue;
+      select.value = choice.dataset.selectValue;
+      syncSelectPicker(select);
+      closeSelectPickers();
+      trigger.focus({ preventScroll: true });
+      if (changed) {
+        select.dispatchEvent(new Event("input", { bubbles: true }));
+        select.dispatchEvent(new Event("change", { bubbles: true }));
+      }
+      event.preventDefault();
+      return;
+    }
+    if (!event.target.closest("[data-select-picker-toggle]")) return;
+    const opening = !picker.classList.contains("open");
+    closeContentPickers();
+    closeSelectPickers(opening ? picker : null);
+    picker.classList.toggle("open", opening);
+    trigger.setAttribute("aria-expanded", String(opening));
+    if (opening) {
+      populateSelectMenu(select, picker);
+      positionSelectMenu(picker);
+    }
+    event.preventDefault();
+  });
+  picker.addEventListener("keydown", (event) => {
+    const options = [...picker.querySelectorAll("[data-select-value]:not(:disabled)")];
+    const current = options.indexOf(document.activeElement);
+    if (event.target === trigger && ["ArrowDown", "ArrowUp"].includes(event.key)) {
+      if (!picker.classList.contains("open")) trigger.click();
+      const selected = options.find((option) => option.getAttribute("aria-selected") === "true");
+      (selected || options[event.key === "ArrowDown" ? 0 : options.length - 1])?.focus();
+      event.preventDefault();
+      return;
+    }
+    if (current >= 0 && ["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) {
+      const next = event.key === "Home" ? 0
+        : event.key === "End" ? options.length - 1
+          : (current + (event.key === "ArrowDown" ? 1 : -1) + options.length) % options.length;
+      options[next]?.focus();
+      event.preventDefault();
+    } else if (current >= 0 && ["Enter", " "].includes(event.key)) {
+      document.activeElement.click();
+      event.preventDefault();
+    } else if (event.key === "Escape") {
+      closeSelectPickers();
+      trigger.focus({ preventScroll: true });
+      event.preventDefault();
+    }
+  });
+  select.addEventListener("change", () => syncSelectPicker(select));
+}
+
+function enhanceSelects(root = document) {
+  const selects = root.matches?.("select") ? [root] : [...(root.querySelectorAll?.("select") || [])];
+  selects.forEach(enhanceSelect);
+}
+
+function observeSelects() {
+  const observer = new MutationObserver((records) => {
+    records.forEach((record) => record.addedNodes.forEach((node) => {
+      if (node.nodeType === Node.ELEMENT_NODE) enhanceSelects(node);
+    }));
+  });
+  observer.observe(document.body, { childList: true, subtree: true });
+}
+
+function contentPickerHtml(label, index) {
+  const selectedFile = contentLabelFile(label);
+  const selectedFileName = selectedFile?.file || "找不到來源文件";
+  const selectedLabel = label || "尚未選擇 label";
+  const files = state.nodeDetail?.contents || [];
+  const fileRows = files.map((file) => {
+    const fileName = file.file || `${file.name}.rpy`;
+    const labels = file.labels || [];
+    if (!labels.length) {
+      return `<button class="content-file-choice is-disabled" type="button" disabled><span>${escapeHtml(fileName)}</span><small>沒有 label</small></button>`;
+    }
+    if (labels.length === 1) {
+      return `
+        <button class="content-file-choice" type="button" role="menuitem" data-content-label-choice="${escapeHtml(labels[0])}">
+          <span>${escapeHtml(fileName)}</span>
+        </button>
+      `;
+    }
+    return `
+      <div class="content-file-branch">
+        <button class="content-file-choice" type="button" role="menuitem" aria-haspopup="menu" aria-expanded="false" data-content-file-expand>
+          <span>${escapeHtml(fileName)}</span><i aria-hidden="true">›</i>
+        </button>
+        <div class="content-label-submenu" role="menu" aria-label="${escapeHtml(fileName)} labels">
+          ${labels.map((item) => `
+            <button type="button" role="menuitem" data-content-label-choice="${escapeHtml(item)}">${escapeHtml(item)}</button>
+          `).join("")}
+        </div>
+      </div>
+    `;
+  }).join("");
+  return `
+    <div class="field content-choice-field">
+      <span class="visually-hidden">Content label</span>
+      <input name="contentWeightedId" type="hidden" value="${escapeHtml(label)}">
+      <div class="content-choice-picker" data-content-picker-index="${index}">
+        <button class="content-choice-trigger" type="button" aria-haspopup="menu" aria-expanded="false" data-content-picker-toggle>
+          <span><strong>${escapeHtml(selectedFileName)}</strong><small>${escapeHtml(selectedLabel)}</small></span><i aria-hidden="true">⌄</i>
+        </button>
+        <div class="content-choice-menu" role="menu">
+          ${fileRows || '<div class="content-choice-empty">目前節點沒有 Content 文件。</div>'}
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function closeContentPickers(except = null) {
+  document.querySelectorAll(".content-choice-picker.open").forEach((picker) => {
+    if (picker === except) return;
+    picker.classList.remove("open");
+    picker.querySelector("[data-content-picker-toggle]")?.setAttribute("aria-expanded", "false");
+    picker.querySelectorAll(".content-file-branch.submenu-open").forEach((branch) => branch.classList.remove("submenu-open"));
+  });
+}
+
+function updateDatalists() {
+  dom.screenNames.innerHTML = state.screenNames.map((name) => `<option value="${escapeHtml(name)}"></option>`).join("");
   dom.statNames.innerHTML = Object.keys(state.stats).sort().map((name) => `<option value="${escapeHtml(name)}"></option>`).join("");
   dom.nodeNames.innerHTML = state.nodes.map((node) => `<option value="${escapeHtml(node.id)}"></option>`).join("");
   const labels = new Set();
@@ -441,8 +857,6 @@ function updateDatalists() {
   }
   dom.contentNames.innerHTML = [...labels].sort().map((name) => `<option value="${escapeHtml(name)}"></option>`).join("");
   dom.imageAssets.innerHTML = state.images.map((name) => `<option value="${escapeHtml(name)}"></option>`).join("");
-  const newNodeScreen = document.querySelector("#newNodeScreen");
-  if (newNodeScreen) newNodeScreen.innerHTML = namedOptionTags(screenChoices(), newNodeScreen.value, { includeNone: true });
 }
 
 function updateHeader() {
@@ -493,7 +907,8 @@ async function loadProject({ preserveNode = true } = {}) {
     state.projectPath = data.projectPath;
     state.rootNodeId = data.rootNodeId || null;
     state.nodes = data.nodes || [];
-    state.screens = data.screens || [];
+    state.graph = data.graph || { edges: [] };
+    state.screenNames = data.screenNames || [];
     state.images = data.images || [];
     state.stats = data.stats || {};
     state.statsDraft = clone(state.stats);
@@ -554,8 +969,8 @@ function renderAll() {
   renderEventsPanel();
   renderOptionsPanel();
   renderContentPanel();
-  renderScreensPanel();
   renderStatsPanel();
+  renderGraphPanel();
   renderValidationPanel();
   switchTab(state.activeTab, { render: false });
   updateEmptyState();
@@ -594,8 +1009,8 @@ function switchTab(tab, { render = true } = {}) {
   syncTabFocusIndicator({ immediate: !dom.tabFocusIndicator?.classList.contains("ready") });
   if (render) {
     if (tab === "options") renderOptionsPanel();
-    if (tab === "screens") renderScreensPanel();
     if (tab === "stats") renderStatsPanel();
+    if (tab === "graph") renderGraphPanel();
     if (tab === "validation") renderValidationPanel();
   }
   updateEmptyState();
@@ -643,11 +1058,11 @@ function renderNodePanel() {
             <div class="form-grid two-columns">
               <label class="field">
                 <span>Background</span>
-                <input name="Background" value="${escapeHtml(node.Background || "")}" placeholder="請輸入背景資源 ID">
+                <select name="Background" aria-label="Background">${nodeBackgroundOptionTags(node.Background || "")}</select>
               </label>
               <label class="field">
                 <span>Scene Screen</span>
-                <select name="Screen">${namedOptionTags(screenChoices(), node.Screen || "", { includeNone: true })}</select>
+                <input name="Screen" list="screenNames" value="${escapeHtml(node.Screen || "")}" placeholder="選填 Screen 名稱">
               </label>
             </div>
           </div>
@@ -949,13 +1364,18 @@ function weightedRowsHtml(value, kind) {
   const rows = choiceEntries(value);
   if (!rows.length) return `<div class="row-empty">尚未加入權重項目。</div>`;
   const choices = kind === "content" ? contentChoices() : nodeChoices();
-  return rows.map(([id, weight], index) => `
-    <div class="repeat-row weight-row" data-index="${index}">
-      <label class="field"><span class="visually-hidden">Name</span><select name="${kind}WeightedId" aria-label="${kind === "content" ? "Content 名稱" : "節點名稱"}">${namedOptionTags(choices, id)}</select></label>
+  return rows.map(([id, weight], index) => {
+    const choiceControl = kind === "content"
+      ? contentPickerHtml(id, index)
+      : `<label class="field"><span class="visually-hidden">節點名稱</span><select name="nextWeightedId" aria-label="節點名稱">${namedOptionTags(choices, id)}</select></label>`;
+    return `
+    <div class="repeat-row weight-row ${kind === "content" ? "content-weight-row" : ""}" data-index="${index}">
+      ${choiceControl}
       <label class="field"><span class="visually-hidden">Weight</span><input name="${kind}WeightedValue" aria-label="權重" type="number" min="0.0001" step="any" value="${escapeHtml(weight)}"></label>
       <button class="row-button" type="button" data-remove-weighted="${kind}:${index}" title="移除項目" aria-label="移除項目">×</button>
     </div>
-  `).join("");
+  `;
+  }).join("");
 }
 
 function choiceBlockHtml(value, kind) {
@@ -969,7 +1389,15 @@ function choiceBlockHtml(value, kind) {
 }
 
 function eventEditorHtml(event) {
-  const triggerMode = event.Trigger === "Auto" ? "Auto" : "Action";
+  const triggerMode = eventTriggerMode(event.Trigger);
+  const triggerInput = triggerMode === "Action"
+    ? `<select name="Trigger" aria-label="Option 選項" required>${namedOptionTags(eventActionChoices(event.Trigger), event.Trigger)}</select>`
+    : triggerMode === "Keyboard"
+      ? `<input class="keyboard-trigger-recorder" data-keyboard-trigger readonly aria-label="Keyboard 按鍵" value="${escapeHtml(keyboardKeysymDisplay(keyboardTriggerKeysym(event.Trigger)))}" title="聚焦後直接按下按鍵或按鍵組合">
+         <input name="Trigger" type="hidden" value="${escapeHtml(event.Trigger)}">`
+      : triggerMode === "Mouse"
+        ? `<select name="Trigger" aria-label="Mouse 按鍵" required>${namedOptionTags(MOUSE_TRIGGER_CHOICES, event.Trigger)}</select>`
+        : '<input name="Trigger" type="hidden" value="Auto">';
   return `
     <form class="editor-page" id="eventForm">
       <div class="form-section event-primary-section">
@@ -977,11 +1405,9 @@ function eventEditorHtml(event) {
           <label class="field"><span>Name</span><input name="Name" required value="${escapeHtml(event.Name || event.ID || "")}"></label>
           <div class="field event-trigger-field">
             <span>Trigger</span>
-            <div class="event-trigger-control ${triggerMode === "Auto" ? "is-auto" : "is-action"}">
-              <select name="TriggerMode" aria-label="Trigger 模式">${optionTags(["Auto", "Action"], triggerMode)}</select>
-              ${triggerMode === "Action"
-                ? `<select name="Trigger" aria-label="Action 選項" required>${namedOptionTags(eventActionChoices(event.Trigger), event.Trigger)}</select>`
-                : '<input name="Trigger" type="hidden" value="Auto">'}
+            <div class="event-trigger-control is-${triggerMode.toLocaleLowerCase()}">
+              <select name="TriggerMode" aria-label="Trigger 模式">${namedOptionTags(EVENT_TRIGGER_MODES, triggerMode)}</select>
+              ${triggerInput}
             </div>
           </div>
         </div>
@@ -1116,6 +1542,39 @@ function bindEventPanel() {
   const form = document.querySelector("#eventForm");
   if (!form) return;
   form.addEventListener("submit", saveEvent);
+  const keyboardTriggerInput = form.querySelector("[data-keyboard-trigger]");
+  keyboardTriggerInput?.addEventListener("focus", () => keyboardTriggerInput.select());
+  keyboardTriggerInput?.addEventListener("keydown", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const keysym = keyboardKeysymFromEvent(event);
+    if (!keysym) return;
+    form.elements.Trigger.value = `Keyboard:${keysym}`;
+    keyboardTriggerInput.value = keyboardKeysymDisplay(keysym);
+    state.eventDraft = readEventForm();
+    scheduleEventAutosave({ useDraft: true });
+  });
+  form.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && event.target.closest(".content-choice-picker")) {
+      closeContentPickers();
+      event.preventDefault();
+      return;
+    }
+    if (event.key === "ArrowRight" && event.target.matches("[data-content-file-expand]")) {
+      const branch = event.target.closest(".content-file-branch");
+      branch?.classList.add("submenu-open");
+      event.target.setAttribute("aria-expanded", "true");
+      branch?.querySelector(".content-label-submenu button")?.focus();
+      event.preventDefault();
+    } else if (event.key === "ArrowLeft" && event.target.closest(".content-label-submenu")) {
+      const branch = event.target.closest(".content-file-branch");
+      branch?.classList.remove("submenu-open");
+      const parent = branch?.querySelector("[data-content-file-expand]");
+      parent?.setAttribute("aria-expanded", "false");
+      parent?.focus();
+      event.preventDefault();
+    }
+  });
   document.querySelector("#deleteEventButton")?.addEventListener("click", deleteEvent);
   document.querySelector("#addConditionButton")?.addEventListener("click", (event) => {
     event.stopPropagation();
@@ -1134,6 +1593,36 @@ function bindEventPanel() {
     renderEventsPanel({ preserveView: true });
   });
   form.addEventListener("click", (event) => {
+    const pickerToggle = event.target.closest("[data-content-picker-toggle]");
+    const fileExpand = event.target.closest("[data-content-file-expand]");
+    const labelChoice = event.target.closest("[data-content-label-choice]");
+    if (pickerToggle) {
+      const picker = pickerToggle.closest(".content-choice-picker");
+      const opening = !picker.classList.contains("open");
+      closeContentPickers(opening ? picker : null);
+      picker.classList.toggle("open", opening);
+      pickerToggle.setAttribute("aria-expanded", String(opening));
+      event.preventDefault();
+      return;
+    }
+    if (fileExpand) {
+      const branch = fileExpand.closest(".content-file-branch");
+      const opening = !branch.classList.contains("submenu-open");
+      branch.classList.toggle("submenu-open", opening);
+      fileExpand.setAttribute("aria-expanded", String(opening));
+      event.preventDefault();
+      return;
+    }
+    if (labelChoice) {
+      const picker = labelChoice.closest(".content-choice-picker");
+      const input = picker?.closest(".content-choice-field")?.querySelector('[name="contentWeightedId"]');
+      if (input) input.value = labelChoice.dataset.contentLabelChoice;
+      state.eventDraft = readEventForm();
+      scheduleEventAutosave({ useDraft: true });
+      renderEventsPanel({ preserveView: true });
+      event.preventDefault();
+      return;
+    }
     const conditionIndex = event.target.dataset.removeCondition;
     const effectIndex = event.target.dataset.removeEffect;
     const weighted = event.target.dataset.removeWeighted;
@@ -1160,6 +1649,10 @@ function bindEventPanel() {
       const key = addWeighted === "content" ? "Content" : "Next Node";
       const current = Object.fromEntries(choiceEntries(state.eventDraft[key]));
       const available = addWeighted === "content" ? contentChoices() : nodeChoices();
+      if (!available.length) {
+        toast(addWeighted === "content" ? "目前節點沒有可用的 Content label。" : "目前專案沒有 Scene Node。", "error");
+        return;
+      }
       let id = available.find((item) => !Object.hasOwn(current, item.id))?.id || (addWeighted === "content" ? "missingContent" : "missingNode");
       current[id] = 1;
       state.eventDraft[key] = current;
@@ -1175,11 +1668,18 @@ function bindEventPanel() {
       if (event.target.value === "Action") {
         const action = eventActionChoices()[0]?.id;
         if (!action) {
-          event.target.value = "Auto";
+          draft.Trigger = "Auto";
+          state.eventDraft = draft;
+          scheduleEventAutosave({ useDraft: true });
+          renderEventsPanel({ preserveView: true });
           toast("目前節點尚未建立可供 Event 使用的選項。", "error");
           return;
         }
         draft.Trigger = action;
+      } else if (event.target.value === "Keyboard") {
+        draft.Trigger = "Keyboard:K_SPACE";
+      } else if (event.target.value === "Mouse") {
+        draft.Trigger = MOUSE_TRIGGER_CHOICES[0].id;
       } else {
         draft.Trigger = "Auto";
       }
@@ -1345,10 +1845,6 @@ function defaultOptionItem(index = 1) {
     Name: `新選項 ${index}`,
     Text: `新選項 ${index}`,
     Trigger: `Action:新選項${index}`,
-    "Visible Conditions": [],
-    "Enabled Conditions": [],
-    Tooltip: "",
-    Icon: "",
     "Style Override": {},
   };
 }
@@ -1360,8 +1856,9 @@ function defaultOptionElement(type) {
     Name: type === "TEXTBOX" ? "選項清單" : type === "PICTURE" ? "圖片選項" : "互動區域",
     Type: type,
     Layout: { X: 690 + offset, Y: 360 + offset, Width: 540, Height: type === "TEXTBOX" ? 352 : 180, "Z Order": 10 },
-    "Visible Conditions": [],
-    "Enabled Conditions": [],
+    Hover: { Enabled: true, Color: "#ffffff18" },
+    "Hover Sound": "",
+    "Click Sound": "",
   };
   if (type === "TEXTBOX") {
     base.List = {
@@ -1369,37 +1866,22 @@ function defaultOptionElement(type) {
       "Item Height": 72,
       "Item Spacing": 12,
       Padding: 16,
-      Scrollbar: "AUTO",
-      "Scrollbar Width": 18,
-      "Scrollbar Side": "RIGHT",
-      Mousewheel: true,
-      Draggable: true,
-      "Remember Scroll": "RESET",
+      "Show Scrollbar": true,
     };
     base.Style = {
       Background: "#0b1118",
       "Item Background": "#20302a",
-      "Item Hover Background": "#2d8068",
-      "Item Disabled Background": "#29312e",
       "Text Color": "#ffffff",
-      "Text Hover Color": "#ffffff",
-      "Text Disabled Color": "#8b948f",
       "Text Size": 30,
       "Text Align": 0.5,
     };
     base.Items = [defaultOptionItem(1)];
   } else if (type === "PICTURE") {
     base.Trigger = "Action:新圖片選項";
-    base.Tooltip = "";
-    base.Picture = { Idle: "", Hover: "", Pressed: "", Disabled: "", Fit: "CONTAIN", "Keep Aspect": true, "Alpha Hit Test": false, Opacity: 1, Tint: "#ffffff", "Hover Scale": 1 };
-    base["Hover Sound"] = "";
-    base["Click Sound"] = "";
+    base.Picture = { Idle: "", Hover: "", Fit: "CONTAIN", "Keep Aspect": true, "Alpha Hit Test": false, Opacity: 1, Tint: "#ffffff" };
   } else {
     base.Trigger = "Action:新互動區域";
-    base.Tooltip = "";
-    base.Hitbox = { "Editor Color": "#28a47d", "Editor Opacity": 0.24, "Hover Image": "", Cursor: "pointer" };
-    base["Hover Sound"] = "";
-    base["Click Sound"] = "";
+    base.Hitbox = { "Editor Color": "#28a47d", "Editor Opacity": 0.24 };
   }
   return base;
 }
@@ -1503,13 +1985,6 @@ function assetUrl(path) {
   return path ? `/api/asset?path=${encodeURIComponent(path)}` : "";
 }
 
-function customOptionScreenName() {
-  const screen = state.nodeDetail?.node?.["Option Screen"] || "";
-  if (screen && screen !== "scene_option_renderer") return screen;
-  const sourceMatch = state.nodeDetail?.optionSource?.match(/^\s*screen\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(/m);
-  return sourceMatch?.[1] || `option_${state.nodeDetail?.node?.ID || "custom"}`;
-}
-
 function textBoxMetrics(element, useMaximum = false) {
   const settings = element.List || {};
   const itemHeight = Math.max(24, numberValue(settings["Item Height"], 72));
@@ -1528,7 +2003,7 @@ function markOptionsDirty() {
 
 function optionElementListHtml() {
   const elements = state.optionsDraft?.Elements || [];
-  if (!elements.length) return `<div class="node-list-empty">尚未建立選項元件</div>`;
+  if (!elements.length) return `<div class="node-list-empty">尚未建立選項</div>`;
   return elements.map((element) => `
     <button class="subnav-item option-element-list-item ${element.ID === state.selectedOptionElementId ? "active" : ""}" type="button" data-option-element-select="${escapeHtml(element.ID)}">
       <span class="subnav-item-copy">
@@ -1553,15 +2028,15 @@ function optionStageElementHtml(element) {
     const metrics = textBoxMetrics(element);
     height = metrics.height;
     const style = element.Style || {};
-    const scrollbar = element.List?.Scrollbar || "AUTO";
-    const overflowClass = scrollbar === "HIDDEN" ? "scrollbar-hidden" : "";
-    const overflowStyle = scrollbar === "ALWAYS" ? "scroll" : "auto";
+    const hover = element.Hover || {};
+    const hoverClass = hover.Enabled !== false ? "hover-effect-enabled" : "";
+    const overflowClass = element.List?.["Show Scrollbar"] === false ? "scrollbar-hidden" : "";
     const items = element.Items || [];
     body = `
       <div class="option-textbox-preview" style="padding:${metrics.padding}px;background:${safeColor(style.Background, "#0b1118")}">
-        <div class="option-scroll-preview ${overflowClass}" style="max-height:${metrics.contentHeight}px;overflow-y:${overflowStyle};gap:${metrics.spacing}px">
+        <div class="option-scroll-preview ${overflowClass}" style="max-height:${metrics.contentHeight}px;overflow-y:auto;gap:${metrics.spacing}px">
           ${items.length ? items.map((item) => `
-            <button class="option-text-item ${item.ID === state.selectedOptionItemId ? "selected" : ""}" type="button" data-option-item-select="${escapeHtml(item.ID)}" style="height:${metrics.itemHeight}px;background:${safeColor(style["Item Background"])};color:${safeColor(style["Text Color"], "#ffffff")};font-size:${numberValue(style["Text Size"], 30)}px;text-align:${numberValue(style["Text Align"], 0.5) === 0 ? "left" : numberValue(style["Text Align"], 0.5) === 1 ? "right" : "center"}">
+            <button class="option-text-item ${hoverClass} ${item.ID === state.selectedOptionItemId ? "selected" : ""}" type="button" data-option-item-select="${escapeHtml(item.ID)}" style="height:${metrics.itemHeight}px;--option-item-background:${safeColor(style["Item Background"])};--option-hover-color:${safeColor(hover.Color, "#ffffff18")};background:var(--option-item-background);color:${safeColor(style["Text Color"], "#ffffff")};font-size:${numberValue(style["Text Size"], 30)}px;text-align:${numberValue(style["Text Align"], 0.5) === 0 ? "left" : numberValue(style["Text Align"], 0.5) === 1 ? "right" : "center"}">
               ${escapeHtml(item.Text || item.Name || item.ID)}
             </button>
           `).join("") : `<div class="option-empty-row" style="height:${metrics.itemHeight}px">尚未建立 Item</div>`}
@@ -1570,14 +2045,21 @@ function optionStageElementHtml(element) {
     `;
   } else if (element.Type === "PICTURE") {
     const picture = element.Picture || {};
+    const hover = element.Hover || {};
     const idle = picture.Idle || "";
+    const hoverImage = hover.Enabled !== false ? picture.Hover || "" : "";
     const fit = picture["Keep Aspect"] === false || picture.Fit === "STRETCH" ? "fill" : picture.Fit === "COVER" ? "cover" : "contain";
     body = idle
-      ? `<img class="option-picture-preview" src="${escapeHtml(assetUrl(idle))}" alt="" draggable="false" style="object-fit:${fit};opacity:${numberValue(picture.Opacity, 1)};--picture-hover-scale:${numberValue(picture["Hover Scale"], 1)}">`
+      ? `<div class="option-picture-preview ${hover.Enabled !== false ? "hover-effect-enabled" : ""}" style="--picture-opacity:${numberValue(picture.Opacity, 1)};--option-hover-color:${safeColor(hover.Color, "#ffffff18")}">
+          <img class="option-picture-idle" src="${escapeHtml(assetUrl(idle))}" alt="" draggable="false" style="object-fit:${fit}">
+          ${hoverImage ? `<img class="option-picture-hover" src="${escapeHtml(assetUrl(hoverImage))}" alt="" draggable="false" style="object-fit:${fit}">` : ""}
+          <span class="option-picture-hover-color"></span>
+        </div>`
       : `<div class="option-picture-placeholder"><span>PICTURE</span><small>選擇 Idle 圖片</small></div>`;
   } else {
     const hitbox = element.Hitbox || {};
-    body = `<div class="option-hitbox-preview" style="--hitbox-color:${safeColor(hitbox["Editor Color"], "#28a47d")};--hitbox-opacity:${numberValue(hitbox["Editor Opacity"], 0.24)};cursor:${escapeHtml(hitbox.Cursor || "pointer")}"><span>${escapeHtml(element.Name || "Hitbox")}</span></div>`;
+    const hover = element.Hover || {};
+    body = `<div class="option-hitbox-preview ${hover.Enabled !== false ? "hover-effect-enabled" : ""}" style="--hitbox-color:${safeColor(hitbox["Editor Color"], "#28a47d")};--hitbox-opacity:${numberValue(hitbox["Editor Opacity"], 0.24)};--option-hover-color:${safeColor(hover.Color, "#ffffff18")}"><span>${escapeHtml(element.Name || "Hitbox")}</span></div>`;
   }
 
   const handles = selected ? ["nw", "n", "ne", "e", "se", "s", "sw", "w"].map((direction) => `<span class="resize-handle ${direction}" data-option-resize="${direction}"></span>`).join("") : "";
@@ -1595,7 +2077,10 @@ function optionStageHtml() {
   const canvas = options.Canvas || {};
   const width = Math.max(320, numberValue(canvas.Width, 1920));
   const height = Math.max(180, numberValue(canvas.Height, 1080));
-  const background = canvas["Preview Background"] || "";
+  const previewBackground = canvas["Preview Background"] || "";
+  const background = previewBackground === "__none__"
+    ? ""
+    : previewBackground || state.nodeDetail?.node?.Background || "";
   const elements = [...(options.Elements || [])].sort((a, b) => numberValue(a.Layout?.["Z Order"], 10) - numberValue(b.Layout?.["Z Order"], 10));
   return `
     <div class="option-stage-shell" id="optionStageShell" style="aspect-ratio:${width} / ${height}">
@@ -1604,38 +2089,6 @@ function optionStageHtml() {
         <div class="option-stage-grid ${state.optionGridVisible ? "" : "hidden"}" style="background-size:${state.editorSettings.gridSize}px ${state.editorSettings.gridSize}px"></div>
         ${elements.map(optionStageElementHtml).join("")}
       </div>
-    </div>
-  `;
-}
-
-function optionConditionRowsHtml(conditions, scope) {
-  if (!conditions?.length) return `<div class="row-empty compact-empty">無條件</div>`;
-  return conditions.map((condition, index) => {
-    const type = condition.type === "tag" ? "memory" : (condition.type || "stat");
-    const isMemory = type === "memory";
-    return `
-      <div class="option-condition-row" data-option-condition-scope="${escapeHtml(scope)}" data-index="${index}">
-        <select data-option-condition-part="type">${optionTags(["stat", "memory"], type)}</select>
-        ${isMemory ? `
-          <select data-option-condition-part="bank" aria-label="記憶庫">${namedOptionTags(memoryChoices(), condition.bank || "memory")}</select>
-          <input data-option-condition-part="id" aria-label="記憶標籤" value="${escapeHtml(condition.id || "")}" placeholder="標籤">
-          <select data-option-condition-part="op">${optionTags(["has", "not_has"], condition.op)}</select>
-        ` : `
-          <select data-option-condition-part="id">${namedOptionTags(statChoices(), condition.id)}</select>
-          <select data-option-condition-part="op">${optionTags([">", ">=", "<", "<=", "==", "!="], condition.op)}</select>
-          <input data-option-condition-part="value" type="number" step="any" value="${escapeHtml(condition.value ?? 0)}">
-        `}
-        <button class="row-button" type="button" data-remove-option-condition="${escapeHtml(scope)}:${index}" title="移除條件" aria-label="移除條件">×</button>
-      </div>
-    `;
-  }).join("");
-}
-
-function optionConditionSectionHtml(title, conditions, scope) {
-  return `
-    <div class="option-condition-section">
-      <div class="mini-section-heading"><strong>${escapeHtml(title)}</strong><button class="quiet-button compact add-button" type="button" data-add-option-condition="${escapeHtml(scope)}">＋ 新增</button></div>
-      <div class="option-condition-list">${optionConditionRowsHtml(conditions || [], scope)}</div>
     </div>
   `;
 }
@@ -1660,124 +2113,144 @@ function textBoxItemsHtml(element) {
   `;
 }
 
-function optionInspectorTabsHtml() {
-  const tabs = [
-    ["content", "內容"],
-    ["layout", "版面"],
-    ["appearance", "外觀"],
-    ["rules", "規則"],
-    ["more", "更多"],
-  ];
+function optionBooleanField(label, attributes, checked) {
   return `
-    <div class="option-inspector-menu" role="tablist" aria-label="選項功能">
-      ${tabs.map(([id, label]) => `
-        <button class="${state.optionInspectorTab === id ? "active" : ""}" type="button" role="tab" aria-selected="${state.optionInspectorTab === id}" data-option-inspector-tab="${id}">${label}</button>
-      `).join("")}
+    <label class="field option-boolean-field">
+      <span>${escapeHtml(label)}</span>
+      <span class="boolean-control">
+        <input ${attributes} type="checkbox" ${checked ? "checked" : ""}>
+        <span class="boolean-display" data-off="False" data-on="True" aria-hidden="true"><i></i></span>
+      </span>
+    </label>
+  `;
+}
+
+function optionHoverFields(element, { picture = false } = {}) {
+  const hover = element.Hover || {};
+  const hoverEnabled = hover.Enabled !== false;
+  const pictureData = element.Picture || {};
+  return `
+    ${optionBooleanField("Hover 效果", 'data-option-path="Hover.Enabled"', hoverEnabled)}
+    ${hoverEnabled ? `
+      ${transparentColorField("Hover 顏色", "Hover.Color", hover.Color, "#ffffff18")}
+      ${picture ? `<label class="field"><span>Hover 圖片</span><input data-option-path="Picture.Hover" list="imageAssets" value="${escapeHtml(pictureData.Hover || "")}"></label>` : ""}
+    ` : ""}
+  `;
+}
+
+function optionSoundSection(element) {
+  return `
+    <div class="form-section option-sound-section">
+      <div class="form-section-header option-static-header"><div><h3>聲音</h3></div></div>
+      <div class="form-grid two-columns option-field-grid">
+        <label class="field"><span>Hover Sound</span><input data-option-path="Hover Sound" value="${escapeHtml(element["Hover Sound"] || "")}"></label>
+        <label class="field"><span>Click Sound</span><input data-option-path="Click Sound" value="${escapeHtml(element["Click Sound"] || "")}"></label>
+      </div>
     </div>
+  `;
+}
+
+function optionCollapsibleSection(title, summary, body, extraClass = "") {
+  return `
+    <details class="form-section collapsible-section option-collapsible-section ${extraClass}" data-option-section="${escapeHtml(title)}">
+      <summary class="form-section-header">
+        <div><h3>${escapeHtml(title)}</h3>${summary ? `<span>${escapeHtml(summary)}</span>` : ""}</div>
+      </summary>
+      <div class="collapsible-section-body">${body}</div>
+    </details>
   `;
 }
 
 function optionInspectorHtml() {
   const element = selectedOptionElement();
   if (!element) {
-    return `<div class="option-inspector-empty"><strong>選擇或新增元件</strong></div>`;
+    return `
+      <div class="option-inspector-empty">
+        <strong>${state.optionWorkspaceMode === "canvas" ? "畫布上尚無可調整的選項" : "選擇或新增選項"}</strong>
+        ${state.optionWorkspaceMode === "canvas" ? '<span>向左拖曳分隔把手即可回到表單新增。</span>' : ""}
+      </div>
+    `;
   }
   const layout = element.Layout || {};
-  const tab = state.optionInspectorTab;
-  const common = tab === "content" ? `
-      <div class="inspector-section option-menu-section">
-        <div class="mini-section-heading"><strong>元件</strong></div>
-        <label class="field"><span>名稱</span><input data-option-path="Name" value="${escapeHtml(element.Name || "")}"></label>
-      </div>
-    ` : tab === "layout" ? `
-      <div class="inspector-section option-menu-section">
-        <div class="mini-section-heading"><strong>位置與尺寸</strong></div>
-        <div class="form-grid two-columns compact-grid">
-          <label class="field"><span>X</span><input data-option-path="Layout.X" type="number" value="${escapeHtml(layout.X ?? 0)}"></label>
-          <label class="field"><span>Y</span><input data-option-path="Layout.Y" type="number" value="${escapeHtml(layout.Y ?? 0)}"></label>
-        </div>
-        <div class="form-grid ${element.Type === "TEXTBOX" ? "" : "two-columns"} compact-grid">
-          <label class="field"><span>寬度</span><input data-option-path="Layout.Width" type="number" min="24" value="${escapeHtml(layout.Width ?? 100)}"></label>
-          ${element.Type === "TEXTBOX" ? "" : `<label class="field"><span>高度</span><input data-option-path="Layout.Height" type="number" min="24" value="${escapeHtml(layout.Height ?? 100)}"></label>`}
-        </div>
-        <label class="field"><span>圖層順序</span><input data-option-path="Layout.Z Order" type="number" value="${escapeHtml(layout["Z Order"] ?? 10)}"></label>
-      </div>
-    ` : "";
+  const isCanvas = state.optionWorkspaceMode === "canvas";
+  const positionFields = `
+    <div class="form-grid two-columns option-field-grid">
+      <label class="field"><span>X</span><input data-option-path="Layout.X" type="number" value="${escapeHtml(layout.X ?? 0)}"></label>
+      <label class="field"><span>Y</span><input data-option-path="Layout.Y" type="number" value="${escapeHtml(layout.Y ?? 0)}"></label>
+    </div>
+    <div class="form-grid ${element.Type === "TEXTBOX" ? "" : "two-columns"} option-field-grid">
+      <label class="field"><span>寬度</span><input data-option-path="Layout.Width" type="number" min="24" value="${escapeHtml(layout.Width ?? 100)}"></label>
+      ${element.Type === "TEXTBOX" ? "" : `<label class="field"><span>高度</span><input data-option-path="Layout.Height" type="number" min="24" value="${escapeHtml(layout.Height ?? 100)}"></label>`}
+    </div>
+  `;
+  const zOrderField = `<label class="field"><span>圖層順序</span><input data-option-path="Layout.Z Order" type="number" value="${escapeHtml(layout["Z Order"] ?? 10)}"></label>`;
+  let primary = "";
+  let sections = "";
 
-  let specific = "";
   if (element.Type === "TEXTBOX") {
     const list = element.List || {};
     const style = element.Style || {};
     const item = selectedOptionItem();
     const itemOverride = item?.["Style Override"] || {};
     const hasItemOverride = Object.keys(itemOverride).length > 0;
-    if (tab === "content") {
-      specific = `
-        <div class="inspector-section option-menu-section">
-          <div class="mini-section-heading"><strong>清單項目</strong><button class="quiet-button compact add-button" id="addOptionItem" type="button">＋ 新增</button></div>
+    if (!isCanvas) {
+      primary = `
+        <div class="form-grid option-field-grid">
+          <label class="field"><span>Name</span><input data-option-path="Name" value="${escapeHtml(element.Name || "")}"></label>
+        </div>
+        <div class="option-primary-block">
+          <div class="form-section-header option-static-header">
+            <div><h3>Items</h3><span>${element.Items?.length || 0} 個選項</span></div>
+            <button class="icon-button section-add-button add-button" id="addOptionItem" type="button" title="新增選項" aria-label="新增選項">＋</button>
+          </div>
           ${textBoxItemsHtml(element)}
         </div>
-        ${item ? `
-          <div class="inspector-section option-menu-section selected-item-editor">
-            <div class="mini-section-heading"><strong>目前選項</strong></div>
-            <label class="field"><span>名稱</span><input data-option-item-path="Name" value="${escapeHtml(item.Name || "")}"></label>
-            <label class="field"><span>顯示文字</span><input data-option-item-path="Text" value="${escapeHtml(item.Text || "")}"></label>
-            <label class="field"><span>Trigger</span><input data-option-item-path="Trigger" value="${escapeHtml(actionTriggerName(item.Trigger))}"></label>
-            <label class="field"><span>Tooltip</span><input data-option-item-path="Tooltip" value="${escapeHtml(item.Tooltip || "")}"></label>
-            <label class="field"><span>Icon</span><input data-option-item-path="Icon" list="imageAssets" value="${escapeHtml(item.Icon || "")}"></label>
+        ${item ? `<div class="option-primary-block selected-item-editor">
+          <div class="form-grid two-columns option-field-grid">
+            <label class="field"><span>Name</span><input data-option-item-path="Name" value="${escapeHtml(item.Name || "")}"></label>
+            <label class="field"><span>Text</span><input data-option-item-path="Text" value="${escapeHtml(item.Text || "")}"></label>
+            <label class="field option-wide-field"><span>Trigger</span><input data-option-item-path="Trigger" value="${escapeHtml(actionTriggerName(item.Trigger))}"></label>
           </div>
-        ` : ""}
+        </div>` : ""}
       `;
-    } else if (tab === "layout") {
-      specific = `
-        <div class="inspector-section option-menu-section">
-          <div class="mini-section-heading"><strong>清單尺寸</strong></div>
+      sections += optionSoundSection(element);
+    } else {
+      primary = positionFields;
+      sections += optionCollapsibleSection("版面細節", "", `
+        ${zOrderField}
+        <div class="option-section-group">
           ${rangeField("最多顯示", "List.Max Visible Items", list["Max Visible Items"] ?? 4, { min: 1, max: 20 })}
           ${rangeField("Item 高度", "List.Item Height", list["Item Height"] ?? 72, { min: 24, max: 240, suffix: " px" })}
           ${rangeField("Item 間距", "List.Item Spacing", list["Item Spacing"] ?? 12, { min: 0, max: 120, suffix: " px" })}
           ${rangeField("Padding", "List.Padding", list.Padding ?? 16, { min: 0, max: 160, suffix: " px" })}
         </div>
-        <div class="inspector-section option-menu-section">
-          <div class="mini-section-heading"><strong>捲動方式</strong></div>
-          <label class="field"><span>Scrollbar</span><select data-option-path="List.Scrollbar">${optionTags(["AUTO", "HIDDEN", "ALWAYS"], list.Scrollbar || "AUTO")}</select></label>
-          ${rangeField("Scrollbar 寬度", "List.Scrollbar Width", list["Scrollbar Width"] ?? 18, { min: 4, max: 64, suffix: " px" })}
-          <label class="field"><span>位置</span><select data-option-path="List.Scrollbar Side">${optionTags(["LEFT", "RIGHT"], list["Scrollbar Side"] || "RIGHT")}</select></label>
-          <label class="field"><span>記住位置</span><select data-option-path="List.Remember Scroll">${optionTags(["RESET", "NODE"], list["Remember Scroll"] || "RESET", (value) => value === "RESET" ? "每次重設" : "節點內保留")}</select></label>
-          <div class="form-grid two-columns compact-grid">
-            <label class="checkbox-field"><input data-option-path="List.Mousewheel" type="checkbox" ${list.Mousewheel !== false ? "checked" : ""}><span>滑鼠滾輪</span></label>
-            <label class="checkbox-field"><input data-option-path="List.Draggable" type="checkbox" ${list.Draggable !== false ? "checked" : ""}><span>拖曳捲動</span></label>
-          </div>
+        ${optionBooleanField("內容超出時顯示滑桿", 'data-option-path="List.Show Scrollbar"', list["Show Scrollbar"] !== false)}
+      `);
+      sections += optionCollapsibleSection("外觀", "", `
+        <div class="option-section-group">
+          ${optionHoverFields(element)}
         </div>
-      `;
-    } else if (tab === "appearance") {
-      specific = `
-        <div class="inspector-section option-menu-section">
-          <div class="mini-section-heading"><strong>背景</strong></div>
+        <div class="option-section-group">
+          <h4>背景</h4>
           <div class="form-grid compact-grid color-grid option-opacity-colors">
             ${transparentColorField("容器", "Style.Background", style.Background, "#0b1118")}
             ${transparentColorField("Item", "Style.Item Background", style["Item Background"], "#20302a")}
-            ${transparentColorField("Hover", "Style.Item Hover Background", style["Item Hover Background"], "#2d8068")}
-            ${transparentColorField("停用", "Style.Item Disabled Background", style["Item Disabled Background"], "#29312e")}
           </div>
         </div>
-        <div class="inspector-section option-menu-section">
-          <div class="mini-section-heading"><strong>文字</strong></div>
+        <div class="option-section-group">
+          <h4>文字</h4>
           <div class="form-grid two-columns compact-grid color-grid">
             <label class="field"><span>一般</span><input data-option-path="Style.Text Color" type="color" value="${safeColor(style["Text Color"], "#ffffff").slice(0, 7)}"></label>
-            <label class="field"><span>Hover</span><input data-option-path="Style.Text Hover Color" type="color" value="${safeColor(style["Text Hover Color"], "#ffffff").slice(0, 7)}"></label>
-            <label class="field"><span>停用</span><input data-option-path="Style.Text Disabled Color" type="color" value="${safeColor(style["Text Disabled Color"], "#8b948f").slice(0, 7)}"></label>
           </div>
           ${rangeField("字體大小", "Style.Text Size", style["Text Size"] ?? 30, { min: 8, max: 160, suffix: " px" })}
           <label class="field"><span>文字對齊</span><select data-option-path="Style.Text Align">${optionTags([0, 0.5, 1], style["Text Align"] ?? 0.5, (value) => ({ 0: "靠左", 0.5: "置中", 1: "靠右" })[value])}</select></label>
         </div>
         ${item ? `
-          <div class="inspector-section option-menu-section">
-            <div class="mini-section-heading"><strong>目前選項</strong></div>
-            <label class="checkbox-field"><input id="itemStyleOverrideEnabled" type="checkbox" ${hasItemOverride ? "checked" : ""}><span>使用獨立樣式</span></label>
+          <div class="option-section-group">
+            ${optionBooleanField("使用獨立樣式", 'id="itemStyleOverrideEnabled"', hasItemOverride)}
             ${hasItemOverride ? `
               <div class="form-grid compact-grid color-grid option-opacity-colors">
                 ${transparentColorField("背景", "Style Override.Item Background", itemOverride["Item Background"], style["Item Background"] || "#20302a", true)}
-                ${transparentColorField("Hover", "Style Override.Item Hover Background", itemOverride["Item Hover Background"], style["Item Hover Background"] || "#2d8068", true)}
                 <label class="field"><span>文字</span><input data-option-item-path="Style Override.Text Color" type="color" value="${safeColor(itemOverride["Text Color"], style["Text Color"]).slice(0, 7)}"></label>
               </div>
               ${rangeField("字體大小", "Style Override.Text Size", itemOverride["Text Size"] ?? style["Text Size"] ?? 30, { min: 8, max: 160, suffix: " px", itemField: true })}
@@ -1785,126 +2258,68 @@ function optionInspectorHtml() {
             ` : ""}
           </div>
         ` : ""}
-      `;
-    } else if (tab === "rules") {
-      specific = `
-        <div class="inspector-section option-menu-section">
-          <div class="mini-section-heading"><strong>元件規則</strong></div>
-          ${optionConditionSectionHtml("顯示條件", element["Visible Conditions"], "element-visible")}
-          ${optionConditionSectionHtml("可用條件", element["Enabled Conditions"], "element-enabled")}
-        </div>
-        ${item ? `
-          <div class="inspector-section option-menu-section">
-            <div class="mini-section-heading"><strong>目前選項規則</strong></div>
-            ${optionConditionSectionHtml("顯示條件", item["Visible Conditions"], "item-visible")}
-            ${optionConditionSectionHtml("可用條件", item["Enabled Conditions"], "item-enabled")}
-          </div>
-        ` : ""}
-      `;
+      `);
     }
   } else if (element.Type === "PICTURE") {
     const picture = element.Picture || {};
-    if (tab === "content") {
-      specific = `
-        <div class="inspector-section option-menu-section">
-          <div class="mini-section-heading"><strong>圖片與動作</strong></div>
+    if (!isCanvas) {
+      primary = `
+        <div class="form-grid two-columns option-field-grid">
+          <label class="field"><span>Name</span><input data-option-path="Name" value="${escapeHtml(element.Name || "")}"></label>
           <label class="field"><span>Trigger</span><input data-option-path="Trigger" value="${escapeHtml(actionTriggerName(element.Trigger))}"></label>
           <label class="field"><span>Idle 圖片</span><input data-option-path="Picture.Idle" list="imageAssets" value="${escapeHtml(picture.Idle || "")}"></label>
-          <label class="field"><span>Hover 圖片</span><input data-option-path="Picture.Hover" list="imageAssets" value="${escapeHtml(picture.Hover || "")}"></label>
-          <label class="field"><span>Pressed 圖片</span><input data-option-path="Picture.Pressed" list="imageAssets" value="${escapeHtml(picture.Pressed || "")}"></label>
-          <label class="field"><span>Disabled 圖片</span><input data-option-path="Picture.Disabled" list="imageAssets" value="${escapeHtml(picture.Disabled || "")}"></label>
-          <label class="field"><span>Tooltip</span><input data-option-path="Tooltip" value="${escapeHtml(element.Tooltip || "")}"></label>
+          ${optionBooleanField("只讓不透明部分可點擊", 'data-option-path="Picture.Alpha Hit Test"', Boolean(picture["Alpha Hit Test"]))}
         </div>
       `;
-    } else if (tab === "layout") {
-      specific = `
-        <div class="inspector-section option-menu-section">
-          <div class="mini-section-heading"><strong>圖片填充</strong></div>
-          <label class="field"><span>填充方式</span><select data-option-path="Picture.Fit">${optionTags(["CONTAIN", "COVER", "STRETCH"], picture.Fit || "CONTAIN")}</select></label>
-          <label class="checkbox-field"><input data-option-path="Picture.Keep Aspect" type="checkbox" ${picture["Keep Aspect"] !== false ? "checked" : ""}><span>保持長寬比</span></label>
+      sections += optionSoundSection(element);
+    } else {
+      primary = positionFields;
+      sections += optionCollapsibleSection("版面細節", "", `
+        ${zOrderField}
+        <label class="field"><span>填充方式</span><select data-option-path="Picture.Fit">${optionTags(["CONTAIN", "COVER", "STRETCH"], picture.Fit || "CONTAIN")}</select></label>
+        ${optionBooleanField("保持長寬比", 'data-option-path="Picture.Keep Aspect"', picture["Keep Aspect"] !== false)}
+      `);
+      sections += optionCollapsibleSection("外觀", "", `
+        <div class="option-section-group">
+          ${optionHoverFields(element, { picture: true })}
         </div>
-      `;
-    } else if (tab === "appearance") {
-      specific = `
-        <div class="inspector-section option-menu-section">
-          <div class="mini-section-heading"><strong>顯示效果</strong></div>
+        <div class="option-section-group">
+          <h4>顯示效果</h4>
           ${rangeField("不透明度", "Picture.Opacity", picture.Opacity ?? 1, { min: 0, max: 1, step: 0.01, format: "percent" })}
-          ${rangeField("Hover Scale", "Picture.Hover Scale", picture["Hover Scale"] ?? 1, { min: 0.1, max: 5, step: 0.05, suffix: "×" })}
           <label class="field"><span>Tint</span><input data-option-path="Picture.Tint" type="color" value="${safeColor(picture.Tint, "#ffffff").slice(0, 7)}"></label>
-          <label class="checkbox-field"><input data-option-path="Picture.Alpha Hit Test" type="checkbox" ${picture["Alpha Hit Test"] ? "checked" : ""}><span>只讓不透明部分可點擊</span></label>
         </div>
-      `;
-    } else if (tab === "rules") {
-      specific = `
-        <div class="inspector-section option-menu-section">
-          <div class="mini-section-heading"><strong>圖片規則</strong></div>
-          ${optionConditionSectionHtml("顯示條件", element["Visible Conditions"], "element-visible")}
-          ${optionConditionSectionHtml("可用條件", element["Enabled Conditions"], "element-enabled")}
-        </div>
-      `;
-    } else if (tab === "more") {
-      specific = `
-        <div class="inspector-section option-menu-section">
-          <div class="mini-section-heading"><strong>聲音</strong></div>
-          <label class="field"><span>Hover Sound</span><input data-option-path="Hover Sound" value="${escapeHtml(element["Hover Sound"] || "")}"></label>
-          <label class="field"><span>Click Sound</span><input data-option-path="Click Sound" value="${escapeHtml(element["Click Sound"] || "")}"></label>
-        </div>
-      `;
+      `);
     }
   } else {
     const hitbox = element.Hitbox || {};
-    if (tab === "content") {
-      specific = `
-        <div class="inspector-section option-menu-section">
-          <div class="mini-section-heading"><strong>互動內容</strong></div>
+    if (!isCanvas) {
+      primary = `
+        <div class="form-grid two-columns option-field-grid">
+          <label class="field"><span>Name</span><input data-option-path="Name" value="${escapeHtml(element.Name || "")}"></label>
           <label class="field"><span>Trigger</span><input data-option-path="Trigger" value="${escapeHtml(actionTriggerName(element.Trigger))}"></label>
-          <label class="field"><span>Tooltip</span><input data-option-path="Tooltip" value="${escapeHtml(element.Tooltip || "")}"></label>
         </div>
       `;
-    } else if (tab === "appearance") {
-      specific = `
-        <div class="inspector-section option-menu-section">
-          <div class="mini-section-heading"><strong>編輯器預覽</strong></div>
+      sections += optionSoundSection(element);
+    } else {
+      primary = positionFields;
+      sections += optionCollapsibleSection("版面細節", "", zOrderField);
+      sections += optionCollapsibleSection("外觀", "", `
+        <div class="option-section-group">
+          ${optionHoverFields(element)}
+        </div>
+        <div class="option-section-group">
           <label class="field"><span>顏色</span><input data-option-path="Hitbox.Editor Color" type="color" value="${safeColor(hitbox["Editor Color"], "#28a47d").slice(0, 7)}"></label>
           ${rangeField("不透明度", "Hitbox.Editor Opacity", hitbox["Editor Opacity"] ?? 0.24, { min: 0, max: 1, step: 0.01, format: "percent" })}
-          <label class="field"><span>Hover 圖片</span><input data-option-path="Hitbox.Hover Image" list="imageAssets" value="${escapeHtml(hitbox["Hover Image"] || "")}"></label>
-          <label class="field"><span>Cursor</span><input data-option-path="Hitbox.Cursor" value="${escapeHtml(hitbox.Cursor || "pointer")}"></label>
         </div>
-      `;
-    } else if (tab === "rules") {
-      specific = `
-        <div class="inspector-section option-menu-section">
-          <div class="mini-section-heading"><strong>互動規則</strong></div>
-          ${optionConditionSectionHtml("顯示條件", element["Visible Conditions"], "element-visible")}
-          ${optionConditionSectionHtml("可用條件", element["Enabled Conditions"], "element-enabled")}
-        </div>
-      `;
-    } else if (tab === "more") {
-      specific = `
-        <div class="inspector-section option-menu-section">
-          <div class="mini-section-heading"><strong>聲音</strong></div>
-          <label class="field"><span>Hover Sound</span><input data-option-path="Hover Sound" value="${escapeHtml(element["Hover Sound"] || "")}"></label>
-          <label class="field"><span>Click Sound</span><input data-option-path="Click Sound" value="${escapeHtml(element["Click Sound"] || "")}"></label>
-        </div>
-      `;
+      `);
     }
   }
-  const optionMode = state.nodeDetail.node["Option Mode"] || "DATA";
-  const custom = tab === "more" ? `
-    <div class="inspector-section option-menu-section option-custom-editor-section">
-      <div class="mini-section-heading"><strong>選項來源</strong></div>
-      <label class="field"><span>模式</span><select id="optionMode">${optionTags(["DATA", "CUSTOM"], optionMode, (value) => value === "DATA" ? "資料化選項" : "自訂 RPY")}</select></label>
-      ${optionMode === "CUSTOM" ? `
-        <label class="field"><span>Custom Screen</span><input id="customOptionScreen" value="${escapeHtml(customOptionScreenName())}" placeholder="scene_option_custom"></label>
-        <textarea class="raw-option-editor" id="optionEditor" spellcheck="false">${escapeHtml(state.nodeDetail.optionSource || "")}</textarea>
-      ` : ""}
-    </div>
-  ` : "";
+
   return `
-    ${optionInspectorTabsHtml()}
-    <div class="option-inspector-pane" role="tabpanel" data-option-inspector-pane="${escapeHtml(tab)}">
-      ${common}${specific}${custom}
-      ${tab === "more" ? `<div class="inspector-danger-zone"><button class="danger-button compact" id="deleteOptionElement" type="button">刪除元件</button></div>` : ""}
+    <div class="editor-page option-editor-page option-editor-${isCanvas ? "canvas" : "form"}">
+      <div class="form-section option-primary-section">${primary}</div>
+      ${sections}
+      ${isCanvas ? "" : `<div class="editor-danger-zone"><button class="danger-button" id="deleteOptionElement" type="button">刪除</button></div>`}
     </div>
   `;
 }
@@ -1918,15 +2333,17 @@ function captureOptionsPanelView() {
   return {
     nodePath: builder.dataset.nodePath || "",
     elementId: builder.dataset.elementId || "",
+    workspaceMode: builder.dataset.workspaceMode || "form",
     inspectorScrollTop: inspector?.scrollTop || 0,
     elementListScrollTop: elementList?.scrollTop || 0,
     canvasScrollTop: canvas?.scrollTop || 0,
     canvasScrollLeft: canvas?.scrollLeft || 0,
+    sectionStates: Object.fromEntries([...builder.querySelectorAll("details.option-collapsible-section")].map((section) => [section.dataset.optionSection, section.open])),
   };
 }
 
 function restoreOptionsPanelView(view) {
-  if (!view || view.nodePath !== state.selectedNodePath) return;
+  if (!view || view.nodePath !== state.selectedNodePath || view.workspaceMode !== state.optionWorkspaceMode) return;
   const builder = dom.optionsPanel.querySelector(".option-builder");
   const elementList = builder?.querySelector(".option-element-sidebar .subnav-list");
   const canvas = builder?.querySelector(".option-canvas-scroll");
@@ -1938,6 +2355,10 @@ function restoreOptionsPanelView(view) {
   if (view.elementId === state.selectedOptionElementId) {
     const inspector = builder?.querySelector(".option-inspector");
     if (inspector) inspector.scrollTop = view.inspectorScrollTop;
+    [...(builder?.querySelectorAll("details.option-collapsible-section") || [])].forEach((section) => {
+      const open = view.sectionStates?.[section.dataset.optionSection];
+      if (open !== undefined) section.open = open;
+    });
   }
 }
 
@@ -1949,47 +2370,44 @@ function renderOptionsPanel() {
   }
   if (!state.optionsDraft) state.optionsDraft = clone(state.nodeDetail.options || defaultOptionsDraft());
   const canvas = state.optionsDraft.Canvas || {};
-  const layoutClasses = [
-    state.optionElementsHidden ? "elements-hidden" : "",
-    state.optionInspectorHidden ? "inspector-hidden" : "",
-  ].filter(Boolean).join(" ");
+  const isFormMode = state.optionWorkspaceMode === "form";
+  const elementSidebar = `
+    <aside class="option-element-sidebar">
+      <div class="option-add-buttons" aria-label="新增選項">
+        <button class="quiet-button compact add-button" type="button" data-add-option-element="TEXTBOX">Text Box</button>
+        <button class="quiet-button compact add-button" type="button" data-add-option-element="PICTURE">Picture</button>
+        <button class="quiet-button compact add-button" type="button" data-add-option-element="HITBOX">Hitbox</button>
+      </div>
+      <div class="subnav-list">${optionElementListHtml()}</div>
+    </aside>
+  `;
+  const divider = `
+    <button class="option-workspace-divider" type="button" role="separator" aria-orientation="vertical" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${isFormMode ? 0 : 100}" aria-label="拖曳切換表單與畫布" title="拖曳切換表單與畫布；也可按 Enter 或方向鍵">
+      <span aria-hidden="true"></span><span aria-hidden="true"></span><span aria-hidden="true"></span>
+    </button>
+  `;
+  const canvasColumn = `
+    <section class="option-canvas-column">
+      <div class="option-builder-toolbar">
+        <div class="option-view-controls" aria-label="畫布設定">
+          <button class="toggle-button ${state.optionGridVisible ? "active" : ""}" id="toggleOptionGrid" type="button" title="顯示或隱藏格線（${shortcutDisplay(state.editorSettings.shortcuts.grid)}）">格線</button>
+          <button class="toggle-button ${state.optionSnapEnabled ? "active" : ""}" id="toggleOptionSnap" type="button" title="開啟或關閉吸附（${shortcutDisplay(state.editorSettings.shortcuts.snap)}）">吸附</button>
+        </div>
+        <label class="field inline-field canvas-path-field"><select data-canvas-path="Preview Background" aria-label="預覽底圖">${canvasBackgroundOptionTags(canvas["Preview Background"] || "")}</select></label>
+        <span class="canvas-size-label">${escapeHtml(canvas.Width || 1920)} × ${escapeHtml(canvas.Height || 1080)}</span>
+      </div>
+      <div class="option-canvas-scroll">${optionStageHtml()}</div>
+    </section>
+  `;
   dom.optionsPanel.innerHTML = `
-    <div class="option-builder ${layoutClasses}" data-node-path="${escapeHtml(state.selectedNodePath || "")}" data-element-id="${escapeHtml(state.selectedOptionElementId || "")}">
-      <aside class="option-element-sidebar">
-        <div class="option-add-buttons">
-          <button class="quiet-button compact add-button" type="button" data-add-option-element="TEXTBOX">Text Box</button>
-          <button class="quiet-button compact add-button" type="button" data-add-option-element="PICTURE">Picture</button>
-          <button class="quiet-button compact add-button" type="button" data-add-option-element="HITBOX">Hitbox</button>
-        </div>
-        <div class="subnav-list">${optionElementListHtml()}</div>
-      </aside>
-      <section class="option-canvas-column">
-        <div class="option-builder-toolbar">
-          <div class="option-view-controls" aria-label="工作區面板">
-            <button class="toggle-button ${state.optionGridVisible ? "active" : ""}" id="toggleOptionGrid" type="button" title="顯示或隱藏格線（${shortcutDisplay(state.editorSettings.shortcuts.grid)}）">格線</button>
-            <button class="toggle-button ${state.optionSnapEnabled ? "active" : ""}" id="toggleOptionSnap" type="button" title="開啟或關閉吸附（${shortcutDisplay(state.editorSettings.shortcuts.snap)}）">吸附</button>
-          </div>
-          <label class="field inline-field canvas-path-field"><input data-canvas-path="Preview Background" aria-label="預覽底圖路徑" list="imageAssets" value="${escapeHtml(canvas["Preview Background"] || "")}" placeholder="images/room.png"></label>
-          <span class="canvas-size-label">${escapeHtml(canvas.Width || 1920)} × ${escapeHtml(canvas.Height || 1080)}</span>
-        </div>
-        <div class="option-canvas-scroll">${optionStageHtml()}</div>
-      </section>
-      <aside class="option-inspector">${optionInspectorHtml()}</aside>
+    <div class="options-workspace">
+      <div class="option-builder option-${escapeHtml(state.optionWorkspaceMode)}-mode" data-workspace-mode="${escapeHtml(state.optionWorkspaceMode)}" data-node-path="${escapeHtml(state.selectedNodePath || "")}" data-element-id="${escapeHtml(state.selectedOptionElementId || "")}">
+        ${isFormMode ? `${elementSidebar}${divider}<section class="option-inspector option-form-column">${optionInspectorHtml()}</section>` : `${canvasColumn}${divider}<aside class="option-inspector option-visual-inspector">${optionInspectorHtml()}</aside>`}
+      </div>
     </div>
   `;
   bindOptionsPanel();
   restoreOptionsPanelView(view);
-}
-
-function optionConditionTarget(scope) {
-  const element = selectedOptionElement();
-  const item = selectedOptionItem();
-  if (!element) return null;
-  if (scope === "element-visible") return element["Visible Conditions"];
-  if (scope === "element-enabled") return element["Enabled Conditions"];
-  if (scope === "item-visible") return item?.["Visible Conditions"];
-  if (scope === "item-enabled") return item?.["Enabled Conditions"];
-  return null;
 }
 
 function refreshOptionStage() {
@@ -2002,7 +2420,8 @@ function refreshOptionStage() {
   updateOptionStageScale();
 }
 
-function updateOptionStageScale() {
+function updateOptionStageScale(force = false) {
+  if (!force && state.optionWorkspaceTransitioning) return;
   const shell = document.querySelector("#optionStageShell");
   const stage = document.querySelector("#optionStage");
   const scroll = document.querySelector(".option-canvas-scroll");
@@ -2018,12 +2437,275 @@ function updateOptionStageScale() {
   stage.style.transform = `scale(${targetWidth / width})`;
 }
 
+function cloneOptionTransitionPanel(source) {
+  const clone = source.cloneNode(true);
+  const sourceNodes = [source, ...source.querySelectorAll("*")];
+  const cloneNodes = [clone, ...clone.querySelectorAll("*")];
+  sourceNodes.forEach((node, index) => {
+    if (node.scrollTop) cloneNodes[index].scrollTop = node.scrollTop;
+    if (node.scrollLeft) cloneNodes[index].scrollLeft = node.scrollLeft;
+  });
+  clone.querySelectorAll("[id]").forEach((node) => node.removeAttribute("id"));
+  clone.querySelectorAll("button, input, select, textarea").forEach((node) => node.setAttribute("tabindex", "-1"));
+  return clone;
+}
+
+function beginOptionWorkspaceTransition(mode, builder = dom.optionsPanel.querySelector(".option-builder")) {
+  if (!['form', 'canvas'].includes(mode) || state.optionWorkspaceMode === mode || state.optionWorkspaceTransitioning || !builder) return null;
+  const currentMode = state.optionWorkspaceMode;
+  const oldSources = [builder.children[0], builder.children[2]];
+  if (oldSources.some((panel) => !panel)) return null;
+  const oldRects = oldSources.map((panel) => panel.getBoundingClientRect());
+  const oldClones = oldSources.map(cloneOptionTransitionPanel);
+
+  state.optionWorkspaceTransitioning = true;
+  state.optionWorkspaceMode = mode;
+  renderOptionsPanel();
+  const nextBuilder = dom.optionsPanel.querySelector(".option-builder");
+  const workspace = nextBuilder?.closest(".options-workspace");
+  const nextSources = nextBuilder ? [nextBuilder.children[0], nextBuilder.children[2]] : [];
+  if (!nextBuilder || !workspace || nextSources.some((panel) => !panel)) {
+    state.optionWorkspaceMode = currentMode;
+    state.optionWorkspaceTransitioning = false;
+    renderOptionsPanel();
+    return null;
+  }
+  updateOptionStageScale(true);
+  const nextRects = nextSources.map((panel) => panel.getBoundingClientRect());
+  const nextClones = nextSources.map(cloneOptionTransitionPanel);
+  const workspaceRect = workspace.getBoundingClientRect();
+  nextBuilder.classList.add("option-transition-base");
+
+  const overlay = document.createElement("div");
+  overlay.className = "option-transition-overlay";
+  overlay.setAttribute("aria-hidden", "true");
+  const masks = oldRects.map((_rect, index) => {
+    const mask = document.createElement("div");
+    mask.className = "option-transition-mask";
+    const oldLayer = document.createElement("div");
+    oldLayer.className = `option-transition-layer option-${currentMode}-mode`;
+    const nextLayer = document.createElement("div");
+    nextLayer.className = `option-transition-layer option-${mode}-mode`;
+    oldLayer.append(oldClones[index]);
+    nextLayer.append(nextClones[index]);
+    mask.append(oldLayer, nextLayer);
+    overlay.append(mask);
+    return { mask, oldLayer, nextLayer, oldPanel: oldClones[index], nextPanel: nextClones[index] };
+  });
+  const handle = document.createElement("div");
+  handle.className = "option-transition-handle";
+  handle.innerHTML = '<span></span><span></span><span></span>';
+  overlay.append(handle);
+  workspace.append(overlay);
+
+  let progress = 0;
+  let finished = false;
+  let animationFrame = 0;
+  const relativeRect = (rect) => ({
+    left: rect.left - workspaceRect.left,
+    top: rect.top - workspaceRect.top,
+    width: rect.width,
+    height: rect.height,
+  });
+  const oldRelative = oldRects.map(relativeRect);
+  const nextRelative = nextRects.map(relativeRect);
+  const interpolate = (start, end, value) => start + (end - start) * value;
+
+  const setProgress = (value) => {
+    progress = Math.max(0, Math.min(1, value));
+    let dividerPosition = 0;
+    masks.forEach((entry, index) => {
+      const oldRect = oldRelative[index];
+      const nextRect = nextRelative[index];
+      const current = {
+        left: interpolate(oldRect.left, nextRect.left, progress),
+        top: interpolate(oldRect.top, nextRect.top, progress),
+        width: interpolate(oldRect.width, nextRect.width, progress),
+        height: interpolate(oldRect.height, nextRect.height, progress),
+      };
+      Object.assign(entry.mask.style, {
+        left: `${current.left}px`,
+        top: `${current.top}px`,
+        width: `${current.width}px`,
+        height: `${current.height}px`,
+      });
+      Object.assign(entry.oldPanel.style, {
+        left: `${oldRect.left - current.left}px`,
+        top: `${oldRect.top - current.top}px`,
+        width: `${oldRect.width}px`,
+        height: `${oldRect.height}px`,
+      });
+      Object.assign(entry.nextPanel.style, {
+        left: `${nextRect.left - current.left}px`,
+        top: `${nextRect.top - current.top}px`,
+        width: `${nextRect.width}px`,
+        height: `${nextRect.height}px`,
+      });
+      entry.oldLayer.style.opacity = String(1 - progress);
+      entry.nextLayer.style.opacity = String(progress);
+      if (index === 0) dividerPosition = current.left + current.width;
+    });
+    Object.assign(handle.style, {
+      left: `${dividerPosition}px`,
+      top: "0px",
+      height: `${workspaceRect.height}px`,
+    });
+  };
+
+  const animateTo = (target, maximumDuration = 380) => new Promise((resolve) => {
+    window.cancelAnimationFrame(animationFrame);
+    const start = progress;
+    const distance = Math.abs(target - start);
+    const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const duration = reducedMotion ? 1 : Math.max(80, maximumDuration * distance);
+    const startedAt = performance.now();
+    const tick = (now) => {
+      const elapsed = Math.min(1, (now - startedAt) / duration);
+      const eased = elapsed < 0.5
+        ? 4 * Math.pow(elapsed, 3)
+        : 1 - Math.pow(-2 * elapsed + 2, 3) / 2;
+      setProgress(interpolate(start, target, eased));
+      if (elapsed < 1 && overlay.isConnected) {
+        animationFrame = window.requestAnimationFrame(tick);
+      } else {
+        resolve();
+      }
+    };
+    animationFrame = window.requestAnimationFrame(tick);
+  });
+
+  const finish = (commit) => {
+    if (finished) return;
+    finished = true;
+    window.cancelAnimationFrame(animationFrame);
+    if (commit) {
+      nextBuilder.classList.add("option-transition-handoff");
+      nextBuilder.classList.remove("option-transition-base");
+      overlay.remove();
+      window.requestAnimationFrame(() => {
+        if (nextBuilder.isConnected) nextBuilder.classList.remove("option-transition-handoff");
+      });
+    } else {
+      overlay.remove();
+      state.optionWorkspaceMode = currentMode;
+      renderOptionsPanel();
+    }
+    state.optionWorkspaceTransitioning = false;
+    updateOptionStageScale();
+  };
+
+  setProgress(0);
+  return {
+    currentMode,
+    targetMode: mode,
+    startDivider: oldRelative[0].left + oldRelative[0].width,
+    targetDivider: nextRelative[0].left + nextRelative[0].width,
+    get progress() { return progress; },
+    setProgress,
+    animateTo,
+    finish,
+  };
+}
+
+function setOptionWorkspaceMode(mode) {
+  const transition = beginOptionWorkspaceTransition(mode);
+  if (!transition) return;
+  transition.animateTo(1).then(() => transition.finish(true));
+}
+
+function bindOptionWorkspaceDivider() {
+  const divider = document.querySelector(".option-workspace-divider");
+  if (!divider) return;
+
+  const switchMode = (mode) => {
+    if (mode === state.optionWorkspaceMode) return;
+    setOptionWorkspaceMode(mode);
+  };
+
+  divider.addEventListener("click", () => {
+    switchMode(state.optionWorkspaceMode === "form" ? "canvas" : "form");
+  });
+
+  divider.addEventListener("keydown", (event) => {
+    if (!["ArrowLeft", "ArrowRight", "Home", "End", "Enter", " "].includes(event.key)) return;
+    event.preventDefault();
+    if (event.key === "ArrowLeft" || event.key === "Home") switchMode("form");
+    else if (event.key === "ArrowRight" || event.key === "End") switchMode("canvas");
+    else switchMode(state.optionWorkspaceMode === "form" ? "canvas" : "form");
+  });
+
+  divider.addEventListener("pointerdown", (event) => {
+    if (event.button !== 0 || window.matchMedia("(max-width: 760px)").matches) return;
+    event.preventDefault();
+    const builder = divider.closest(".option-builder");
+    if (!builder) return;
+    const targetMode = state.optionWorkspaceMode === "form" ? "canvas" : "form";
+    const transition = beginOptionWorkspaceTransition(targetMode, builder);
+    if (!transition) return;
+
+    const startX = event.clientX;
+    const travel = transition.targetDivider - transition.startDivider;
+    let moved = false;
+    let settled = false;
+    let dragFrame = 0;
+    let latestX = startX;
+
+    document.body.classList.add("option-workspace-dragging");
+
+    const updateLatestX = (pointerEvent) => {
+      const coalescedEvents = pointerEvent.getCoalescedEvents?.() || [];
+      const latestEvent = coalescedEvents[coalescedEvents.length - 1] || pointerEvent;
+      latestX = latestEvent.clientX;
+    };
+
+    const renderDragFrame = () => {
+      dragFrame = 0;
+      const distance = latestX - startX;
+      moved = moved || Math.abs(distance) > 4;
+      transition.setProgress(travel ? distance / travel : 0);
+    };
+
+    const onMove = (moveEvent) => {
+      updateLatestX(moveEvent);
+      if (!dragFrame) dragFrame = window.requestAnimationFrame(renderDragFrame);
+    };
+
+    const removeListeners = () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", onCancel);
+      window.cancelAnimationFrame(dragFrame);
+      document.body.classList.remove("option-workspace-dragging");
+    };
+
+    const settle = (commit) => {
+      if (settled) return;
+      settled = true;
+      removeListeners();
+      transition.animateTo(commit ? 1 : 0, 220).then(() => transition.finish(commit));
+    };
+
+    const onUp = (upEvent) => {
+      updateLatestX(upEvent);
+      window.cancelAnimationFrame(dragFrame);
+      renderDragFrame();
+      settle(moved ? transition.progress >= 0.5 : true);
+    };
+
+    const onCancel = () => settle(false);
+
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointercancel", onCancel);
+  });
+}
+
 function addOptionElement(type) {
   const element = defaultOptionElement(type);
   state.optionsDraft.Elements.push(element);
   state.selectedOptionElementId = element.ID;
   state.selectedOptionItemId = element.Items?.[0]?.ID || null;
-  state.optionInspectorTab = "content";
+  state.optionWorkspaceMode = "form";
   markOptionsDirty();
   renderOptionsPanel();
 }
@@ -2089,6 +2771,10 @@ function updateOptionField(control, itemField = false) {
   setNested(target, path, path === "Trigger" ? actionTriggerValue(value) : value);
   if (target.Type === "TEXTBOX") target.Layout.Height = textBoxMetrics(target).height;
   markOptionsDirty();
+  if (path === "Hover.Enabled") {
+    renderOptionsPanel();
+    return;
+  }
   refreshOptionStage();
 }
 
@@ -2107,63 +2793,11 @@ function updateOptionColor(control, itemField = false) {
   refreshOptionStage();
 }
 
-function updateConditionControl(control) {
-  const row = control.closest("[data-option-condition-scope]");
-  if (!row) return;
-  const conditions = optionConditionTarget(row.dataset.optionConditionScope);
-  const condition = conditions?.[Number(row.dataset.index)];
-  if (!condition) return;
-  const part = control.dataset.optionConditionPart;
-  condition[part] = part === "value" ? numberValue(control.value) : control.value;
-  if (part === "type") {
-    if (control.value === "memory") {
-      condition.bank = memoryChoices()[0]?.id || "memory";
-      condition.id = "新標籤";
-      condition.op = "has";
-      delete condition.value;
-    } else {
-      delete condition.bank;
-      condition.id = statChoices()[0]?.id || "";
-      condition.op = ">=";
-      condition.value = 0;
-    }
-    markOptionsDirty();
-    renderOptionsPanel();
-  } else {
-    markOptionsDirty();
-  }
-}
-
 function bindOptionsPanel() {
   document.querySelector("#saveOptionsButton")?.addEventListener("click", saveOptions);
-  document.querySelector("#toggleOptionElementsPanel")?.addEventListener("click", toggleActiveLeftPanel);
-  document.querySelector("#closeOptionElementsPanel")?.addEventListener("click", toggleActiveLeftPanel);
-  document.querySelector("#toggleOptionInspectorPanel")?.addEventListener("click", toggleActiveRightPanel);
-  document.querySelector("#closeOptionInspectorPanel")?.addEventListener("click", toggleActiveRightPanel);
+  bindOptionWorkspaceDivider();
   document.querySelector("#toggleOptionGrid")?.addEventListener("click", toggleOptionGrid);
   document.querySelector("#toggleOptionSnap")?.addEventListener("click", toggleOptionSnap);
-  const inspectorTabs = [...document.querySelectorAll("[data-option-inspector-tab]")];
-  inspectorTabs.forEach((button, index) => {
-    button.addEventListener("click", () => {
-      state.optionInspectorTab = button.dataset.optionInspectorTab;
-      renderOptionsPanel();
-      const inspector = dom.optionsPanel.querySelector(".option-inspector");
-      if (inspector) inspector.scrollTop = 0;
-    });
-    button.addEventListener("keydown", (event) => {
-      if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
-      event.preventDefault();
-      const nextIndex = event.key === "Home"
-        ? 0
-        : event.key === "End"
-          ? inspectorTabs.length - 1
-          : (index + (event.key === "ArrowRight" ? 1 : -1) + inspectorTabs.length) % inspectorTabs.length;
-      const nextTab = inspectorTabs[nextIndex].dataset.optionInspectorTab;
-      state.optionInspectorTab = nextTab;
-      renderOptionsPanel();
-      requestAnimationFrame(() => document.querySelector(`[data-option-inspector-tab="${nextTab}"]`)?.focus());
-    });
-  });
   document.querySelectorAll("[data-add-option-element]").forEach((button) => button.addEventListener("click", () => addOptionElement(button.dataset.addOptionElement)));
   document.querySelectorAll("[data-option-element-select]").forEach((button) => button.addEventListener("click", () => {
     state.selectedOptionElementId = button.dataset.optionElementSelect;
@@ -2179,12 +2813,10 @@ function bindOptionsPanel() {
     if (!item) return;
     item["Style Override"] = event.target.checked ? {
       "Item Background": style["Item Background"] || "#20302a",
-      "Item Hover Background": style["Item Hover Background"] || "#2d8068",
       "Text Color": style["Text Color"] || "#ffffff",
       "Text Size": style["Text Size"] ?? 30,
       "Text Align": style["Text Align"] ?? 0.5,
     } : {};
-    state.optionInspectorTab = "appearance";
     markOptionsDirty();
     renderOptionsPanel();
   });
@@ -2197,22 +2829,6 @@ function bindOptionsPanel() {
     const [index, direction] = button.dataset.moveOptionItem.split(":").map(Number);
     moveOptionItem(index, direction);
   }));
-  document.querySelectorAll("[data-add-option-condition]").forEach((button) => button.addEventListener("click", () => {
-    const conditions = optionConditionTarget(button.dataset.addOptionCondition);
-    if (!conditions) return;
-    conditions.push(defaultStatCondition() || defaultMemoryCondition());
-    state.optionInspectorTab = "rules";
-    markOptionsDirty();
-    renderOptionsPanel();
-  }));
-  document.querySelectorAll("[data-remove-option-condition]").forEach((button) => button.addEventListener("click", () => {
-    const [scope, rawIndex] = button.dataset.removeOptionCondition.split(":");
-    optionConditionTarget(scope)?.splice(Number(rawIndex), 1);
-    state.optionInspectorTab = "rules";
-    markOptionsDirty();
-    renderOptionsPanel();
-  }));
-
   dom.optionsPanel.querySelectorAll("[data-option-path]").forEach((control) => {
     control.addEventListener("input", () => updateOptionField(control));
   });
@@ -2225,39 +2841,15 @@ function bindOptionsPanel() {
   dom.optionsPanel.querySelectorAll("[data-option-item-color-path]").forEach((control) => {
     control.addEventListener("input", () => updateOptionColor(control, true));
   });
-  dom.optionsPanel.querySelectorAll("[data-option-condition-part]").forEach((control) => {
-    control.addEventListener("change", () => updateConditionControl(control));
-    if (["id", "value"].includes(control.dataset.optionConditionPart)) {
-      control.addEventListener("input", () => updateConditionControl(control));
-    }
-  });
   dom.optionsPanel.querySelector("[data-canvas-path]")?.addEventListener("input", (event) => {
     state.optionsDraft.Canvas[event.target.dataset.canvasPath] = event.target.value;
     markOptionsDirty();
     refreshOptionStage();
   });
-  document.querySelector("#optionMode")?.addEventListener("change", (event) => {
-    state.nodeDetail.node["Option Mode"] = event.target.value;
-    if (event.target.value === "DATA") {
-      state.nodeDetail.node["Option Screen"] = "scene_option_renderer";
-    } else if (state.nodeDetail.node["Option Screen"] === "scene_option_renderer") {
-      state.nodeDetail.node["Option Screen"] = customOptionScreenName();
-    }
-    markOptionsDirty();
-    renderOptionsPanel();
-  });
-  document.querySelector("#customOptionScreen")?.addEventListener("input", (event) => {
-    state.nodeDetail.node["Option Screen"] = event.target.value;
-    markOptionsDirty();
-  });
-  document.querySelector("#optionEditor")?.addEventListener("input", (event) => {
-    state.nodeDetail.optionSource = event.target.value;
-    markOptionsDirty();
-  });
   bindOptionStageInteractions();
-  requestAnimationFrame(updateOptionStageScale);
+  requestAnimationFrame(() => updateOptionStageScale());
   if (state.optionResizeObserver) state.optionResizeObserver.disconnect();
-  state.optionResizeObserver = new ResizeObserver(updateOptionStageScale);
+  state.optionResizeObserver = new ResizeObserver(() => updateOptionStageScale());
   const canvas = document.querySelector(".option-canvas-scroll");
   if (canvas) state.optionResizeObserver.observe(canvas);
 }
@@ -2265,6 +2857,7 @@ function bindOptionsPanel() {
 function bindOptionStageInteractions() {
   document.querySelectorAll("#optionStage [data-option-item-select]").forEach((button) => button.addEventListener("pointerdown", (event) => {
     event.stopPropagation();
+    state.selectedOptionElementId = button.closest("[data-option-stage-element]")?.dataset.optionStageElement || state.selectedOptionElementId;
     state.selectedOptionItemId = button.dataset.optionItemSelect;
     renderOptionsPanel();
   }));
@@ -2280,7 +2873,10 @@ function beginOptionPointer(event) {
   state.selectedOptionElementId = element.ID;
   if (element.Type === "TEXTBOX" && !state.selectedOptionItemId) state.selectedOptionItemId = element.Items?.[0]?.ID || null;
   const direction = event.target.dataset.optionResize || (event.target.closest("[data-option-drag-handle]") || element.Type !== "TEXTBOX" ? "move" : null);
-  if (!direction) return;
+  if (!direction) {
+    if (!node.classList.contains("selected")) renderOptionsPanel();
+    return;
+  }
   const shell = document.querySelector("#optionStageShell");
   const scale = shell.clientWidth / Math.max(320, numberValue(state.optionsDraft.Canvas.Width, 1920));
   try {
@@ -2369,14 +2965,9 @@ function toggleOptionSnap() {
 }
 
 function optionsSnapshot() {
-  const mode = state.nodeDetail?.node?.["Option Mode"] || "DATA";
-  const customScreen = state.nodeDetail?.node?.["Option Screen"] || "";
   return {
     node: state.selectedNodePath,
     options: clone(state.optionsDraft),
-    source: state.nodeDetail?.optionSource || "",
-    optionMode: mode,
-    optionScreen: mode === "DATA" ? "scene_option_renderer" : customScreen,
   };
 }
 
@@ -2416,7 +3007,7 @@ async function saveOptions() {
 function fileListHtml(files, selected, dataName) {
   if (!files.length) return `<div class="node-list-empty">尚未建立文件</div>`;
   return files.map((file) => {
-    const symbols = [...(file.labels || []), ...(file.screens || [])];
+    const symbols = file.labels || [];
     return `
       <button class="subnav-item ${file.name === selected ? "active" : ""}" type="button" data-${dataName}="${escapeHtml(file.name)}">
         <span class="subnav-item-copy">
@@ -2452,8 +3043,8 @@ function renderContentPanel() {
     </div>
   `;
   document.querySelectorAll("[data-content-file]").forEach((button) => button.addEventListener("click", () => loadContent(button.dataset.contentFile)));
-  document.querySelector("#newContentButton")?.addEventListener("click", () => openNameDialog("content"));
-  document.querySelector("#emptyNewContentButton")?.addEventListener("click", () => openNameDialog("content"));
+  document.querySelector("#newContentButton")?.addEventListener("click", openNameDialog);
+  document.querySelector("#emptyNewContentButton")?.addEventListener("click", openNameDialog);
   document.querySelector("#saveContentButton")?.addEventListener("click", saveContent);
   document.querySelector("#deleteContentButton")?.addEventListener("click", deleteContent);
   document.querySelector("#contentDisplayName")?.addEventListener("input", scheduleContentAutosave);
@@ -2526,122 +3117,22 @@ async function saveContent() {
 }
 
 async function deleteContent() {
-  if (!await flushAutosave()) return;
   if (!state.selectedContent || !window.confirm(`確定刪除 Content「${state.selectedContent}.rpy」？`)) return;
+  const node = state.selectedNodePath;
+  const name = state.selectedContent;
+  discardPendingAutosave();
+  await autosaveInFlight;
+  discardPendingAutosave();
+  setSaveState("刪除中", "saving");
   try {
-    await api(`/api/content?node=${encodeURIComponent(state.selectedNodePath)}&name=${encodeURIComponent(state.selectedContent)}`, { method: "DELETE" });
+    await api(`/api/content?node=${encodeURIComponent(node)}&name=${encodeURIComponent(name)}`, { method: "DELETE" });
     state.selectedContent = null;
     state.selectedContentDisplayName = "";
     state.contentSource = "";
     await refreshAfterSave();
     toast("Content 已刪除");
   } catch (error) {
-    toast(error.message, "error");
-  }
-}
-
-function renderScreensPanel() {
-  const files = state.screens || [];
-  dom.screensPanel.innerHTML = `
-    <div class="file-workspace ${state.leftPanelHidden.screens ? "left-panel-hidden" : ""}">
-      <aside class="subnav">
-        <div class="subnav-header"><strong>SCENESCREEN</strong><div class="subnav-header-actions"><button class="icon-button add-button" id="newScreenButton" type="button" title="新增 Scene Screen" aria-label="新增 Scene Screen">＋</button></div></div>
-        <div class="subnav-list">${fileListHtml(files, state.selectedScreen, "screen-file")}</div>
-      </aside>
-      <div class="editor-scroll">
-        ${state.selectedScreen ? `
-          <div class="code-toolbar">
-            <label class="field" style="width:min(320px,60%)"><span class="visually-hidden">Scene Screen 名稱</span><input id="screenDisplayName" value="${escapeHtml(state.selectedScreenDisplayName || state.selectedScreen)}"></label>
-          </div>
-          <div class="code-editor-wrap"><textarea class="code-editor" id="screenEditor" spellcheck="false">${escapeHtml(state.screenSource)}</textarea></div>
-          <div class="editor-danger-zone"><button class="danger-button compact" id="deleteScreenButton" type="button">刪除畫面</button></div>
-        ` : `<div class="editor-empty"><div><p>選擇或新增 Scene Screen 文件。</p><button class="primary-button add-button" id="emptyNewScreenButton" type="button">新增 Scene Screen</button></div></div>`}
-      </div>
-    </div>
-  `;
-  document.querySelectorAll("[data-screen-file]").forEach((button) => button.addEventListener("click", () => loadScreen(button.dataset.screenFile)));
-  document.querySelector("#newScreenButton")?.addEventListener("click", () => openNameDialog("screen"));
-  document.querySelector("#emptyNewScreenButton")?.addEventListener("click", () => openNameDialog("screen"));
-  document.querySelector("#saveScreenButton")?.addEventListener("click", saveScreen);
-  document.querySelector("#deleteScreenButton")?.addEventListener("click", deleteScreen);
-  document.querySelector("#screenDisplayName")?.addEventListener("input", scheduleScreenAutosave);
-  document.querySelector("#screenEditor")?.addEventListener("input", scheduleScreenAutosave);
-  syncShortcutTitles();
-}
-
-async function loadScreen(name) {
-  if (name !== state.selectedScreen && !await flushAutosave()) return;
-  try {
-    const data = await api(`/api/screen?name=${encodeURIComponent(name)}`);
-    state.selectedScreen = data.name;
-    state.selectedScreenDisplayName = data.displayName || data.name;
-    state.screenSource = data.source;
-    renderScreensPanel();
-  } catch (error) {
-    toast(error.message, "error");
-  }
-}
-
-function screenSnapshot() {
-  return {
-    originalName: state.selectedScreen,
-    id: state.selectedScreen,
-    displayName: document.querySelector("#screenDisplayName")?.value.trim() || state.selectedScreenDisplayName,
-    source: document.querySelector("#screenEditor")?.value ?? state.screenSource,
-  };
-}
-
-async function persistScreenSnapshot(snapshot) {
-  const saved = await api("/api/screens", { method: "POST", body: snapshot });
-  if (state.selectedScreen !== snapshot.originalName) return saved;
-  state.selectedScreen = saved.name;
-  state.selectedScreenDisplayName = saved.displayName;
-  state.screenSource = snapshot.source;
-  const entry = state.screens.find((file) => file.name === snapshot.originalName);
-  if (entry) {
-    entry.name = saved.name;
-    entry.displayName = saved.displayName;
-  }
-  return saved;
-}
-
-function scheduleScreenAutosave() {
-  if (!state.selectedScreen) return;
-  const snapshot = screenSnapshot();
-  state.selectedScreenDisplayName = snapshot.displayName;
-  state.screenSource = snapshot.source;
-  scheduleAutosave("Scene Screen 未能儲存", () => persistScreenSnapshot(snapshot));
-}
-
-async function saveScreen() {
-  const snapshot = screenSnapshot();
-  discardPendingAutosave();
-  await autosaveInFlight;
-  setSaveState("儲存中", "saving");
-  try {
-    const saved = await persistScreenSnapshot(snapshot);
-    state.selectedScreen = saved.name;
-    state.selectedScreenDisplayName = saved.displayName;
-    await refreshAfterSave();
-    await loadScreen(saved.name);
-    toast("Scene Screen 已儲存");
-  } catch (error) {
-    setSaveState("儲存失敗", "error");
-    toast(error.message, "error");
-  }
-}
-
-async function deleteScreen() {
-  if (!await flushAutosave()) return;
-  if (!state.selectedScreen || !window.confirm(`確定刪除 Scene Screen「${state.selectedScreen}.rpy」？`)) return;
-  try {
-    await api(`/api/screens?name=${encodeURIComponent(state.selectedScreen)}`, { method: "DELETE" });
-    state.selectedScreen = null;
-    state.selectedScreenDisplayName = "";
-    state.screenSource = "";
-    await refreshAfterSave();
-    toast("Scene Screen 已刪除");
-  } catch (error) {
+    setSaveState("刪除失敗", "error");
     toast(error.message, "error");
   }
 }
@@ -2815,6 +3306,295 @@ async function saveStats() {
   }
 }
 
+function graphRelationships(nodes) {
+  const nodeIds = new Set(nodes.map((node) => String(node.id)));
+  const grouped = new Map();
+  for (const edge of state.graph?.edges || []) {
+    const source = String(edge.source || "");
+    const target = String(edge.target || "");
+    if (!nodeIds.has(source) || !nodeIds.has(target)) continue;
+    const key = `${source}\u0000${target}`;
+    if (!grouped.has(key)) grouped.set(key, { source, target, events: [] });
+    grouped.get(key).events.push(edge);
+  }
+  return [...grouped.values()];
+}
+
+function buildGraphLayout(nodes, relationships) {
+  const nodeWidth = 190;
+  const nodeHeight = 72;
+  const horizontalGap = 130;
+  const verticalGap = 46;
+  const nodeById = new Map(nodes.map((node) => [String(node.id), node]));
+  const adjacency = new Map(nodes.map((node) => [String(node.id), []]));
+  const indegree = new Map(nodes.map((node) => [String(node.id), 0]));
+  relationships.forEach((edge) => {
+    adjacency.get(edge.source)?.push(edge.target);
+    indegree.set(edge.target, (indegree.get(edge.target) || 0) + 1);
+  });
+
+  const levels = new Map();
+  const starts = [];
+  if (state.rootNodeId && nodeById.has(String(state.rootNodeId))) starts.push(String(state.rootNodeId));
+  [...nodes]
+    .sort((left, right) => String(left.name || left.id).localeCompare(String(right.name || right.id), "zh-Hant"))
+    .forEach((node) => {
+      const id = String(node.id);
+      if ((indegree.get(id) || 0) === 0 && !starts.includes(id)) starts.push(id);
+    });
+
+  const visitFrom = (start, baseLevel = 0) => {
+    if (!levels.has(start)) levels.set(start, baseLevel);
+    const queue = [start];
+    while (queue.length) {
+      const source = queue.shift();
+      const nextLevel = (levels.get(source) || 0) + 1;
+      for (const target of adjacency.get(source) || []) {
+        if (levels.has(target)) continue;
+        levels.set(target, nextLevel);
+        queue.push(target);
+      }
+    }
+  };
+  starts.forEach((start) => visitFrom(start));
+  nodes.forEach((node) => {
+    const id = String(node.id);
+    if (!levels.has(id)) visitFrom(id);
+  });
+
+  const grouped = new Map();
+  nodes.forEach((node) => {
+    const level = levels.get(String(node.id)) || 0;
+    if (!grouped.has(level)) grouped.set(level, []);
+    grouped.get(level).push(node);
+  });
+  grouped.forEach((items) => items.sort((left, right) => String(left.name || left.id).localeCompare(String(right.name || right.id), "zh-Hant")));
+  const maximumRows = Math.max(1, ...[...grouped.values()].map((items) => items.length));
+  const maximumLevel = Math.max(0, ...grouped.keys());
+  const positions = new Map();
+  grouped.forEach((items, level) => {
+    const offset = (maximumRows - items.length) * (nodeHeight + verticalGap) / 2;
+    items.forEach((node, index) => {
+      positions.set(String(node.id), {
+        x: 70 + level * (nodeWidth + horizontalGap),
+        y: 70 + offset + index * (nodeHeight + verticalGap),
+      });
+    });
+  });
+  return {
+    nodeWidth,
+    nodeHeight,
+    positions,
+    width: Math.max(760, 140 + (maximumLevel + 1) * nodeWidth + maximumLevel * horizontalGap),
+    height: Math.max(480, 140 + maximumRows * nodeHeight + Math.max(0, maximumRows - 1) * verticalGap),
+  };
+}
+
+function graphEdgePath(source, target, layout, index) {
+  const sourceCenterY = source.y + layout.nodeHeight / 2;
+  const targetCenterY = target.y + layout.nodeHeight / 2;
+  if (target.x > source.x) {
+    const startX = source.x + layout.nodeWidth;
+    const endX = target.x;
+    const middleX = (startX + endX) / 2;
+    return `M ${startX} ${sourceCenterY} C ${middleX} ${sourceCenterY}, ${middleX} ${targetCenterY}, ${endX} ${targetCenterY}`;
+  }
+  const lift = 58 + (index % 4) * 24;
+  const startX = source.x + layout.nodeWidth * 0.7;
+  const endX = target.x + layout.nodeWidth * 0.3;
+  return `M ${startX} ${source.y} C ${startX + 70} ${source.y - lift}, ${endX - 70} ${target.y - lift}, ${endX} ${target.y}`;
+}
+
+function graphViewBoxValue() {
+  const view = state.graphViewBox;
+  return view ? `${view.x} ${view.y} ${view.width} ${view.height}` : "0 0 760 480";
+}
+
+function applyGraphViewBox() {
+  const svg = dom.graphPanel.querySelector("#projectGraphSvg");
+  if (svg && state.graphViewBox) svg.setAttribute("viewBox", graphViewBoxValue());
+}
+
+function resetGraphView() {
+  const svg = dom.graphPanel.querySelector("#projectGraphSvg");
+  if (!svg) return;
+  state.graphViewBox = {
+    x: 0,
+    y: 0,
+    width: Number(svg.dataset.graphWidth) || 760,
+    height: Number(svg.dataset.graphHeight) || 480,
+  };
+  applyGraphViewBox();
+}
+
+function updateGraphSearch() {
+  const query = state.graphSearch.trim().toLocaleLowerCase();
+  dom.graphPanel.querySelectorAll(".graph-node").forEach((node) => {
+    const matches = !query || (node.dataset.searchText || "").includes(query);
+    node.classList.toggle("is-dimmed", !matches);
+    node.classList.toggle("is-search-match", Boolean(query && matches));
+  });
+}
+
+function bindGraphPanel() {
+  const svg = dom.graphPanel.querySelector("#projectGraphSvg");
+  const canvas = dom.graphPanel.querySelector(".graph-canvas");
+  const search = dom.graphPanel.querySelector("#graphSearch");
+  dom.graphPanel.querySelector("#resetGraphView")?.addEventListener("click", resetGraphView);
+  search?.addEventListener("input", (event) => {
+    state.graphSearch = event.target.value;
+    updateGraphSearch();
+  });
+  dom.graphPanel.querySelectorAll(".graph-node").forEach((node) => {
+    const openNode = () => selectNode(node.dataset.nodePath, { preserveTab: true });
+    node.addEventListener("click", openNode);
+    node.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter" && event.key !== " ") return;
+      event.preventDefault();
+      openNode();
+    });
+  });
+  if (!svg || !canvas) return;
+  let pendingWheelDelta = 0;
+  let pendingWheelPoint = null;
+  let wheelFrame = null;
+  const applyWheelZoom = () => {
+    wheelFrame = null;
+    const point = pendingWheelPoint;
+    const rawDelta = Math.max(-55, Math.min(55, pendingWheelDelta));
+    pendingWheelDelta = 0;
+    pendingWheelPoint = null;
+    if (!point || Math.abs(rawDelta) < 0.01) return;
+
+    const rect = svg.getBoundingClientRect();
+    if (!rect.width || !rect.height) return;
+    const view = state.graphViewBox || { x: 0, y: 0, width: 760, height: 480 };
+    const pointerX = view.x + (point.x - rect.left) / rect.width * view.width;
+    const pointerY = view.y + (point.y - rect.top) / rect.height * view.height;
+    // MacBook 觸控板通常送出大量小數或 1px 左右的 WheelEvent。
+    // 為最小位移保留可見的縮放量，再限制單一畫面更新的最大幅度。
+    const visibleDelta = Math.sign(rawDelta) * Math.max(1.5, Math.abs(rawDelta));
+    const requestedFactor = Math.exp(visibleDelta * 0.008);
+    const width = Math.max(320, Math.min(5000, view.width * requestedFactor));
+    const factor = width / view.width;
+    const height = view.height * factor;
+    const ratioX = (pointerX - view.x) / view.width;
+    const ratioY = (pointerY - view.y) / view.height;
+    state.graphViewBox = {
+      x: pointerX - ratioX * width,
+      y: pointerY - ratioY * height,
+      width,
+      height,
+    };
+    applyGraphViewBox();
+  };
+  canvas.addEventListener("wheel", (event) => {
+    if (event.target.closest(".graph-search, .graph-reset-button")) return;
+    event.preventDefault();
+    if (!event.deltaY) return;
+    const deltaScale = event.deltaMode === WheelEvent.DOM_DELTA_LINE ? 16
+      : event.deltaMode === WheelEvent.DOM_DELTA_PAGE ? svg.getBoundingClientRect().height
+        : 1;
+    pendingWheelDelta += event.deltaY * deltaScale;
+    pendingWheelPoint = { x: event.clientX, y: event.clientY };
+    if (wheelFrame === null) wheelFrame = window.requestAnimationFrame(applyWheelZoom);
+  }, { passive: false });
+
+  let drag = null;
+  svg.addEventListener("pointerdown", (event) => {
+    if (event.target.closest(".graph-node")) return;
+    event.preventDefault();
+    drag = { x: event.clientX, y: event.clientY, view: { ...state.graphViewBox } };
+    svg.classList.add("is-panning");
+    svg.setPointerCapture(event.pointerId);
+  });
+  svg.addEventListener("pointermove", (event) => {
+    if (!drag) return;
+    const rect = svg.getBoundingClientRect();
+    state.graphViewBox = {
+      ...drag.view,
+      x: drag.view.x - (event.clientX - drag.x) / rect.width * drag.view.width,
+      y: drag.view.y - (event.clientY - drag.y) / rect.height * drag.view.height,
+    };
+    applyGraphViewBox();
+  });
+  const stopPanning = (event) => {
+    if (!drag) return;
+    drag = null;
+    svg.classList.remove("is-panning");
+    if (svg.hasPointerCapture(event.pointerId)) svg.releasePointerCapture(event.pointerId);
+  };
+  svg.addEventListener("pointerup", stopPanning);
+  svg.addEventListener("pointercancel", stopPanning);
+  updateGraphSearch();
+}
+
+function renderGraphPanel() {
+  const nodes = state.nodes || [];
+  const relationships = graphRelationships(nodes);
+  const signature = JSON.stringify({
+    nodes: nodes.map((node) => [node.id, node.path, node.name]),
+    edges: relationships.map((edge) => [edge.source, edge.target, edge.events.length]),
+  });
+  const layout = buildGraphLayout(nodes, relationships);
+  if (signature !== state.graphLayoutSignature) {
+    state.graphLayoutSignature = signature;
+    state.graphViewBox = { x: 0, y: 0, width: layout.width, height: layout.height };
+  }
+  if (!nodes.length) {
+    dom.graphPanel.innerHTML = '<div class="panel-page wide"><div class="success-state">建立 Scene Node 後，關聯圖會顯示 GOTO 關係。</div></div>';
+    return;
+  }
+  const edgesHtml = relationships.map((relationship, index) => {
+    const source = layout.positions.get(relationship.source);
+    const target = layout.positions.get(relationship.target);
+    if (!source || !target) return "";
+    const descriptions = relationship.events.map((event) => `${event.eventName} · ${event.trigger || "Auto"}${event.weight === 1 ? "" : ` · Weight ${event.weight}`}`);
+    const selected = relationship.source === String(state.nodeDetail?.node?.ID || "") || relationship.target === String(state.nodeDetail?.node?.ID || "");
+    return `
+      <g class="graph-edge ${selected ? "is-related" : ""}">
+        <path d="${graphEdgePath(source, target, layout, index)}" marker-end="url(#graphArrow)"><title>${escapeHtml(descriptions.join("\n"))}</title></path>
+        ${relationship.events.length > 1 ? `<text x="${(source.x + target.x + layout.nodeWidth) / 2}" y="${(source.y + target.y + layout.nodeHeight) / 2 - 8}">×${relationship.events.length}</text>` : ""}
+      </g>
+    `;
+  }).join("");
+  const nodesHtml = nodes.map((node) => {
+    const position = layout.positions.get(String(node.id));
+    const selected = node.path === state.selectedNodePath;
+    const root = String(node.id) === String(state.rootNodeId || "");
+    const name = String(node.name || node.id);
+    const shortName = name.length > 20 ? `${name.slice(0, 19)}…` : name;
+    const shortId = String(node.id).length > 24 ? `${String(node.id).slice(0, 23)}…` : String(node.id);
+    const searchText = `${name} ${node.id} ${node.path}`.toLocaleLowerCase();
+    return `
+      <g class="graph-node ${selected ? "is-selected" : ""} ${root ? "is-root" : ""}" transform="translate(${position.x} ${position.y})" role="button" tabindex="0" data-node-path="${escapeHtml(node.path)}" data-search-text="${escapeHtml(searchText)}" aria-label="開啟節點 ${escapeHtml(name)}">
+        <rect width="${layout.nodeWidth}" height="${layout.nodeHeight}" rx="17"></rect>
+        <circle cx="22" cy="24" r="6"></circle>
+        <text class="graph-node-name" x="38" y="29">${escapeHtml(shortName)}</text>
+        <text class="graph-node-id" x="22" y="53">${escapeHtml(shortId)}</text>
+        ${root ? `<text class="graph-root-label" x="${layout.nodeWidth - 12}" y="17" text-anchor="end">ROOT</text>` : ""}
+        <title>${escapeHtml(name)}\n${escapeHtml(node.path)}</title>
+      </g>
+    `;
+  }).join("");
+  dom.graphPanel.innerHTML = `
+    <div class="graph-workspace">
+      <div class="graph-canvas">
+        <label class="search-field graph-search"><span class="visually-hidden">搜尋關聯圖節點</span><input id="graphSearch" type="search" value="${escapeHtml(state.graphSearch)}" placeholder="搜尋節點"></label>
+        <button class="graph-reset-button" id="resetGraphView" type="button" title="重新置中" aria-label="重新置中">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"></circle><path d="M12 3v3M12 18v3M3 12h3M18 12h3"></path></svg>
+        </button>
+        <svg id="projectGraphSvg" role="img" aria-label="Scene Node GOTO 有向關聯圖" viewBox="${graphViewBoxValue()}" data-graph-width="${layout.width}" data-graph-height="${layout.height}">
+          <defs><marker id="graphArrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z"></path></marker></defs>
+          <g class="graph-edges">${edgesHtml}</g>
+          <g class="graph-nodes">${nodesHtml}</g>
+        </svg>
+      </div>
+    </div>
+  `;
+  bindGraphPanel();
+}
+
 function renderValidationPanel() {
   const errors = state.issues.filter((issue) => issue.level === "error").length;
   const warnings = state.issues.filter((issue) => issue.level !== "error").length;
@@ -2854,8 +3634,10 @@ async function runValidation() {
 async function refreshAfterSave() {
   const selectedPath = state.selectedNodePath;
   const project = await api("/api/project");
+  state.rootNodeId = project.rootNodeId || null;
   state.nodes = project.nodes || [];
-  state.screens = project.screens || [];
+  state.graph = project.graph || { edges: [] };
+  state.screenNames = project.screenNames || [];
   state.images = project.images || [];
   state.stats = project.stats || {};
   state.statsDraft = clone(state.stats);
@@ -2876,42 +3658,30 @@ async function refreshAfterSave() {
   renderAll();
 }
 
-function openNameDialog(kind) {
-  state.nameDialogKind = kind;
-  const isContent = kind === "content";
-  dom.nameDialogKicker.textContent = isContent ? "CONTENT" : "SCENESCREEN";
-  dom.nameDialogTitle.textContent = isContent ? "新增 Content" : "新增 Scene Screen";
-  dom.nameDialogLabel.textContent = isContent ? "檔名與 Label" : "檔名與 Screen 名稱";
+function openNameDialog() {
   dom.nameDialogInput.value = "";
-  dom.nameDialogInput.placeholder = isContent ? "buyWaterNormal" : "basicScene";
   dom.nameDialog.showModal();
   window.setTimeout(() => dom.nameDialogInput.focus(), 0);
 }
 
 async function createNamedFile(name) {
-  if (state.nameDialogKind === "content") {
-    const id = generateId("content");
-    const source = `label ${id}:\n    \"在這裡撰寫演出。\"\n    return\n`;
-    await api("/api/content", { method: "POST", body: { node: state.selectedNodePath, id, displayName: name, source } });
-    state.selectedContent = id;
-    state.selectedContentDisplayName = name;
-    await refreshAfterSave();
-    await loadContent(id);
-    switchTab("content");
-  } else {
-    const id = generateId("screen");
-    const source = `screen ${id}():\n    text \"\"\n`;
-    await api("/api/screens", { method: "POST", body: { id, displayName: name, source } });
-    state.selectedScreen = id;
-    state.selectedScreenDisplayName = name;
-    await refreshAfterSave();
-    await loadScreen(id);
-    switchTab("screens");
-  }
+  const id = generateId("content");
+  const source = `label ${id}:\n    \"在這裡撰寫演出。\"\n    return\n`;
+  await api("/api/content", { method: "POST", body: { node: state.selectedNodePath, id, displayName: name, source } });
+  state.selectedContent = id;
+  state.selectedContentDisplayName = name;
+  await refreshAfterSave();
+  await loadContent(id);
+  switchTab("content");
 }
 
 function openNodeDialog() {
   dom.nodeDialogForm.reset();
+  const background = dom.nodeDialogForm.elements.background;
+  if (background) {
+    background.innerHTML = nodeBackgroundOptionTags("");
+    syncSelectPicker(background);
+  }
   updateDatalists();
   dom.nodeDialog.showModal();
   window.setTimeout(() => dom.nodeDialogForm.elements.name.focus(), 0);
@@ -3032,6 +3802,7 @@ function renderShortcutSettings() {
 function openSettings() {
   dom.autosaveEnabled.checked = state.editorSettings.autosave;
   dom.autosaveDelay.value = String(state.editorSettings.autosaveDelay);
+  syncSelectPicker(dom.autosaveDelay);
   dom.gridSize.value = state.editorSettings.gridSize;
   renderShortcutSettings();
   if (!dom.settingsDialog.open) dom.settingsDialog.showModal();
@@ -3054,15 +3825,19 @@ function syncShortcutTitles() {
     ["#emptyNewEventButton", "新增 Event"],
     ["#newContentButton", "新增 Content"],
     ["#emptyNewContentButton", "新增 Content"],
-    ["#newScreenButton", "新增 Scene Screen"],
-    ["#emptyNewScreenButton", "新增 Scene Screen"],
   ].forEach(([selector, label]) => {
     const button = document.querySelector(selector);
     if (button) button.title = `${label}（${createShortcut}）`;
   });
+  const optionDivider = document.querySelector(".option-workspace-divider");
+  if (optionDivider) optionDivider.title = `拖曳或按鍵切換表單與畫布（${shortcutDisplay(state.editorSettings.shortcuts.sections)}）`;
 }
 
 function toggleActiveSections() {
+  if (state.activeTab === "options") {
+    setOptionWorkspaceMode(state.optionWorkspaceMode === "form" ? "canvas" : "form");
+    return;
+  }
   const panel = document.querySelector(`.tab-panel[data-panel="${state.activeTab}"]`);
   const sections = [...(panel?.querySelectorAll("details") || [])];
   if (!sections.length) return;
@@ -3076,7 +3851,6 @@ function saveActiveEditor() {
   if (active === "events") document.querySelector("#eventForm")?.requestSubmit();
   if (active === "options") saveOptions();
   if (active === "content" && state.selectedContent) saveContent();
-  if (active === "screens" && state.selectedScreen) saveScreen();
   if (active === "stats") saveStats();
 }
 
@@ -3086,19 +3860,9 @@ function cycleActiveTab(direction) {
   requestTabSwitch(TAB_ORDER[nextIndex]);
 }
 
-function syncOptionPanelVisibility() {
-  const builder = document.querySelector(".option-builder");
-  if (!builder) return false;
-  builder.classList.toggle("elements-hidden", state.optionElementsHidden);
-  builder.classList.toggle("inspector-hidden", state.optionInspectorHidden);
-  return true;
-}
-
 function toggleActiveLeftPanel() {
   if (state.activeTab === "options") {
-    state.optionElementsHidden = !state.optionElementsHidden;
-    if (narrowOptionsMedia.matches && !state.optionElementsHidden) state.optionInspectorHidden = true;
-    syncOptionPanelVisibility();
+    setOptionWorkspaceMode("form");
     return true;
   }
   if (!Object.hasOwn(state.leftPanelHidden, state.activeTab)) return false;
@@ -3112,9 +3876,7 @@ function toggleActiveLeftPanel() {
 
 function toggleActiveRightPanel() {
   if (state.activeTab !== "options") return false;
-  state.optionInspectorHidden = !state.optionInspectorHidden;
-  if (narrowOptionsMedia.matches && !state.optionInspectorHidden) state.optionElementsHidden = true;
-  syncOptionPanelVisibility();
+  setOptionWorkspaceMode("canvas");
   return true;
 }
 
@@ -3133,11 +3895,9 @@ function createInActiveTab() {
       toast("請先建立或選擇節點", "error");
       return true;
     }
-    openNameDialog("content");
-  } else if (state.activeTab === "screens") {
-    openNameDialog("screen");
+    openNameDialog();
   } else if (state.activeTab === "options") {
-    toast("選項具有多種元件類型，請使用左側新增按鈕");
+    toast("選項具有多種元件類型，請在表單模式使用左側新增按鈕");
   } else if (state.activeTab === "stats") {
     toast("狀態具有 Stats 與 Memory，請使用各區新增按鈕");
   } else {
@@ -3157,11 +3917,7 @@ function runShortcut(action) {
   else if (action === "sections") toggleActiveSections();
   else if (action === "leftPanel") return toggleActiveLeftPanel();
   else if (action === "rightPanel") return toggleActiveRightPanel();
-  else if (state.activeTab === "options" && action === "optionElements") {
-    toggleActiveLeftPanel();
-  } else if (state.activeTab === "options" && action === "optionInspector") {
-    toggleActiveRightPanel();
-  } else if (state.activeTab === "options" && action === "grid") toggleOptionGrid();
+  else if (state.activeTab === "options" && action === "grid") toggleOptionGrid();
   else if (state.activeTab === "options" && action === "snap") toggleOptionSnap();
   else return false;
   return true;
@@ -3214,11 +3970,6 @@ function handleSidebarNodeNavigation(event) {
 }
 
 function bindGlobalEvents() {
-  narrowOptionsMedia.addEventListener?.("change", (event) => {
-    state.optionElementsHidden = event.matches;
-    state.optionInspectorHidden = event.matches;
-    if (state.activeTab === "options") syncOptionPanelVisibility();
-  });
   document.querySelector("#newNodeButton").addEventListener("click", openNodeDialog);
   document.querySelector("#emptyNewNodeButton").addEventListener("click", openNodeDialog);
   document.querySelector("#refreshProject").addEventListener("click", async () => { if (await flushAutosave()) await loadProject(); });
@@ -3230,10 +3981,18 @@ function bindGlobalEvents() {
     if (button) selectNode(button.dataset.nodePath);
   });
   document.querySelectorAll(".tab").forEach((button) => button.addEventListener("click", () => requestTabSwitch(button.dataset.tab)));
+  document.addEventListener("click", (event) => {
+    if (!event.target.closest(".content-choice-picker")) closeContentPickers();
+    if (!event.target.closest(".select-choice-picker")) closeSelectPickers();
+  });
   document.querySelector("#openSidebar").addEventListener("click", toggleSidebar);
   document.querySelector("#closeSidebar")?.addEventListener("click", closeSidebar);
   document.querySelector("#sidebarScrim").addEventListener("click", closeSidebar);
-  window.addEventListener("resize", () => syncTabFocusIndicator({ immediate: true }));
+  window.addEventListener("resize", () => {
+    closeSelectPickers();
+    syncTabFocusIndicator({ immediate: true });
+  });
+  window.addEventListener("scroll", () => closeSelectPickers(), true);
   document.querySelectorAll("[data-close-dialog]").forEach((button) => button.addEventListener("click", () => {
     document.querySelector(`#${button.dataset.closeDialog}`)?.close();
   }));
@@ -3289,7 +4048,6 @@ function bindGlobalEvents() {
       const end = editor.selectionEnd;
       editor.setRangeText("    ", start, end, "end");
       if (state.activeTab === "content") scheduleContentAutosave();
-      if (state.activeTab === "screens") scheduleScreenAutosave();
       return;
     }
     const shortcut = shortcutFromEvent(event);
@@ -3303,6 +4061,14 @@ function bindGlobalEvents() {
   }, true);
 
   window.addEventListener("beforeunload", (event) => {
+    const settingsBody = JSON.stringify(state.editorSettings);
+    localStorage.setItem(SETTINGS_KEY, settingsBody);
+    fetch("/api/editor-settings", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: settingsBody,
+      keepalive: true,
+    }).catch(() => {});
     if (!pendingAutosave && !failedAutosave && autosaveQueuedCount === 0) return;
     event.preventDefault();
     event.returnValue = "";
@@ -3315,10 +4081,13 @@ function bindGlobalEvents() {
 }
 
 async function init() {
-  writeEditorSettings();
+  await loadEditorSettings();
+  await writeEditorSettings({ notifyFailure: false });
   syncSidebarLayout();
   syncShortcutTitles();
   bindGlobalEvents();
+  enhanceSelects(document);
+  observeSelects();
   await loadProject();
 }
 

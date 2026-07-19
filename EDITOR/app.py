@@ -29,15 +29,20 @@ PROJECT_ROOT = EDITOR_ROOT.parent
 
 DATA_DIR = "DATA"
 NODE_DIR = "SCENENODE"
-SCREEN_DIR = "SCENESCREEN"
 EVENT_DIR = "EVENTPOOL"
 CONTENT_DIR = "CONTENT"
 OPTIONS_FILE = "Options.json"
+EDITOR_SETTINGS_FILE = "settings.json"
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".avif"}
 
 LABEL_RE = re.compile(r"^\s*label\s+([A-Za-z_][A-Za-z0-9_.]*)\s*:", re.MULTILINE)
 SCREEN_RE = re.compile(r"^\s*screen\s+([A-Za-z_][A-Za-z0-9_]*)\s*(?:\([^)]*\))?\s*:", re.MULTILINE)
 DISPLAY_NAME_RE = re.compile(r"^\s*#\s*@display_name:\s*(.+?)\s*$", re.MULTILINE)
+KEYBOARD_KEYSYM_RE = re.compile(
+    r"^(?:(?:alt|meta|ctrl|osctrl|anymod|shift|noshift|caps|nocaps|num|nonum|repeat|anyrepeat|keydown|keyup)_)*"
+    r"(?:K_[A-Za-z0-9_]+|KP_[A-Za-z0-9_]+|[^\s])$"
+)
+MOUSE_TRIGGER_VALUES = {"Left", "Middle", "Right", "WheelUp", "WheelDown"}
 
 
 class ApiError(Exception):
@@ -48,7 +53,7 @@ class ApiError(Exception):
 
 
 def ensure_project_structure():
-    for name in (DATA_DIR, NODE_DIR, SCREEN_DIR):
+    for name in (DATA_DIR, NODE_DIR):
         (PROJECT_ROOT / name).mkdir(parents=True, exist_ok=True)
 
     stats_path = PROJECT_ROOT / DATA_DIR / "Stats.json"
@@ -124,6 +129,21 @@ def memories_path():
     return PROJECT_ROOT / MEMORIES_RELATIVE
 
 
+def editor_settings_path():
+    return PROJECT_ROOT.parent / ".scene-node-editor" / EDITOR_SETTINGS_FILE
+
+
+def validate_editor_settings(value):
+    if value is None:
+        return {}
+    if not isinstance(value, dict):
+        raise ApiError(HTTPStatus.BAD_REQUEST, "Editor 設定必須是 object。")
+    shortcuts = value.get("shortcuts")
+    if shortcuts is not None and not isinstance(shortcuts, dict):
+        raise ApiError(HTTPStatus.BAD_REQUEST, "快捷鍵設定必須是 object。")
+    return value
+
+
 def scene_project_path():
     return PROJECT_ROOT / PROJECT_CONFIG_RELATIVE
 
@@ -170,14 +190,6 @@ def number_setting(value, fallback, field, minimum=None, maximum=None, integer=F
     if integer:
         return int(result)
     return int(result) if result.is_integer() else result
-
-
-def validate_option_conditions(value, field):
-    if value is None:
-        return []
-    if not isinstance(value, list) or not all(isinstance(item, dict) for item in value):
-        raise ApiError(HTTPStatus.BAD_REQUEST, f"{field} 必須是 object 陣列。")
-    return [validate_condition(item, field) for item in value]
 
 
 def validate_condition(condition, field="Condition"):
@@ -266,11 +278,7 @@ def validate_option_style_override(value):
     result = {}
     color_fields = (
         "Item Background",
-        "Item Hover Background",
-        "Item Disabled Background",
         "Text Color",
-        "Text Hover Color",
-        "Text Disabled Color",
     )
     for field in color_fields:
         if field in value:
@@ -294,10 +302,6 @@ def validate_option_item(item):
         "Name": str(item.get("Name") or item.get("Text") or item_id),
         "Text": str(item.get("Text") or item.get("Name") or item_id),
         "Trigger": trigger,
-        "Visible Conditions": validate_option_conditions(item.get("Visible Conditions"), "Visible Conditions"),
-        "Enabled Conditions": validate_option_conditions(item.get("Enabled Conditions"), "Enabled Conditions"),
-        "Tooltip": str(item.get("Tooltip") or ""),
-        "Icon": clean_asset_path(item.get("Icon")),
         "Style Override": validate_option_style_override(item.get("Style Override")),
     }
 
@@ -324,39 +328,29 @@ def validate_option_element(element):
         "Name": str(element.get("Name") or element_id),
         "Type": element_type,
         "Layout": layout,
-        "Visible Conditions": validate_option_conditions(element.get("Visible Conditions"), "Visible Conditions"),
-        "Enabled Conditions": validate_option_conditions(element.get("Enabled Conditions"), "Enabled Conditions"),
     }
+    raw_hover = element.get("Hover") if isinstance(element.get("Hover"), dict) else {}
+    result["Hover"] = {
+        "Enabled": bool(raw_hover.get("Enabled", True)),
+        "Color": str(raw_hover.get("Color") or "#ffffff18"),
+    }
+    result["Hover Sound"] = clean_asset_path(element.get("Hover Sound"))
+    result["Click Sound"] = clean_asset_path(element.get("Click Sound"))
 
     if element_type == "TEXTBOX":
         raw_list = element.get("List") if isinstance(element.get("List"), dict) else {}
-        scrollbar = str(raw_list.get("Scrollbar") or "AUTO").upper()
-        if scrollbar not in ("AUTO", "HIDDEN", "ALWAYS"):
-            raise ApiError(HTTPStatus.BAD_REQUEST, "Scrollbar 必須是 AUTO、HIDDEN 或 ALWAYS。")
-        remember_scroll = str(raw_list.get("Remember Scroll") or "RESET").upper()
-        if remember_scroll not in ("RESET", "NODE"):
-            raise ApiError(HTTPStatus.BAD_REQUEST, "Remember Scroll 必須是 RESET 或 NODE。")
         result["List"] = {
             "Max Visible Items": number_setting(raw_list.get("Max Visible Items", 4), 4, "Max Visible Items", minimum=1, maximum=20, integer=True),
             "Item Height": number_setting(raw_list.get("Item Height", 72), 72, "Item Height", minimum=24, maximum=300, integer=True),
             "Item Spacing": number_setting(raw_list.get("Item Spacing", 12), 12, "Item Spacing", minimum=0, maximum=100, integer=True),
             "Padding": number_setting(raw_list.get("Padding", 16), 16, "Padding", minimum=0, maximum=200, integer=True),
-            "Scrollbar": scrollbar,
-            "Scrollbar Width": number_setting(raw_list.get("Scrollbar Width", 18), 18, "Scrollbar Width", minimum=4, maximum=80, integer=True),
-            "Scrollbar Side": "LEFT" if str(raw_list.get("Scrollbar Side")).upper() == "LEFT" else "RIGHT",
-            "Mousewheel": bool(raw_list.get("Mousewheel", True)),
-            "Draggable": bool(raw_list.get("Draggable", True)),
-            "Remember Scroll": remember_scroll,
+            "Show Scrollbar": bool(raw_list.get("Show Scrollbar", True)),
         }
         raw_style = element.get("Style") if isinstance(element.get("Style"), dict) else {}
         result["Style"] = {
             "Background": str(raw_style.get("Background") or "#0b1118"),
             "Item Background": str(raw_style.get("Item Background") or "#20302a"),
-            "Item Hover Background": str(raw_style.get("Item Hover Background") or "#2d8068"),
-            "Item Disabled Background": str(raw_style.get("Item Disabled Background") or "#29312e"),
             "Text Color": str(raw_style.get("Text Color") or "#ffffff"),
-            "Text Hover Color": str(raw_style.get("Text Hover Color") or "#ffffff"),
-            "Text Disabled Color": str(raw_style.get("Text Disabled Color") or "#8b948f"),
             "Text Size": number_setting(raw_style.get("Text Size", 30), 30, "Text Size", minimum=8, maximum=160, integer=True),
             "Text Align": number_setting(raw_style.get("Text Align", 0.5), 0.5, "Text Align", minimum=0, maximum=1),
         }
@@ -373,35 +367,24 @@ def validate_option_element(element):
         result["Trigger"] = str(element.get("Trigger") or "").strip()
         if not result["Trigger"]:
             raise ApiError(HTTPStatus.BAD_REQUEST, f"Picture {element_id} 的 Trigger 不可為空。")
-        result["Tooltip"] = str(element.get("Tooltip") or "")
         result["Picture"] = {
             "Idle": clean_asset_path(raw_picture.get("Idle")),
             "Hover": clean_asset_path(raw_picture.get("Hover")),
-            "Pressed": clean_asset_path(raw_picture.get("Pressed")),
-            "Disabled": clean_asset_path(raw_picture.get("Disabled")),
             "Fit": fit,
             "Keep Aspect": bool(raw_picture.get("Keep Aspect", True)),
             "Alpha Hit Test": bool(raw_picture.get("Alpha Hit Test", False)),
             "Opacity": number_setting(raw_picture.get("Opacity", 1), 1, "Opacity", minimum=0, maximum=1),
             "Tint": str(raw_picture.get("Tint") or "#ffffff"),
-            "Hover Scale": number_setting(raw_picture.get("Hover Scale", 1), 1, "Hover Scale", minimum=0.1, maximum=5),
         }
-        result["Hover Sound"] = clean_asset_path(element.get("Hover Sound"))
-        result["Click Sound"] = clean_asset_path(element.get("Click Sound"))
     else:
         raw_hitbox = element.get("Hitbox") if isinstance(element.get("Hitbox"), dict) else {}
         result["Trigger"] = str(element.get("Trigger") or "").strip()
         if not result["Trigger"]:
             raise ApiError(HTTPStatus.BAD_REQUEST, f"Hitbox {element_id} 的 Trigger 不可為空。")
-        result["Tooltip"] = str(element.get("Tooltip") or "")
         result["Hitbox"] = {
             "Editor Color": str(raw_hitbox.get("Editor Color") or "#28a47d"),
             "Editor Opacity": number_setting(raw_hitbox.get("Editor Opacity", 0.24), 0.24, "Editor Opacity", minimum=0, maximum=1),
-            "Hover Image": clean_asset_path(raw_hitbox.get("Hover Image")),
-            "Cursor": str(raw_hitbox.get("Cursor") or "pointer"),
         }
-        result["Hover Sound"] = clean_asset_path(element.get("Hover Sound"))
-        result["Click Sound"] = clean_asset_path(element.get("Click Sound"))
     return result
 
 
@@ -492,7 +475,51 @@ def scan_nodes():
     return sorted(nodes, key=lambda item: (item["path"].casefold(), item["id"].casefold()))
 
 
-def scan_rpy_files(root):
+def project_graph():
+    edges = []
+    for node in scan_nodes():
+        event_root = node_path(node["path"]) / EVENT_DIR
+        if not event_root.exists():
+            continue
+        for path in sorted(event_root.glob("*.json"), key=lambda value: value.name.casefold()):
+            try:
+                event = read_json(path, {}) or {}
+            except ApiError:
+                continue
+            if event.get("End up") != "GOTO":
+                continue
+            target = event.get("Next Node")
+            if isinstance(target, str):
+                targets = [(target, 1)]
+            elif isinstance(target, dict):
+                targets = list(target.items())
+            else:
+                targets = []
+            for target_id, weight in targets:
+                target_id = str(target_id or "").strip()
+                if not target_id:
+                    continue
+                edges.append({
+                    "source": str(node["id"]),
+                    "target": target_id,
+                    "eventId": str(event.get("ID") or path.stem),
+                    "eventName": str(event.get("Name") or event.get("ID") or path.stem),
+                    "trigger": str(event.get("Trigger") or ""),
+                    "weight": weight,
+                })
+    return {
+        "edges": sorted(
+            edges,
+            key=lambda edge: (
+                edge["source"].casefold(),
+                edge["target"].casefold(),
+                edge["eventId"].casefold(),
+            ),
+        )
+    }
+
+
+def scan_content_files(root):
     if not root.exists():
         return []
     files = []
@@ -503,7 +530,6 @@ def scan_rpy_files(root):
             "displayName": source_display_name(source, path.stem),
             "file": path.name,
             "labels": LABEL_RE.findall(source),
-            "screens": SCREEN_RE.findall(source),
         })
     return files
 
@@ -521,21 +547,14 @@ def read_node(relative):
             event = read_json(path, {}) or {}
             events.append({"file": path.name, "data": event})
 
-    option_file = directory / "SCENEOPTION.rpy"
-    option_source = option_file.read_text(encoding="utf-8") if option_file.exists() else ""
     options = validate_options(read_json(directory / OPTIONS_FILE, default_options()))
     return {
         "path": clean_node_path(relative),
         "node": read_json(node_file, {}) or {},
         "events": events,
-        "optionSource": option_source,
         "options": options,
-        "contents": scan_rpy_files(directory / CONTENT_DIR),
+        "contents": scan_content_files(directory / CONTENT_DIR),
     }
-
-
-def scan_screens():
-    return scan_rpy_files(PROJECT_ROOT / SCREEN_DIR)
 
 
 def read_body(handler):
@@ -614,13 +633,35 @@ def validate_weight_map(value, field):
             raise ApiError(HTTPStatus.BAD_REQUEST, f"{field} 的權重必須大於 0。")
 
 
+def validate_event_trigger(value):
+    trigger = str(value or "").strip()
+    if not trigger:
+        raise ApiError(HTTPStatus.BAD_REQUEST, "Event Trigger 不可為空。")
+    if trigger == "Auto":
+        return trigger
+    if ":" not in trigger:
+        raise ApiError(HTTPStatus.BAD_REQUEST, "Event Trigger 必須使用 Auto 或 Source:Value 格式。")
+
+    source, payload = trigger.split(":", 1)
+    payload = payload.strip()
+    if source not in ("Action", "Keyboard", "Mouse"):
+        raise ApiError(HTTPStatus.BAD_REQUEST, f"Event Trigger 來源不合法：{source}。")
+    if not payload:
+        raise ApiError(HTTPStatus.BAD_REQUEST, f"{source} Trigger 不可為空。")
+    if source == "Keyboard" and not (
+        KEYBOARD_KEYSYM_RE.fullmatch(payload) or (len(payload) == 1 and not payload.isspace())
+    ):
+        raise ApiError(HTTPStatus.BAD_REQUEST, "Keyboard Trigger 必須是有效的 Ren'Py keysym。")
+    if source == "Mouse" and payload not in MOUSE_TRIGGER_VALUES:
+        raise ApiError(HTTPStatus.BAD_REQUEST, f"Mouse Trigger 不合法：{payload}。")
+    return f"{source}:{payload}"
+
+
 def validate_event(event):
     if not isinstance(event, dict):
         raise ApiError(HTTPStatus.BAD_REQUEST, "Event 必須是 JSON object。")
     event_id = clean_file_name(event.get("ID") or generate_id("event"), ".json")
-    trigger = str(event.get("Trigger") or "").strip()
-    if not trigger:
-        raise ApiError(HTTPStatus.BAD_REQUEST, "Event Trigger 不可為空。")
+    trigger = validate_event_trigger(event.get("Trigger"))
 
     priority = event.get("Priority", 5)
     weight = event.get("Weight", 1)
@@ -674,6 +715,10 @@ def all_rpy_symbols():
         labels.update(LABEL_RE.findall(source))
         screens.update(SCREEN_RE.findall(source))
     return labels, screens
+
+
+def scan_screen_names():
+    return sorted(all_rpy_symbols()[1], key=str.casefold)
 
 
 def validate_project():
@@ -780,22 +825,6 @@ def validate_project():
                 if target_id not in node_ids:
                     issues.append({"level": "warning", "location": event_location, "message": f"找不到 Next Node：{target_id}。"})
 
-        for element in detail["options"].get("Elements", []):
-            condition_groups = [
-                element.get("Visible Conditions", []),
-                element.get("Enabled Conditions", []),
-            ]
-            for item in element.get("Items", []):
-                condition_groups.extend([
-                    item.get("Visible Conditions", []),
-                    item.get("Enabled Conditions", []),
-                ])
-            for condition in (item for group in condition_groups for item in group):
-                if condition.get("type") == "stat" and condition.get("id") not in stats:
-                    issues.append({"level": "warning", "location": f"{location}/{OPTIONS_FILE}", "message": f"找不到 Stat：{condition.get('id', '')}。"})
-                if condition.get("type") == "memory" and condition.get("bank") not in memories:
-                    issues.append({"level": "warning", "location": f"{location}/{OPTIONS_FILE}", "message": f"找不到記憶庫：{condition.get('bank', '')}。"})
-
     return issues
 
 
@@ -807,7 +836,6 @@ def create_node(payload):
         raise ApiError(HTTPStatus.CONFLICT, "這個 Scene Node 路徑已經存在。")
 
     node_name = str(payload.get("name") or node_id).strip() or node_id
-    custom_option_screen = str(payload.get("optionScreen") or f"option_{node_id}")
     directory.mkdir(parents=True, exist_ok=True)
     (directory / EVENT_DIR).mkdir(exist_ok=True)
     (directory / CONTENT_DIR).mkdir(exist_ok=True)
@@ -816,17 +844,8 @@ def create_node(payload):
         "Name": node_name,
         "Background": str(payload.get("background") or ""),
         "Screen": str(payload.get("screen") or ""),
-        "Option Mode": "DATA",
-        "Option Screen": "scene_option_renderer",
     })
     write_json(directory / OPTIONS_FILE, default_options())
-    option_file = directory / "SCENEOPTION.rpy"
-    if not option_file.exists():
-        option_source = (
-            f"screen {custom_option_screen}():\n"
-            "    textbutton \"範例選項\" action Return(\"Action:example\")\n"
-        )
-        atomic_write(option_file, option_source)
     return node_summary(directory)
 
 
@@ -837,14 +856,11 @@ def save_node(payload):
         raise ApiError(HTTPStatus.NOT_FOUND, "找不到指定的 Scene Node。")
     node = payload.get("node") or {}
     node_id = clean_file_name(node.get("ID"), "")
-    existing = read_json(directory / "Node.json", {}) or {}
     write_json(directory / "Node.json", {
         "ID": node_id,
         "Name": str(node.get("Name") or node_id),
         "Background": str(node.get("Background") or ""),
         "Screen": str(node.get("Screen") or ""),
-        "Option Mode": str(node.get("Option Mode") or existing.get("Option Mode") or "DATA"),
-        "Option Screen": str(node.get("Option Screen") or existing.get("Option Screen") or f"option_{node_id}"),
     })
     return node_summary(directory)
 
@@ -886,12 +902,12 @@ def save_event(payload):
     return event
 
 
-def save_source_file(root, payload, kind):
-    name = clean_file_name(payload.get("id") or payload.get("name") or generate_id("content" if kind == "Content" else "screen"), ".rpy")
+def save_content_file(root, payload):
+    name = clean_file_name(payload.get("id") or payload.get("name") or generate_id("content"), ".rpy")
     original = payload.get("originalName")
     source = payload.get("source")
     if not isinstance(source, str):
-        raise ApiError(HTTPStatus.BAD_REQUEST, f"{kind} 內容必須是文字。")
+        raise ApiError(HTTPStatus.BAD_REQUEST, "Content 內容必須是文字。")
     display_name = str(payload.get("displayName") or name).strip() or name
     source = set_source_display_name(source, display_name)
     root.mkdir(parents=True, exist_ok=True)
@@ -902,10 +918,10 @@ def save_source_file(root, payload, kind):
         old_path = root / f"{old_name}.rpy"
         if old_name != name:
             if target.exists():
-                raise ApiError(HTTPStatus.CONFLICT, f"{kind} 名稱已經存在。")
+                raise ApiError(HTTPStatus.CONFLICT, "Content 名稱已經存在。")
             old_path_to_remove = old_path
     elif target.exists():
-        raise ApiError(HTTPStatus.CONFLICT, f"{kind} 名稱已經存在。")
+        raise ApiError(HTTPStatus.CONFLICT, "Content 名稱已經存在。")
     atomic_write(target, source.rstrip() + "\n")
     if old_path_to_remove and old_path_to_remove.exists():
         old_path_to_remove.unlink()
@@ -983,6 +999,9 @@ class EditorHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         try:
             parsed = urlparse(self.path)
+            if parsed.path == "/api/editor-settings":
+                self.send_json(validate_editor_settings(read_json(editor_settings_path(), {}) or {}))
+                return
             if parsed.path == "/api/project":
                 project = scene_project_config()
                 self.send_json({
@@ -993,7 +1012,8 @@ class EditorHandler(BaseHTTPRequestHandler):
                     "stats": read_json(stats_path(), {}) or {},
                     "memories": read_json(memories_path(), {}) or {},
                     "nodes": scan_nodes(),
-                    "screens": scan_screens(),
+                    "graph": project_graph(),
+                    "screenNames": scan_screen_names(),
                     "images": scan_image_assets(),
                     "issues": validate_project(),
                 })
@@ -1016,20 +1036,14 @@ class EditorHandler(BaseHTTPRequestHandler):
                 source = path.read_text(encoding="utf-8")
                 self.send_json({"name": name, "displayName": source_display_name(source, name), "source": source})
                 return
-            if parsed.path == "/api/screen":
-                name = clean_file_name(self.query_value("name"), ".rpy")
-                path = PROJECT_ROOT / SCREEN_DIR / f"{name}.rpy"
-                if not path.exists():
-                    raise ApiError(HTTPStatus.NOT_FOUND, "找不到 Scene Screen 文件。")
-                source = path.read_text(encoding="utf-8")
-                self.send_json({"name": name, "displayName": source_display_name(source, name), "source": source})
-                return
             if parsed.path == "/api/validate":
                 self.send_json({"issues": validate_project()})
                 return
             if parsed.path == "/api/asset":
                 self.serve_project_asset(self.query_value("path"))
                 return
+            if parsed.path.startswith("/api/"):
+                raise ApiError(HTTPStatus.NOT_FOUND, "找不到 API。")
             self.serve_static(parsed.path)
         except ApiError as exc:
             self.send_error_json(exc)
@@ -1050,10 +1064,7 @@ class EditorHandler(BaseHTTPRequestHandler):
                 directory = node_path(payload.get("node"))
                 if not (directory / "Node.json").exists():
                     raise ApiError(HTTPStatus.NOT_FOUND, "找不到指定的 Scene Node。")
-                self.send_json(save_source_file(directory / CONTENT_DIR, payload, "Content"))
-                return
-            if parsed.path == "/api/screens":
-                self.send_json(save_source_file(PROJECT_ROOT / SCREEN_DIR, payload, "Scene Screen"))
+                self.send_json(save_content_file(directory / CONTENT_DIR, payload))
                 return
             raise ApiError(HTTPStatus.NOT_FOUND, "找不到 API。")
         except ApiError as exc:
@@ -1065,6 +1076,11 @@ class EditorHandler(BaseHTTPRequestHandler):
         try:
             parsed = urlparse(self.path)
             payload = read_body(self)
+            if parsed.path == "/api/editor-settings":
+                settings = validate_editor_settings(payload)
+                write_json(editor_settings_path(), settings)
+                self.send_json(settings)
+                return
             if parsed.path == "/api/stats":
                 stats = validate_stats(payload.get("stats"))
                 write_json(stats_path(), stats)
@@ -1092,30 +1108,6 @@ class EditorHandler(BaseHTTPRequestHandler):
                     options = validate_options(payload.get("options"))
                     write_json(directory / OPTIONS_FILE, options)
                     result["options"] = options
-                if "source" in payload:
-                    source = payload.get("source")
-                    if not isinstance(source, str):
-                        raise ApiError(HTTPStatus.BAD_REQUEST, "Scene Option 內容必須是文字。")
-                    atomic_write(directory / "SCENEOPTION.rpy", source.rstrip() + "\n")
-                if "optionMode" in payload or "optionScreen" in payload:
-                    node_data = read_json(directory / "Node.json", {}) or {}
-                    mode = str(payload.get("optionMode") or node_data.get("Option Mode") or "DATA").upper()
-                    if mode not in ("DATA", "CUSTOM"):
-                        raise ApiError(HTTPStatus.BAD_REQUEST, "Option Mode 必須是 DATA 或 CUSTOM。")
-                    if mode == "DATA":
-                        option_screen = "scene_option_renderer"
-                    else:
-                        option_screen = str(
-                            payload.get("optionScreen")
-                            if "optionScreen" in payload
-                            else node_data.get("Option Screen") or ""
-                        ).strip()
-                        if not option_screen or option_screen == "scene_option_renderer":
-                            raise ApiError(HTTPStatus.BAD_REQUEST, "CUSTOM 模式必須指定自訂 Option Screen。")
-                    node_data["Option Mode"] = mode
-                    node_data["Option Screen"] = option_screen
-                    write_json(directory / "Node.json", node_data)
-                    result["node"] = node_data
                 self.send_json(result)
                 return
             raise ApiError(HTTPStatus.NOT_FOUND, "找不到 API。")
@@ -1138,9 +1130,6 @@ class EditorHandler(BaseHTTPRequestHandler):
                 directory = node_path(self.query_value("node")) / CONTENT_DIR
                 name = clean_file_name(self.query_value("name"), ".rpy")
                 target = directory / f"{name}.rpy"
-            elif parsed.path == "/api/screens":
-                name = clean_file_name(self.query_value("name"), ".rpy")
-                target = PROJECT_ROOT / SCREEN_DIR / f"{name}.rpy"
             else:
                 raise ApiError(HTTPStatus.NOT_FOUND, "找不到 API。")
             if not target.exists():

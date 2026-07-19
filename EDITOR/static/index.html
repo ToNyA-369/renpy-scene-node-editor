@@ -47,8 +47,8 @@
           <button class="tab" type="button" data-tab="events">事件 <span class="tab-count" id="eventCount">0</span></button>
           <button class="tab" type="button" data-tab="options">選項</button>
           <button class="tab" type="button" data-tab="content">演出</button>
-          <button class="tab" type="button" data-tab="screens">畫面</button>
           <button class="tab" type="button" data-tab="stats">狀態</button>
+          <button class="tab" type="button" data-tab="graph">關聯圖</button>
           <button class="tab" type="button" data-tab="validation">檢查 <span class="tab-count issue-count" id="issueCount">0</span></button>
         </nav>
       </header>
@@ -64,8 +64,8 @@
         <section class="tab-panel" data-panel="events" id="eventsPanel"></section>
         <section class="tab-panel" data-panel="options" id="optionsPanel"></section>
         <section class="tab-panel" data-panel="content" id="contentPanel"></section>
-        <section class="tab-panel" data-panel="screens" id="screensPanel"></section>
         <section class="tab-panel" data-panel="stats" id="statsPanel"></section>
+        <section class="tab-panel" data-panel="graph" id="graphPanel"></section>
         <section class="tab-panel" data-panel="validation" id="validationPanel"></section>
       </section>
     </main>
@@ -88,11 +88,11 @@
         <div class="form-grid two-columns">
           <label class="field">
             <span>Background</span>
-            <input name="background" placeholder="請輸入背景資源 ID">
+            <select name="background" aria-label="Background"></select>
           </label>
           <label class="field">
             <span>Screen</span>
-            <select name="screen" id="newNodeScreen"><option value="">None</option></select>
+            <input name="screen" id="newNodeScreen" list="screenNames" placeholder="選填 Screen 名稱">
           </label>
         </div>
       </div>
@@ -107,15 +107,15 @@
     <form method="dialog" id="nameDialogForm">
       <div class="dialog-header">
         <div>
-          <span class="section-kicker" id="nameDialogKicker">NEW FILE</span>
-          <h2 id="nameDialogTitle">新增文件</h2>
+          <span class="section-kicker">CONTENT</span>
+          <h2>新增 Content</h2>
         </div>
         <button class="icon-button" type="button" data-close-dialog="nameDialog" title="關閉" aria-label="關閉">×</button>
       </div>
       <div class="dialog-body">
         <label class="field">
-          <span id="nameDialogLabel">名稱</span>
-          <input id="nameDialogInput" name="name" required autocomplete="off">
+          <span>檔名與 Label</span>
+          <input id="nameDialogInput" name="name" required autocomplete="off" placeholder="buyWaterNormal">
         </label>
       </div>
       <div class="dialog-actions">

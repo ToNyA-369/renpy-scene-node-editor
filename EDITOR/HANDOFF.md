@@ -1,6 +1,6 @@
 # Scene Node Editor 專案交接
 
-最後整理日期：2026-07-16
+最後整理日期：2026-07-19
 
 這份文件提供給新開啟的 Codex 對話。開始修改前，先閱讀本文件及「規格來源」列出的文件，不要重新設計已經定案的遊戲架構。
 
@@ -16,9 +16,9 @@
 
 文件的優先順序如下：
 
-1. `階段性架構規格.md`：目前遊戲架構與資料格式的主要規格。
-2. `README.md`：安裝、更新與從空白 Ren'Py 專案開始使用的流程。
-3. `EDITOR/README.md`：編輯器功能、啟動方式與操作說明。
+1. `docs/zh-TW/REFERENCE.md`：目前遊戲架構、資料格式與 Runtime API 的主要規格。
+2. `docs/zh-TW/USER_GUIDE.md`：各工作區的使用方式與責任邊界。
+3. `README.md`：安裝、更新與從空白 Ren'Py 專案開始使用的流程。
 4. `EDITOR/app.py`：目前編輯器真正接受的資料格式與驗證規則。
 5. `INTEGRATION/TestGame/FRAMEWORK/`：目前 Ren'Py Runtime 與選項 Renderer 的實際行為。
 
@@ -28,14 +28,14 @@
 - `Event 格式構想.md`
 - `其餘配置文件格式構想.md`
 
-若早期文件與《階段性架構規格》或目前程式衝突，以後者為準。若規格與程式互相衝突，修改前先指出差異，不要默默選擇其中一方。
+若早期文件與 Reference 或目前程式衝突，以後者為準。若規格與程式互相衝突，修改前先指出差異，不要默默選擇其中一方。
 
 ## 3. 已定案的遊戲架構
 
 ### 3.1 核心流程
 
 ```text
-Option / Auto Trigger + Global State
+Action / Keyboard / Mouse / Auto Trigger + Global State
 -> 收集目前 Scene Node 的候選 Events
 -> 檢查 Conditions
 -> 選擇最低 Priority 的候選層
@@ -45,13 +45,13 @@ Option / Auto Trigger + Global State
 -> 依 REDO / GOTO / EXIT 決定節點流程
 ```
 
-- Option 是玩家唯一的輸入來源，只回傳 Trigger，不直接選 Event。
+- Option、Keyboard 與 Mouse 都可作為玩家輸入來源，只產生 Trigger，不直接選 Event；Auto 由 Runner 每輪主動檢查。
 - State 系統全遊戲只有一份，包含 Stats 與可自訂的 Memory Banks。
 - 每個 Scene Node 都有自己的 Event Pool。
 - 凡是包含選項的互動單位都是 Scene Node。
 - Content 由創作者自行撰寫 Ren'Py label，也可以是 `null`。
 - State 的改變原則上寫在 Event Effects，而不是藏在 Content label。
-- 每個玩家可選 Trigger 建議保留一個無條件 Event 作為 fallback。
+- 每個可互動 Trigger 建議保留一個無條件 Event 作為 fallback。
 
 ### 3.2 節點流程
 
@@ -65,7 +65,7 @@ EXIT  離開目前節點並回到父節點
 
 ### 3.3 Event 決策
 
-- 一次 Action 只會對應到一個 Event。
+- 一次輸入 Trigger 只會對應到一個 Event。
 - Priority 數字越小越優先，目前範圍為 0 到 5，0 和 1 保留給系統或特殊事件。
 - 同 Trigger、Conditions 通過且 Priority 相同時，才使用 Weight 抽選。
 - Event 的 Content 與 Next Node 都可另外使用權重物件。
@@ -99,19 +99,16 @@ SCENENODE/
   <node_path>/
     Node.json
     Options.json
-    SCENEOPTION.rpy
     EVENTPOOL/
       <event_id>.json
     CONTENT/
       <label_name>.rpy
 
-SCENESCREEN/
-  <screen_id>.rpy
 ```
 
 - Options、Events、Stats、Memory Banks 主要透過表單與 JSON 管理。
-- Content 與 Scene Screen 使用原生 `.rpy`。
-- `SCENEOPTION.rpy` 位於各 Scene Node 之下，作為無法由資料化選項表達時的進階模式。
+- Content 使用 Editor 管理的原生 `.rpy`；Ren'Py Screen 則由創作者在 `game/` 內自行撰寫。
+- Options 固定使用資料化 Renderer；創作者的 `.rpy` Screen 只作為 Scene Screen／HUD，不取代 Options。
 - 創作者可使用中文顯示名稱；編輯器會產生穩定 ASCII 技術 ID。
 - 顯示名稱可修改，技術 ID 不應跟著改名，以保護引用與存檔。
 - Trigger、記憶標籤、玩家文字可直接使用中文。
@@ -131,13 +128,15 @@ TEXTBOX 支援：
 - 多個 Items。
 - 最多可見列數。
 - 超出列數後捲動。
-- 可選擇是否顯示 Scrollbar：`AUTO`、`HIDDEN`、`ALWAYS`。
-- Mousewheel 與拖曳捲動。
+- 可選擇內容溢出時是否顯示滑桿。
+- Mousewheel 與拖曳捲動固定可用，每次互動重新開始時重設位置。
 - Item 高度、間距、Padding 與樣式。
 
-Options 工作區具備 1920 × 1080 預覽畫布、拖曳、縮放、格線與吸附。常用設定直接顯示，低頻樣式、條件、音效與 Scrollbar 細節收進進階選項。
+三種 Element 共用 `Hover.Enabled`、可調透明度的 `Hover.Color`、`Hover Sound` 與 `Click Sound`。Picture 可額外指定 Hover 圖片。Options 不保存 Tooltip、Icon、Cursor 或個別捲動模式。
 
-資料化模式無法表達的特殊 UI 使用 `CUSTOM` 模式與 `SCENEOPTION.rpy`，但仍必須只回傳 Trigger。
+Options 工作區分成兩種共用同一份草稿的模式。表單採左小右大布局，左側管理 Element，右側以獨立卡片分開內容與音效；畫布採左大右小布局，左側預覽、點選與拖曳，右側負責版面、共同 Hover 視覺及外觀。切換由單一連續進度同時驅動兩側欄框寬度與新舊內容透明度；兩個欄框本身是 `overflow: hidden` 遮罩，過場底層也有不透明遮罩覆蓋兩框中央，內容保持各自座標且不會溢出欄框。拖曳進度逐幀取最新游標位置並依完整行程計算；點擊沿用同一控制器，但使用加速後減速的 ease-in-out 補間。完成時先在遮罩後方停用 transition 並顯示正式工作區，再移除遮罩，下一幀才恢復一般 transition，避免結尾閃爍。Options 側欄寬度與 Event 側欄一致。
+
+Options 沒有個別顯示／可用條件，也沒有 CUSTOM Screen 來源。所有顯示的選項都可操作；條件、fallback 與節點分流統一由 Events 和 Scene Nodes 負責。
 
 ## 6. 編輯器目前狀態
 
@@ -145,15 +144,23 @@ Options 工作區具備 1920 × 1080 預覽畫布、拖曳、縮放、格線與�
 
 - 空白專案初始化 ROOT 節點、安全辨識各語系 Ren'Py 預設範本並接線 `script.rpy`、切換起始節點與 Root 刪除保護。
 - 單一 Memory 架構：預設 `Memory`、自訂記憶庫、標籤 add/remove/clear、Runtime API 與舊 Tag 延遲遷移。
-- Scene Node、Event、Stats、Memory Banks、Content、Scene Screen 的建立與編輯。
+- Scene Node、Event、Stats、Memory Banks 與 Content 的建立與編輯。
+- Node Background 由 `game/images/` 圖片選單或 `None` 設定；Runtime 同時接受圖片檔路徑與已宣告的 Ren'Py image 名稱。Options 畫布未指定 Preview Background 時繼承 Node。
+- 掃描整個 `game/` 的 Screen 宣告，供 Scene Screen 引用及驗證。
+- Editor 不提供 Screen 文件工作區或 CRUD API；Installer 也不管理創作者的 `gui.rpy`、`screens.rpy` 與其他介面文件。
 - 中文顯示名稱與穩定技術 ID 映射。
 - Event Conditions、Effects、Content、Next Node 與權重表單。
+- Event Trigger 的 Options 來源在 UI 顯示為 `Option`，JSON／Runtime 契約仍是 `Action:<id>`；Keyboard、Mouse 與 Auto 不變。
+- Event Content 使用 `.rpy` 文件第一層與 label 第二層的階層選單；實際保存值仍是 label。
+- 所有固定選項 `<select>` 由前端提升為共用自訂選單；原始欄位仍保留在表單內，確保既有表單讀取與 API payload 不變。
 - TEXTBOX、PICTURE、HITBOX 選項表單。
-- Options 畫布拖曳、縮放、格線、吸附與側欄切換。
+- Options 拖曳把手式表單／畫布切換，以及畫布拖曳、縮放、格線與吸附。
 - 自動儲存；切換節點、分頁或文件前先完成待處理寫入。
 - 節點刪除引用檢查與 `.scene-node-trash/` 可復原區。
 - 專案引用檢查。
+- 依 `GOTO / Next Node` 產生唯讀有向關聯圖，可搜尋、以滾輪／觸控板雙指縮放、平移並切換節點；搜尋與圓形重新置中按鈕分置底部兩角，拖曳圖面不得產生文字反白。
 - 編輯器快捷鍵與自訂設定。
+- 編輯器設定透過 `/api/editor-settings` 寫入專案根目錄 `.scene-node-editor/settings.json`，不可退回只依賴隨機連接埠來源的 `localStorage`。
 - 安裝到空白 Ren'Py 專案及原地更新。
 
 最近完成的版面修正：
@@ -191,11 +198,11 @@ Options 工作區具備 1920 × 1080 預覽畫布、拖曳、縮放、格線與�
 ### 7.2 整體布局
 
 - 上方左側顯示目前節點名稱與儲存狀態。
-- 上方中央是同一水平的精簡功能 Bar：節點、事件、選項、演出、畫面、狀態、檢查。
+- 上方中央是同一水平的精簡功能 Bar：節點、事件、選項、演出、狀態、關聯圖、檢查。
 - 點擊節點名稱會由左側滑入節點抽屜。
 - 節點抽屜包含新增、搜尋、節點切換、遊戲名稱與設定入口。
 - Event 使用左側 Event Pool 加主要編輯區。
-- Options 使用左側 Elements、中央畫布、右側 Inspector。
+- Options 表單模式使用左側 Element 列表與右側邏輯表單；畫布模式使用左側大畫布與右側視覺 Inspector。
 - 其他工作區依需要使用主區域加一個或兩個可選側欄。
 
 ### 7.3 指定快捷鍵
@@ -213,11 +220,9 @@ Cmd + ,                  開啟設定
 ```text
 Cmd + S      立即儲存
 Cmd + 1…7    直接前往各功能區
-Option + 1   切換 Options Elements
-Option + 2   切換 Options Inspector
 G            顯示或隱藏格線
 S            開啟或關閉吸附
-Cmd + .      展開或收合目前區塊
+Cmd + .      展開或收合目前區塊；Options 中切換表單／畫布
 ```
 
 快捷鍵可在設定中修改。新增資料的對話框按 Enter 應確認，不應取消。
@@ -229,10 +234,10 @@ EDITOR/app.py
   Python 標準函式庫 HTTP Server、檔案讀寫、資料驗證與 API。
 
 EDITOR/static/index.html
-  應用程式外殼、節點抽屜、頂部功能 Bar、對話框與設定結構。
+  應用程式外殼、節點抽屜、七個功能區、對話框與設定結構。
 
 EDITOR/static/app.js
-  前端狀態、各工作區渲染、表單、自動儲存、快捷鍵及 Options 畫布互動。
+  前端狀態、各工作區渲染、Content 階層選單、有向關聯圖、表單、自動儲存、快捷鍵及 Options 畫布互動。
 
 EDITOR/static/styles.css
   全部版面、色彩、響應式規則與互動狀態。
@@ -246,8 +251,17 @@ INTEGRATION/TestGame/FRAMEWORK/option_renderer.rpy
 tools/install.py
   將 Editor 與 Framework 安裝或更新到 Ren'Py 專案。
 
+tools/create_editor_test_unit.py
+  只對全新空白專案建立可拋棄的 Editor／Runtime 綜合測試內容；安全閘門會拒絕既有 Editor 資料。
+
+INTEGRATION/EDITOR_TEST_UNIT.md
+  5 節點關聯圖、Content、Options、Event、State、外部 Screen 與 Runtime 流程的手動驗證步驟。
+
 tests/test_install.py
   乾淨安裝、更新保護與 Editor 啟動測試。
+
+tests/test_editor_test_unit.py
+  綜合測試單元產生、完整 Editor 專案驗證與防覆寫測試。
 
 tests/test_memory_schema.py
   Memory Bank schema、舊 Tag JSON 遷移與 clear Effect 測試。
@@ -291,6 +305,8 @@ git diff --check
 python3 -m unittest discover -s tests -v
 ```
 
+需要手動驗證 Editor 與 Runtime 完整工作流時，另建一個可拋棄的空白 Ren'Py 專案，再依 `INTEGRATION/EDITOR_TEST_UNIT.md` 執行產生器。不可對 `INTEGRATION/TestGame` 或正式遊戲執行這個產生器。
+
 UI 變更必須用瀏覽器實際操作，不只檢查靜態畫面。至少確認：
 
 - 節點與功能區切換。
@@ -304,7 +320,7 @@ UI 變更必須用瀏覽器實際操作，不只檢查靜態畫面。至少確�
 
 ## 10. Git 與資料安全
 
-開始任何工作前都要重新執行 `git status --short`。`INTEGRATION/TestGame/FRAMEWORK/` 是安裝器使用的 Runtime 來源；同層的 `DATA/`、`SCENENODE/`、`SCENESCREEN/`、`script.rpy` 與 `runtime_test.rpy` 是本機創作／測試資料，已由 `.gitignore` 排除，不屬於公開發布包。
+開始任何工作前都要重新執行 `git status --short`。`INTEGRATION/TestGame/FRAMEWORK/` 是安裝器使用的 Runtime 來源；同層的 `DATA/`、`SCENENODE/`、`script.rpy` 與 `runtime_test.rpy` 是本機創作／測試資料，已由 `.gitignore` 排除，不屬於公開發布包。
 
 本機測試遊戲資料不是待清理的暫存檔。除非任務明確要求，禁止還原、刪除或覆寫。
 
@@ -342,7 +358,7 @@ Node / Event Editor
   節點表單、Event Pool、Conditions、Effects、Content 與 Next Node。
 
 Options Editor
-  Elements、Inspector、畫布、拖曳、縮放、格線與吸附。
+  表單／畫布模式、Elements、Inspector、拖曳、縮放、格線與吸附。
 
 Runtime / Schema
   State、Event 決策、stack、Effects、Memory Banks 與資料格式。

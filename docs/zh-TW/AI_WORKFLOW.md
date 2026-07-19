@@ -1,0 +1,84 @@
+# 使用 AI 協助開發 Scene Node 遊戲
+
+[繁體中文](AI_WORKFLOW.md) · [English](../en/AI_WORKFLOW.md) · [回到首頁](../../README.md)
+
+Installer 會將一份精簡契約放在：
+
+```text
+<RenPy Project>/.scene-node-editor/AI_CONTEXT.md
+```
+
+開始任何 AI 工作前，先要求它閱讀該文件。這比把整份 Reference 貼進提示更穩定，也能避免 AI 誤改 Framework 或把 Options 當成自訂 Screen。
+
+## 通用提示模板
+
+```text
+請先閱讀 .scene-node-editor/AI_CONTEXT.md，再檢查與需求相關的現有文件。
+
+我的目標：<描述玩家看到與操作的結果>
+允許修改：<指定 .rpy、Content 或資料範圍>
+不要修改：game/FRAMEWORK、既有技術 ID、未提到的遊戲資料
+
+請先判斷這是：
+1. Editor 資料設定
+2. Content／Ren'Py 演出
+3. gui.rpy／screens.rpy 介面
+4. 專案專屬系統
+5. Schema／Runtime 契約變更
+
+若屬於第 5 類，先說明設計與影響，不要直接實作。
+完成後列出修改檔案、驗證方式，以及我需要在 Editor 內設定的引用。
+```
+
+## 建立 HUD
+
+```text
+請先閱讀 .scene-node-editor/AI_CONTEXT.md。
+
+在 game/screens.rpy 建立一個無參數的 room_hud Screen，顯示 money Stat。
+使用 scene_get_stat("money", 0) 讀取，不要直接修改 State。
+不要修改 FRAMEWORK 或 Options.json。
+完成後告訴我應在 Node 的 Scene Screen 欄位選擇哪個名稱。
+```
+
+## 撰寫 Content 演出
+
+```text
+請閱讀 AI_CONTEXT，然後只修改我指定的 CONTENT .rpy。
+保留既有 label ID，在 label 內加入對話、轉場與 ATL，最後 return。
+不要重複 Event 已經負責的 Stat／Memory Effects，也不要自行 GOTO Scene Node。
+```
+
+## 實作專屬系統
+
+```text
+我需要一個 Editor 尚未資料化的背包系統。
+先提出 creator-owned .rpy 的模組邊界，以及如何透過 Content 或公開 API 與 Scene Node 流程連接。
+不要把背包程式寫進 option_renderer.rpy，不要新增 Schema 欄位，除非我先確認設計。
+```
+
+## AI 可以直接處理的工作
+
+- 撰寫或調整 `gui.rpy`、`screens.rpy` 與 HUD。
+- 編輯指定 Content label 內的 Ren'Py。
+- 建立 ATL、Transform、角色與創作者自訂系統。
+- 分析 Event Conditions／Effects 與節點流程。
+- 依 Reference 建議 Editor 中應建立的資料。
+
+## AI 應先停下說明的工作
+
+- 修改 `FRAMEWORK/runtime.rpy` 或 `option_renderer.rpy`。
+- 新增／刪除 Schema 欄位。
+- 改變 Trigger、REDO、GOTO、EXIT 或 Scene Stack 語意。
+- 重新命名穩定 ID 或搬移被引用的 labels。
+- 改變 Installer 覆寫範圍或存檔相容性。
+
+## 完成後的人工檢查
+
+1. 檢視 AI 實際修改的 diff。
+2. 在 Editor 執行「檢查專案」。
+3. 確認自動儲存完成。
+4. 從 Ren'Py Launcher 實際操作受影響流程。
+5. 確認更新 Installer 後，創作者文件仍會保留。
+
+AI 可以加速實作，但劇情、規則、視覺方向與最終驗收仍由創作者決定。

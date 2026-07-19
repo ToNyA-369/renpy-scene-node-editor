@@ -9,6 +9,13 @@ init -100 python:
     SCENE_NODE_FILE = "/Node.json"
     SCENE_OPTIONS_FILE = "/Options.json"
     SCENE_EVENT_MARKER = "/EVENTPOOL/"
+    SCENE_MOUSE_KEYSYMS = {
+        "Left": "mouseup_1",
+        "Middle": "mouseup_2",
+        "Right": "mouseup_3",
+        "WheelUp": "mousedown_4",
+        "WheelDown": "mousedown_5",
+    }
 
 
     def scene_read_json(path):
@@ -286,6 +293,23 @@ init -100 python:
         )
 
 
+    def scene_input_bindings(node_id):
+        bindings = []
+        seen = set()
+        for event in scene_catalog["events"].get(node_id, []):
+            trigger = str(event.get("Trigger") or "").strip()
+            keysym = None
+            if trigger.startswith("Keyboard:"):
+                keysym = trigger.split(":", 1)[1].strip()
+            elif trigger.startswith("Mouse:"):
+                keysym = SCENE_MOUSE_KEYSYMS.get(trigger.split(":", 1)[1].strip())
+            if not keysym or (keysym, trigger) in seen:
+                continue
+            seen.add((keysym, trigger))
+            bindings.append((keysym, trigger))
+        return bindings
+
+
     def scene_prepare_event(node_id, event):
         return {
             "node_id": node_id,
@@ -451,9 +475,11 @@ init -100 python:
 
         node = scene_current_node()
         background = str(node.get("Background") or "").strip()
+        renpy.scene()
         if background and renpy.has_image(background):
-            renpy.scene()
             renpy.show(background)
+        elif background and renpy.loadable(background):
+            renpy.show("scene_node_background", what=background)
 
         screen_name = str(node.get("Screen") or "").strip()
         if screen_name:
@@ -484,46 +510,11 @@ init -100 python:
             raise Exception("Unknown End up value: {}".format(end_up))
 
 
-    def scene_option_screen(node):
-        return str(node.get("Option Screen") or "option_{}".format(node.get("ID")))
-
-
     def scene_option_data(node_id):
         return scene_catalog["options"].get(
             node_id,
             {"Version": 1, "Canvas": {}, "Elements": []},
         )
-
-
-    def scene_option_mode(node_id, node):
-        mode = str(node.get("Option Mode") or "").upper()
-        if mode in ("DATA", "CUSTOM"):
-            return mode
-        return "DATA" if scene_option_data(node_id).get("Elements") else "CUSTOM"
-
-
-    def scene_option_visible_elements(node_id):
-        return [
-            element
-            for element in scene_option_data(node_id).get("Elements", [])
-            if scene_conditions_match(element.get("Visible Conditions", []))
-        ]
-
-
-    def scene_option_visible_items(element):
-        return [
-            item
-            for item in element.get("Items", [])
-            if scene_conditions_match(item.get("Visible Conditions", []))
-        ]
-
-
-    def scene_option_enabled(element, item=None):
-        if not scene_conditions_match(element.get("Enabled Conditions", [])):
-            return False
-        if item is not None:
-            return scene_conditions_match(item.get("Enabled Conditions", []))
-        return True
 
 
     def scene_option_scale(node_id):
@@ -558,7 +549,43 @@ init -100 python:
         return override.get(key, element.get("Style", {}).get(key, default))
 
 
-    def scene_option_image(path, width, height, fit="CONTAIN", opacity=1.0, tint="#ffffff", zoom=1.0):
+    def scene_option_composite_color(base, overlay):
+        def rgba(value, fallback):
+            text = str(value or fallback).lstrip("#")
+            if len(text) == 6:
+                text += "ff"
+            if len(text) != 8:
+                text = fallback.lstrip("#")
+                if len(text) == 6:
+                    text += "ff"
+            try:
+                return tuple(int(text[index:index + 2], 16) / 255.0 for index in range(0, 8, 2))
+            except ValueError:
+                return (0.0, 0.0, 0.0, 0.0)
+
+        base_rgba = rgba(base, "#00000000")
+        overlay_rgba = rgba(overlay, "#ffffff18")
+        output_alpha = overlay_rgba[3] + base_rgba[3] * (1.0 - overlay_rgba[3])
+        if output_alpha <= 0:
+            return "#00000000"
+        channels = [
+            (overlay_rgba[index] * overlay_rgba[3] + base_rgba[index] * base_rgba[3] * (1.0 - overlay_rgba[3])) / output_alpha
+            for index in range(3)
+        ]
+        values = [int(round(max(0.0, min(1.0, channel)) * 255.0)) for channel in channels]
+        values.append(int(round(max(0.0, min(1.0, output_alpha)) * 255.0)))
+        return "#{:02x}{:02x}{:02x}{:02x}".format(*values)
+
+
+    def scene_option_hover_displayable(base, color, width, height):
+        return Composite(
+            (width, height),
+            (0, 0), base,
+            (0, 0), Solid(color, xsize=width, ysize=height),
+        )
+
+
+    def scene_option_image(path, width, height, fit="CONTAIN", opacity=1.0, tint="#ffffff"):
         if not path:
             return Solid("#00000000", xsize=width, ysize=height)
         fit_name = str(fit or "CONTAIN").lower()
@@ -569,8 +596,6 @@ init -100 python:
         }
         if fit_name != "stretch":
             properties["fit"] = fit_name
-        if float(zoom) != 1.0:
-            properties["zoom"] = float(zoom)
         return Transform(path, **properties)
 
 
@@ -582,9 +607,7 @@ init -100 python:
             if element.get("Type") != "TEXTBOX":
                 continue
             key = "{}:{}".format(node_id, element.get("ID"))
-            remember = str(element.get("List", {}).get("Remember Scroll") or "RESET").upper()
-            if remember == "RESET" or key not in updated:
-                updated[key] = ui.adjustment()
+            updated[key] = ui.adjustment()
         scene_option_adjustments = updated
 
 
@@ -593,11 +616,13 @@ init -100 python:
         return scene_option_adjustments.get(key)
 
 
-    def scene_call_option_screen(node_id, node):
-        if scene_option_mode(node_id, node) == "DATA":
-            scene_option_prepare_adjustments(node_id)
-            return renpy.call_screen("scene_option_renderer", node_id=node_id)
-        return renpy.call_screen(scene_option_screen(node))
+    def scene_call_option_screen(node_id):
+        scene_option_prepare_adjustments(node_id)
+        return renpy.call_screen(
+            "scene_option_renderer",
+            node_id=node_id,
+            input_bindings=scene_input_bindings(node_id),
+        )
 
 
     def scene_missing_event(node_id, trigger):
@@ -636,7 +661,7 @@ label scene_runtime_start(root_node=None):
         $ _scene_event = scene_select_event(_scene_node_id, "Auto")
 
         if _scene_event is None:
-            $ _scene_trigger = scene_call_option_screen(_scene_node_id, _scene_node)
+            $ _scene_trigger = scene_call_option_screen(_scene_node_id)
             $ _scene_event = scene_select_event(_scene_node_id, _scene_trigger)
             if _scene_event is None:
                 $ scene_missing_event(_scene_node_id, _scene_trigger)

@@ -8,6 +8,7 @@ import sys
 import tempfile
 import time
 import unittest
+import urllib.error
 import urllib.request
 from pathlib import Path
 
@@ -35,6 +36,14 @@ class InstallerTest(unittest.TestCase):
             self.assertTrue(launcher.exists())
             self.assertTrue(os.access(launcher, os.X_OK))
             self.assertTrue((project_root / ".scene-node-editor" / "EDITOR" / "app.py").exists())
+            installed_context = project_root / ".scene-node-editor" / "AI_CONTEXT.md"
+            self.assertEqual(
+                installed_context.read_text(encoding="utf-8"),
+                install.AI_CONTEXT_SOURCE.read_text(encoding="utf-8"),
+            )
+            self.assertFalse(
+                (project_root / ".scene-node-editor" / "EDITOR" / "HANDOFF.md").exists()
+            )
             self.assertTrue((game_root / "FRAMEWORK" / "runtime.rpy").exists())
             self.assertTrue((game_root / "FRAMEWORK" / "option_renderer.rpy").exists())
             self.assertFalse((game_root / "FRAMEWORK" / "runtime_test.rpy").exists())
@@ -51,9 +60,10 @@ class InstallerTest(unittest.TestCase):
             root_node = game_root / "SCENENODE" / "root"
             self.assertTrue((root_node / "Node.json").exists())
             self.assertTrue((root_node / "Options.json").exists())
-            self.assertTrue((root_node / "SCENEOPTION.rpy").exists())
+            self.assertFalse((root_node / "SCENEOPTION.rpy").exists())
             self.assertTrue((root_node / "EVENTPOOL").is_dir())
             self.assertTrue((root_node / "CONTENT").is_dir())
+            self.assertFalse((game_root / "SCENESCREEN").exists())
             script_source = (game_root / "script.rpy").read_text(encoding="utf-8")
             self.assertIn("# scene-node-editor: root-start", script_source)
             self.assertIn("call scene_runtime_start()", script_source)
@@ -81,6 +91,9 @@ class InstallerTest(unittest.TestCase):
             content_marker = game_root / "SCENENODE" / "keep" / "creator-data.txt"
             content_marker.parent.mkdir(parents=True)
             content_marker.write_text("preserve me\n", encoding="utf-8")
+            installed_context.write_text("outdated managed context\n", encoding="utf-8")
+            stale_handoff = project_root / ".scene-node-editor" / "EDITOR" / "HANDOFF.md"
+            stale_handoff.write_text("stale internal handoff\n", encoding="utf-8")
             custom_memories = {
                 "memory": {"Name": "Memory"},
                 "chapter": {"Name": "章節記憶"},
@@ -89,12 +102,32 @@ class InstallerTest(unittest.TestCase):
                 json.dumps(custom_memories, ensure_ascii=False, indent=2) + "\n",
                 encoding="utf-8",
             )
+            custom_screens = game_root / "screens.rpy"
+            custom_screens.write_text(
+                "screen creator_hud():\n    text \"HUD\"\n\n"
+                "screen creator_options():\n    textbutton \"繼續\" action Return(\"Action:continue\")\n",
+                encoding="utf-8",
+            )
+            root_node_file = root_node / "Node.json"
+            root_node_data = json.loads(root_node_file.read_text(encoding="utf-8"))
+            root_node_data["Screen"] = "creator_hud"
+            root_node_file.write_text(
+                json.dumps(root_node_data, ensure_ascii=False, indent=2) + "\n",
+                encoding="utf-8",
+            )
 
             install.install(game_root)
 
             self.assertEqual(json.loads(stats_file.read_text(encoding="utf-8")), custom_stats)
             self.assertEqual(content_marker.read_text(encoding="utf-8"), "preserve me\n")
+            self.assertEqual(
+                installed_context.read_text(encoding="utf-8"),
+                install.AI_CONTEXT_SOURCE.read_text(encoding="utf-8"),
+            )
+            self.assertFalse(stale_handoff.exists())
             self.assertEqual(json.loads(memories_file.read_text(encoding="utf-8")), custom_memories)
+            self.assertIn("screen creator_hud", custom_screens.read_text(encoding="utf-8"))
+            self.assertFalse((game_root / "SCENESCREEN").exists())
             self.assertEqual(
                 json.loads(project_config.read_text(encoding="utf-8")),
                 {"Version": 1, "Root Node": "root"},
@@ -109,11 +142,19 @@ class InstallerTest(unittest.TestCase):
             )
             self.assertEqual(manifest["version"], "0.1.0-alpha")
             self.assertEqual(manifest["managed_runtime_files"], list(install.RUNTIME_FILES))
+            self.assertEqual(manifest["managed_context_files"], list(install.MANAGED_CONTEXT_FILES))
 
             port = self.available_port()
             editor_app = project_root / ".scene-node-editor" / "EDITOR" / "app.py"
             environment = dict(os.environ)
             environment["PYTHONPYCACHEPREFIX"] = str(Path(temporary) / "pycache")
+            settings_payload = {
+                "version": 6,
+                "autosave": True,
+                "autosaveDelay": 900,
+                "gridSize": 32,
+                "shortcuts": {"tabGraph": "mod+8"},
+            }
             process = subprocess.Popen(
                 [
                     sys.executable,
@@ -137,7 +178,26 @@ class InstallerTest(unittest.TestCase):
                 self.assertEqual(len(project_data["nodes"]), 1)
                 self.assertEqual(project_data["nodes"][0]["id"], "root")
                 self.assertTrue(project_data["nodes"][0]["isRoot"])
+                self.assertEqual(project_data["graph"], {"edges": []})
+                self.assertIn("creator_hud", project_data["screenNames"])
+                self.assertIn("creator_options", project_data["screenNames"])
                 self.assertEqual(project_data["issues"], [])
+
+                with self.assertRaises(urllib.error.HTTPError) as screen_api_error:
+                    self.request_json(port, "/api/screen?name=creator_hud")
+                self.assertEqual(screen_api_error.exception.code, 404)
+
+                saved_settings = self.request_json(
+                    port,
+                    "/api/editor-settings",
+                    method="PUT",
+                    payload=settings_payload,
+                )
+                self.assertEqual(saved_settings, settings_payload)
+                self.assertEqual(
+                    self.request_json(port, "/api/editor-settings"),
+                    settings_payload,
+                )
 
                 updated_memories = dict(custom_memories)
                 updated_memories["daily"] = {"Name": "每日記憶"}
@@ -152,6 +212,11 @@ class InstallerTest(unittest.TestCase):
             finally:
                 process.terminate()
                 process.communicate(timeout=5)
+
+            settings_file = project_root / ".scene-node-editor" / "settings.json"
+            self.assertEqual(json.loads(settings_file.read_text(encoding="utf-8")), settings_payload)
+            install.install(game_root)
+            self.assertEqual(json.loads(settings_file.read_text(encoding="utf-8")), settings_payload)
 
     def test_custom_start_is_not_overwritten(self):
         with tempfile.TemporaryDirectory(prefix="scene-node-editor-custom-") as temporary:

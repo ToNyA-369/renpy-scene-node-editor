@@ -56,8 +56,6 @@ def default_root_node(root_node=ROOT_NODE_ID):
         "Name": "ROOT",
         "Background": "",
         "Screen": "",
-        "Option Mode": "DATA",
-        "Option Screen": "scene_option_renderer",
     }
 
 
@@ -179,7 +177,7 @@ def connect_root_script(game_root):
 
 def initialize_scene_project(game_root, connect_script=True):
     game_root = Path(game_root)
-    for directory in ("DATA", "SCENENODE", "SCENESCREEN"):
+    for directory in ("DATA", "SCENENODE"):
         (game_root / directory).mkdir(parents=True, exist_ok=True)
     memories_path = game_root / MEMORIES_RELATIVE
     if not memories_path.exists():
@@ -232,11 +230,6 @@ def initialize_scene_project(game_root, connect_script=True):
         write_json(root / "Node.json", default_root_node(root_node))
     if not (root / "Options.json").exists():
         write_json(root / "Options.json", default_options())
-    if not (root / "SCENEOPTION.rpy").exists():
-        atomic_write(
-            root / "SCENEOPTION.rpy",
-            f'screen option_{root_node}():\n    textbutton "範例選項" action Return("Action:example")\n',
-        )
     if not config_path.exists():
         write_json(config_path, default_project_config(root_node))
 
