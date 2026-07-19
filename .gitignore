@@ -13,7 +13,6 @@ saves/
 # Local authoring data is not part of the distributable editor.
 /DATA/
 /SCENENODE/
-/SCENESCREEN/
 /INTEGRATION/TestLauncher/
 /啟動編輯器.command
 
@@ -21,7 +20,6 @@ saves/
 # authoring fixtures and creator content stay on this machine.
 /INTEGRATION/TestGame/DATA/
 /INTEGRATION/TestGame/SCENENODE/
-/INTEGRATION/TestGame/SCENESCREEN/
 /INTEGRATION/TestGame/script.rpy
 /INTEGRATION/TestGame/FRAMEWORK/runtime_test.rpy
 

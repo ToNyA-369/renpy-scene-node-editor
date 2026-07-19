@@ -1,115 +1,78 @@
-# Scene Node Editor
+# Scene Node Editor 本機說明
 
-Scene Node Editor 是這套 Ren'Py 架構的本機內容編輯器。GUI 直接讀寫專案中的 JSON 與 `.rpy`，不使用額外資料庫。
+[English](README.en.md) · [完整中文文件](https://github.com/ToNyA-369/renpy-scene-node-editor/blob/main/docs/zh-TW/USER_GUIDE.md)
+
+這份 Editor 已安裝在你的 Ren'Py 專案中。它用來管理 Scene Node、Event、Options、Content 與遊戲狀態；`gui.rpy`、`screens.rpy`、角色、素材與實際演出仍由你在 Ren'Py 專案中撰寫。
 
 ## 啟動
 
-在 macOS 雙擊專案根目錄的 `啟動編輯器.command`。
+在專案根目錄雙擊：
+
+```text
+啟動 Scene Node 編輯器.command
+```
 
 也可以從終端啟動：
 
 ```sh
-python3 EDITOR/app.py
+python3 .scene-node-editor/EDITOR/app.py --project game
 ```
 
-要編輯另一個 Ren'Py 專案的 `game/` 資料夾，可以指定：
+Editor 只在本機運作，關閉啟動器的終端視窗就會停止服務。
 
-```sh
-python3 EDITOR/app.py --project "/path/to/project/game"
-```
+## 最短工作流程
 
-預設網址：
+1. 在「節點」建立或選擇 Scene Node。
+2. 在「選項」建立玩家可操作的 Text Box、Picture 或 Hitbox。
+3. 在「演出」建立 Content label，並撰寫 Ren'Py 演出。
+4. 在「事件」以 Option、Keyboard、Mouse 或 Auto Trigger 串接 Content、Effects 與 End Up。
+5. 在「檢查」修正引用問題，再從 Ren'Py 啟動遊戲測試。
+
+需要完整教學時，請閱讀[第一個可玩流程](https://github.com/ToNyA-369/renpy-scene-node-editor/blob/main/docs/zh-TW/FIRST_PROJECT.md)。
+
+## 重要概念
+
+- Option 只送出 Trigger；真正的條件、狀態變更與流程分支由 Event 決定。
+- Content 儲存的是 Ren'Py `label` 名稱，不是 `.rpy` 文件名。
+- `REDO` 重跑目前節點、`GOTO` 進入子節點、`EXIT` 回到父節點。
+- 所有顯示中的 Option 都可操作，並在一次互動結束後消失；下一輪顯示是 Runtime 再次建立它。
+- Scene Screen 適合場景外殼或 HUD。請自行在 `screens.rpy` 或其他 `.rpy` 中定義，再於節點選取它。
+
+完整資料與 Runtime 契約請見[技術參考](https://github.com/ToNyA-369/renpy-scene-node-editor/blob/main/docs/zh-TW/REFERENCE.md)。
+
+## 儲存與設定
+
+Editor 會自動儲存。切換節點、文件或工作區前，也會先完成尚未寫入的修改。
+
+快捷鍵、自動儲存延遲與格線尺寸保存在：
 
 ```text
-http://127.0.0.1:8765
+.scene-node-editor/settings.json
 ```
 
-只需要 Python 3，不需要安裝其他套件。
+這是本機 Editor 設定，不是遊戲內容。
 
-## 功能範圍
+## 哪些文件可以自己修改
 
-- 建立與編輯 Scene Node
-- 為空白專案建立 ROOT 節點，並保護目前的起始節點不被直接刪除
-- 將其他 Scene Node 設為新的起始節點
-- 使用中文顯示名稱，並自動映射至穩定技術 ID
-- 刪除 Scene Node 前檢查 `Next Node` 引用
-- 用表單建立、編輯與刪除 Event
-- 編輯 Conditions、Effects、Content 與 Next Node 權重
-- 在「狀態」工作區建立與編輯 Stats、Memory Banks
-- 以表單設定記憶標籤的 has、not_has、add、remove 與 clear
-- 用表單建立 Text Box、Picture 與 Hitbox 選項
-- 在 1920 × 1080 視覺畫布拖曳、縮放與設定 Text Box 顯示列數
-- 切換格線與座標吸附，並在設定中調整格線尺寸
-- 將樣式、條件、音效等低頻欄位收納在「進階選項」
-- 編輯後自動儲存，切換分頁、文件或節點前會先完成待處理的寫入
-- 使用快捷鍵循環功能區、切換左右工作欄、開啟節點抽屜與設定，並可自訂按鍵
-- 保留 `SCENEOPTION.rpy` 作為自訂模式
-- 建立與編輯 Content label
-- 建立與編輯 Scene Screen
-- 檢查 Stat、Memory Bank、Content、Screen 與 Next Node 引用
-
-## 選項工作區
-
-每個 Scene Node 預設使用 `Options.json`。Text Box 可設定最多顯示項目、滑鼠滾輪、拖曳滾動，以及 `AUTO`、`HIDDEN`、`ALWAYS` 三種滑桿模式。超過顯示數量的 Item 會留在清單中，玩家可捲動查看。
-
-位置、尺寸、文字與 Trigger 等常用欄位會直接顯示；條件、完整樣式、音效、Scrollbar 細節與自訂 RPY 收在「進階選項」。需要 Ren'Py 原生 Screen 能力時，將選項模式切換成 `CUSTOM`，即可改用節點內的 `SCENEOPTION.rpy`。
-
-畫布工具列可分別開關格線與吸附。拖曳與縮放期間只更新目前操作的元件，放開後再自動儲存，因此不會因重新建立整個畫布而中斷操作。
-
-## 自動儲存與快捷鍵
-
-右上角的設定按鈕可調整自動儲存延遲、格線尺寸與快捷鍵。點選快捷鍵欄位後直接按下新的組合；按 `Backspace` 可清除，重複的組合會被阻止。
-
-預設快捷鍵：
-
-| 動作 | macOS | Windows / Linux |
-| --- | --- | --- |
-| 立即儲存 | `Command+S` | `Ctrl+S` |
-| 切換上一個／下一個功能區 | `Command+Shift+← / →` | `Ctrl+Shift+← / →` |
-| 切換左側／右側欄位 | `Command+[ / ]` | `Ctrl+[ / ]` |
-| 切換節點列表 | `Command+\` | `Ctrl+\` |
-| 前往節點／事件／選項 | `Command+1…3` | `Ctrl+1…3` |
-| 前往演出／畫面／狀態／檢查 | `Command+4…7` | `Ctrl+4…7` |
-| 切換選項元件列表 | `Option+1` | `Alt+1` |
-| 切換選項屬性 | `Option+2` | `Alt+2` |
-| 顯示或隱藏格線 | `G` | `G` |
-| 開啟或關閉吸附 | `S` | `S` |
-| 展開或收合目前區塊 | `Command+.` | `Ctrl+.` |
-| 開啟編輯器設定 | `Command+,` | `Ctrl+,` |
-
-## 名稱與 ID
-
-創作者在編輯器中可以直接使用中文命名。建立資料時，編輯器會同時產生一個技術 ID：
+安裝器更新時會管理：
 
 ```text
-顯示名稱  我的房間
-技術 ID  node_4ed03143
+.scene-node-editor/EDITOR/
+.scene-node-editor/AI_CONTEXT.md
+game/FRAMEWORK/runtime.rpy
+game/FRAMEWORK/option_renderer.rpy
 ```
 
-顯示名稱可以修改，技術 ID 則保持不變。Ren'Py label、screen、JSON 引用與存檔因此不會因中文改名而斷裂。Trigger、記憶標籤與玩家看到的選項文字仍可以使用中文。
+請不要把自訂邏輯寫進這些文件。你可以安全維護自己的 `gui.rpy`、`screens.rpy`、其他 `.rpy`、素材，以及 Editor 建立的 `DATA/`、`SCENENODE/` 內容；更新不會覆寫這些創作者資料。
 
-## 記憶庫
+若使用 AI 協助開發，先請它閱讀 `.scene-node-editor/AI_CONTEXT.md`。範例提示詞見 [AI 協作指南](https://github.com/ToNyA-369/renpy-scene-node-editor/blob/main/docs/zh-TW/AI_WORKFLOW.md)。
 
-`DATA/Memories.json` 定義可用的 Memory Banks。`memory`／`Memory` 是系統預設庫，供 Once Event 與一般永久記憶使用，因此不能移除；其他記憶庫可在「狀態」工作區建立或移除。
+## 常見問題
 
-記憶庫不會自行每日或每週刷新。創作者可在 Event Effect 選擇 `clear`，或在自訂 Ren'Py 流程呼叫 `scene_memory_clear("記憶庫_ID")`。這讓換日、換週或章節重置都由遊戲自己的時間流程明確控制。
+- 遊戲沒有進入 Scene Node：確認 `label start` 有 `call scene_runtime_start()`。
+- Content 沒有出現在清單：確認 `.rpy` 位於 `game/` 下，且有有效的 `label`。
+- Scene Screen 找不到：確認 Screen 位於 `game/` 下的 `.rpy`，並重新整理 Editor。
+- Trigger 沒有反應：確認目前節點存在相同 Trigger 的 Event，並建議保留一個無條件 fallback Event。
+- 刪錯節點：可到專案根目錄的 `.scene-node-trash/` 尋找可復原資料。
 
-## 起始節點
-
-空白專案第一次初始化時會建立 `ROOT` 節點，並在 `DATA/SceneProject.json` 記錄其技術 ID。Runtime 可透過 `scene_runtime_start()` 讀取這個設定。ROOT 節點不能直接刪除；若要移除，先在另一個節點按下「設為起始節點」。
-
-若專案沒有自訂 `label start`，或仍保留各語系的 Ren'Py 新專案預設範本，初始化會先備份原檔，再自動於 `script.rpy` 接上 Runtime。已有自訂開場時不會覆寫，專案檢查會提醒創作者自行加入 `call scene_runtime_start()`。若舊版初始化曾跳過預設範本，重新安裝或重新開啟更新後的 Editor 會再次安全嘗試接線。
-
-## 刪除節點
-
-刪除前，編輯器會搜尋所有 Event 的 `Next Node`。若還有 Event 指向該節點，刪除會被阻止並列出引用來源。
-
-可刪除的節點不會立即永久消失，而是移至 Ren'Py 專案根目錄下的 `.scene-node-trash/`。這個目錄位於 `game/` 外，不會被 Ren'Py 當成遊戲內容載入。
-
-編輯器會在專案根目錄使用：
-
-```text
-DATA/
-SCENENODE/
-SCENESCREEN/
-```
+回報問題或查看最新版本：<https://github.com/ToNyA-369/renpy-scene-node-editor>

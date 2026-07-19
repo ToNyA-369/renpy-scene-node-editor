@@ -14,8 +14,10 @@ from pathlib import Path
 PACKAGE_ROOT = Path(__file__).resolve().parent.parent
 EDITOR_SOURCE = PACKAGE_ROOT / "EDITOR"
 FRAMEWORK_SOURCE = PACKAGE_ROOT / "INTEGRATION" / "TestGame" / "FRAMEWORK"
+AI_CONTEXT_SOURCE = PACKAGE_ROOT / "docs" / "AI_CONTEXT.md"
 VERSION_FILE = PACKAGE_ROOT / "VERSION"
 RUNTIME_FILES = ("runtime.rpy", "option_renderer.rpy")
+MANAGED_CONTEXT_FILES = ("AI_CONTEXT.md",)
 PROJECT_MARKERS = ("options.rpy", "gui.rpy", "script.rpy")
 PROJECT_LAUNCHER = "啟動 Scene Node 編輯器.command"
 
@@ -49,7 +51,9 @@ def resolve_project(raw_target):
 def ignored_editor_files(_directory, names):
     ignored = []
     for name in names:
-        if name in {"__pycache__", ".DS_Store"} or name.endswith((".pyc", ".pyo", ".tmp")):
+        if name in {"__pycache__", ".DS_Store", "HANDOFF.md"} or name.endswith(
+            (".pyc", ".pyo", ".tmp")
+        ):
             ignored.append(name)
     return ignored
 
@@ -98,7 +102,7 @@ wait "$SERVER_PID"
 def install(raw_target):
     project_root, game_root = resolve_project(raw_target)
 
-    for source in (EDITOR_SOURCE, FRAMEWORK_SOURCE):
+    for source in (EDITOR_SOURCE, FRAMEWORK_SOURCE, AI_CONTEXT_SOURCE):
         if not source.exists():
             raise InstallError("安裝包不完整：缺少 {}。".format(source.relative_to(PACKAGE_ROOT)))
     for filename in RUNTIME_FILES:
@@ -116,12 +120,14 @@ def install(raw_target):
         dirs_exist_ok=True,
         ignore=ignored_editor_files,
     )
+    (installed_editor / "HANDOFF.md").unlink(missing_ok=True)
+    shutil.copy2(AI_CONTEXT_SOURCE, install_root / "AI_CONTEXT.md")
 
     installed_framework.mkdir(parents=True, exist_ok=True)
     for filename in RUNTIME_FILES:
         shutil.copy2(FRAMEWORK_SOURCE / filename, installed_framework / filename)
 
-    for directory in ("DATA", "SCENENODE", "SCENESCREEN"):
+    for directory in ("DATA", "SCENENODE"):
         (game_root / directory).mkdir(parents=True, exist_ok=True)
     stats_file = game_root / "DATA" / "Stats.json"
     if not stats_file.exists():
@@ -134,6 +140,7 @@ def install(raw_target):
         "version": version,
         "installed_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
         "managed_runtime_files": list(RUNTIME_FILES),
+        "managed_context_files": list(MANAGED_CONTEXT_FILES),
     }
     (install_root / "manifest.json").write_text(
         json.dumps(manifest, ensure_ascii=False, indent=2) + "\n",
