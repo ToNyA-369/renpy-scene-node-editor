@@ -38,7 +38,7 @@ Installer 會將一份精簡契約放在：
 在 game/screens.rpy 建立一個無參數的 room_hud Screen，顯示 money Stat。
 使用 scene_get_stat("money", 0) 讀取，不要直接修改 State。
 不要修改 FRAMEWORK 或 Options.json。
-完成後告訴我應在 Node 的 Scene Screen 欄位選擇哪個名稱。
+在指定的 On Enter Content 使用 show screen room_hud，並在對應 On Exit Content 使用 hide screen room_hud。
 ```
 
 ## 撰寫 Content 演出
@@ -69,7 +69,7 @@ Installer 會將一份精簡契約放在：
 
 - 修改 `FRAMEWORK/runtime.rpy` 或 `option_renderer.rpy`。
 - 新增／刪除 Schema 欄位。
-- 改變 Trigger、REDO、GOTO、EXIT 或 Scene Stack 語意。
+- 改變 Trigger、REDO、GOTO、REPLACE、EXIT 或 Scene Stack 語意。
 - 重新命名穩定 ID 或搬移被引用的 labels。
 - 改變 Installer 覆寫範圍或存檔相容性。
 

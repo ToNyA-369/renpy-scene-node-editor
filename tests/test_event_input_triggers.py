@@ -18,19 +18,19 @@ import app  # noqa: E402
 
 
 def event_document(trigger):
-    return {
+    event = {
         "ID": "input_event",
         "Name": "輸入事件",
         "Trigger": trigger,
         "Priority": 3,
-        "Weight": 1,
         "Once": False,
         "Conditions": [],
         "Effects": [],
         "Content": None,
-        "End up": "REDO",
-        "Next Node": None,
     }
+    if trigger not in ("Auto:Enter", "Auto:Exit"):
+        event.update({"Weight": 1, "End up": "REDO", "Next Node": None})
+    return event
 
 
 class FakeRenpy:
@@ -44,7 +44,6 @@ class FakeRenpy:
             "SCENENODE/root/Node.json": {
                 "ID": "root",
                 "Name": "ROOT",
-                "Background": "images/room.png",
             },
             "SCENENODE/root/Options.json": {"Version": 1, "Canvas": {}, "Elements": []},
             "SCENENODE/root/EVENTPOOL/keyboard.json": event_document("Keyboard:shift_K_k"),
@@ -71,17 +70,8 @@ class FakeRenpy:
     def has_image(self, name):
         return False
 
-    def loadable(self, filename):
-        return filename == "images/room.png"
-
     def show(self, name, **kwargs):
         self.show_calls.append((name, kwargs))
-
-    def show_screen(self, *args, **kwargs):
-        pass
-
-    def hide_screen(self, *args, **kwargs):
-        pass
 
 
 def load_runtime_namespace():
@@ -89,16 +79,21 @@ def load_runtime_namespace():
     init_block = source.split("\ndefault scene_stats", 1)[0]
     python_source = textwrap.dedent(init_block.split("\n", 1)[1])
     renpy = FakeRenpy()
-    namespace = {"renpy": renpy, "ui": types.SimpleNamespace(adjustment=lambda: object())}
+    namespace = {
+        "renpy": renpy,
+        "ui": types.SimpleNamespace(adjustment=lambda: object()),
+    }
     exec(compile(python_source, str(RUNTIME), "exec"), namespace)
     namespace["scene_reset_state"]()
     return namespace, renpy
 
 
 class EventInputTriggerTest(unittest.TestCase):
-    def test_event_schema_accepts_four_trigger_sources(self):
+    def test_event_schema_accepts_all_trigger_sources(self):
         for trigger in (
-            "Auto",
+            "Auto:Enter",
+            "Auto:Node",
+            "Auto:Exit",
             "Action:continue",
             "Keyboard:meta_shift_K_k",
             "Mouse:Left",
@@ -111,6 +106,8 @@ class EventInputTriggerTest(unittest.TestCase):
             "Keyboard:",
             "Keyboard:not a keysym",
             "Keyboard:banana",
+            "Auto",
+            "Auto:Normal",
             "Mouse:Button8",
             "Gamepad:A",
             "custom_trigger",
@@ -118,6 +115,41 @@ class EventInputTriggerTest(unittest.TestCase):
             with self.subTest(trigger=trigger):
                 with self.assertRaises(app.ApiError):
                     app.validate_event(event_document(trigger))
+
+    def test_lifecycle_schema_omits_weight_and_transition_fields(self):
+        event = event_document("Auto:Enter")
+        event.update({"Weight": 99, "End up": "GOTO", "Next Node": "other"})
+
+        validated = app.validate_event(event)
+
+        self.assertNotIn("Weight", validated)
+        self.assertNotIn("End up", validated)
+        self.assertNotIn("Next Node", validated)
+
+    def test_event_schema_rejects_audio_effects(self):
+        event = event_document("Auto:Node")
+        event["Effects"] = [{"type": "bgm", "op": "play", "id": "audio/theme.ogg"}]
+
+        with self.assertRaises(app.ApiError):
+            app.validate_event(event)
+
+    def test_event_schema_accepts_replace_with_single_or_weighted_next_node(self):
+        for next_node in ("target", {"target": 1, "alternate": 3}):
+            with self.subTest(next_node=next_node):
+                event = event_document("Action:replace")
+                event.update({"End up": "REPLACE", "Next Node": next_node})
+
+                validated = app.validate_event(event)
+
+                self.assertEqual(validated["End up"], "REPLACE")
+                self.assertEqual(validated["Next Node"], next_node)
+
+    def test_event_schema_rejects_replace_without_next_node(self):
+        event = event_document("Action:replace")
+        event.update({"End up": "REPLACE", "Next Node": None})
+
+        with self.assertRaisesRegex(app.ApiError, "REPLACE Event 必須設定 Next Node"):
+            app.validate_event(event)
 
     def test_runtime_maps_keyboard_and_mouse_events_to_keysyms(self):
         runtime, renpy = load_runtime_namespace()
@@ -150,17 +182,12 @@ class EventInputTriggerTest(unittest.TestCase):
         self.assertIn("for keysym, trigger in (input_bindings or []):", source)
         self.assertIn("key keysym action Return(trigger)", source)
 
-    def test_runtime_accepts_node_background_file_paths(self):
-        runtime, renpy = load_runtime_namespace()
+    def test_runtime_leaves_native_screen_management_to_content(self):
+        source = RUNTIME.read_text(encoding="utf-8")
 
-        runtime["scene_begin"]("root")
-        runtime["scene_show_current_node"]()
-
-        self.assertEqual(renpy.scene_calls, 1)
-        self.assertEqual(
-            renpy.show_calls,
-            [("scene_node_background", {"what": "images/room.png"})],
-        )
+        self.assertNotIn("scene_show_current_node", source)
+        self.assertNotIn("scene_active_screen", source)
+        self.assertNotIn("renpy.show_screen", source)
 
 
 if __name__ == "__main__":

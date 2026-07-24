@@ -28,10 +28,8 @@ call scene_runtime_start()
 進入「節點」：
 
 1. 將 Name 改成「門前」。
-2. Background 可選擇 `game/images/` 中的圖片，或維持 `None`。
-3. Scene Screen 可先保持空白。
 
-Background 是遊戲場景圖片；Scene Screen 是創作者在 `.rpy` 中自行撰寫的 HUD 或介面外殼。
+節點頁的其餘資訊是由 Events、Options、Content 與流程引用即時計算的摘要，不會寫入額外 Schema。背景、音樂與 Screen 稍後可由 On Enter Event 的 Content 使用原生 Ren'Py 語法建立。
 
 ## 4. 建立玩家 Option
 
@@ -111,10 +109,11 @@ Next Node   門後
 Option → Action:open_door → Event → Effect → Content → GOTO
 ```
 
-## 9. 理解三種流程結果
+## 9. 理解四種流程結果
 
 - `REDO`：留在目前節點，Content 結束後重新顯示 Options。
 - `GOTO`：進入另一個節點，並將它放入 Scene Stack。
+- `REPLACE`：需要目前 Stack 有父層，將目前節點原子替換為目標節點；目標 EXIT 後會回到原本父節點。
 - `EXIT`：離開目前節點，回到父節點；ROOT 執行 EXIT 會結束 Runner。
 
 ## 10. 檢查與執行
@@ -129,8 +128,10 @@ Option → Action:open_door → Event → Effect → Content → GOTO
 
 - 在同一 Trigger 建立有 Conditions 的高優先 Event，以及無條件 fallback。
 - 使用 Keyboard 或 Mouse Trigger。
+- 建立 On Enter Content，使用 `scene room with dissolve` 或 `play music ... fadein 1.0` 設定進場演出。
+- 建立 On Exit Content，處理離場淡出或音訊清理。
 - 在畫布加入 Picture 或 Hitbox。
 - 使用 Memory 記錄鑰匙、章節或已觸發事件。
-- 在自己的 `screens.rpy` 建立 HUD，並由 Node 的 Scene Screen 引用。
+- 在自己的 `screens.rpy` 建立 HUD，並由 On Enter／On Exit Content 使用 `show screen`／`hide screen` 控制。
 
 繼續閱讀 [Editor 使用指南](USER_GUIDE.md) 與 [Schema／Runtime 參考](REFERENCE.md)。

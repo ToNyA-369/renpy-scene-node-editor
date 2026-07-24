@@ -39,16 +39,12 @@ This document defines the current public-alpha data and Runtime contracts. For n
 ```json
 {
   "ID": "room",
-  "Name": "My room",
-  "Background": "images/room.webp",
-  "Screen": "room_hud"
+  "Name": "My room"
 }
 ```
 
 - `ID`: stable technical ID.
 - `Name`: editable display name.
-- `Background`: a `game/images/` path, registered Ren'Py image name, or empty string.
-- `Screen`: a parameterless Screen name or empty string.
 
 ## Options.json
 
@@ -60,7 +56,7 @@ This document defines the current public-alpha data and Runtime contracts. For n
 }
 ```
 
-An empty Preview Background inherits the Node Background and affects only the editor preview.
+`Preview Background` affects only the Options canvas in the editor. An empty string means no preview image and never changes the game scene.
 
 ### Text Box
 
@@ -155,16 +151,48 @@ Options have no lifecycle, per-item visibility rules, or custom Screen source. E
 { "content_day": 3, "content_night": 1 }
 ```
 
+An ordinary Event's `End up` may be `REDO`, `GOTO`, `REPLACE`, or `EXIT`. GOTO and REPLACE require `Next Node`; the Editor shows Node Name while JSON stores the stable Node ID. REPLACE example:
+
+```json
+{
+  "End up": "REPLACE",
+  "Next Node": "adjacent_scene"
+}
+```
+
+`Auto:Enter` and `Auto:Exit` are lifecycle Events and omit `Weight`, `End up`, and `Next Node`:
+
+```json
+{
+  "ID": "room_enter",
+  "Name": "Enter room",
+  "Trigger": "Auto:Enter",
+  "Priority": 1,
+  "Once": false,
+  "Conditions": [],
+  "Effects": [],
+  "Content": "room_enter_presentation"
+}
+```
+
 ## Triggers
 
 ```text
-Auto
+Auto:Enter
+Auto:Node
+Auto:Exit
 Action:<option_id>
 Keyboard:<Ren'Py keysym>
 Mouse:<Left|Middle|Right|WheelUp|WheelDown>
 ```
 
 Mouse maps to Ren'Py keysyms: left / middle / right use `mouseup_1/2/3`; wheel up / down use `mousedown_4/5`.
+
+- `Auto:Enter`: runs when ROOT starts or GOTO / REPLACE enters the node.
+- `Auto:Node`: checked before each interaction and preserves the former Auto semantics.
+- `Auto:Exit`: runs before EXIT / REPLACE removes the current node from the Stack.
+
+Returning from a child through EXIT does not re-run the parent's `Auto:Enter`. Pushing a child through GOTO does not run the parent's `Auto:Exit`.
 
 ## Conditions
 
@@ -202,13 +230,7 @@ Memory:
 
 Operators: `add`, `remove`, `clear`; clear does not use `id`.
 
-Audio:
-
-```json
-{ "type": "bgm", "id": "audio/theme.ogg", "op": "play", "persistent": false }
-```
-
-Types are `bgm` and `se`; operations are `play` and `stop`. Non-persistent audio is released when its node exits.
+Event Effects handle only Stats and Memories. Backgrounds, music, sound effects, transitions, and fades belong in Content labels using native Ren'Py syntax. Options may still select Hover Sound and Click Sound from `game/audio/`.
 
 ## Stats and Memories
 
@@ -231,21 +253,46 @@ Types are `bgm` and `se`; operations are `play` and `stop`. Non-persistent audio
 
 ## Event selection
 
+`Auto:Node`, Option, Keyboard, and Mouse use the single-selection flow:
+
 1. Collect Events in the current Node with the same Trigger.
 2. Exclude failed Conditions and completed Once Events.
 3. Find the minimum Priority.
 4. Choose one Event by Weight only within that Priority.
 5. Apply Effects.
 6. Choose and call Content.
-7. Resolve End up.
+7. Select a single or weighted GOTO / REPLACE Next Node during prepare, then validate it after Content returns and before any On Exit.
+8. Resolve End up.
+
+`Auto:Enter` and `Auto:Exit` use the lifecycle batch flow:
+
+1. Evaluate all Conditions and Once markers against one state snapshot before any Effects run.
+2. Sort every matching Event by ascending Priority, then Event ID.
+3. Apply each Event's Effects and call its Content in order.
+
+Lifecycle Events do not use Weight and do not change the Scene Stack.
 
 ## Scene Stack
 
 - `REDO`: stay in the current Node and begin another iteration.
 - `GOTO`: push the destination Node onto the stack.
+- `REPLACE`: require an actual Stack depth greater than one and atomically replace the top: `[parent, current] -> [parent, target]`.
 - `EXIT`: pop the current Node; return to its parent, or end the Runner at ROOT.
 
 Effects run before Content. A Content label must `return` so the Runner can resolve End up.
+
+REPLACE runs in this order: Event Effects, Event Content, destination validation, current On Exit, atomic top replacement, destination On Enter, then destination On Node / Options. The current On Exit Conditions can therefore observe state changed by the main Event's Effects and Content. The parent runs no On Enter, On Exit, On Node, or Options during the transition. A later EXIT from the destination returns to the original parent, never the replaced node.
+
+The parent restriction uses the live Stack depth, not the configured Root Node ID. A node started as the first level with `scene_runtime_start("node_id")` therefore cannot REPLACE either, and the Runtime reports a clear error. REPLACE does not use a static Parent field and does not restrict destinations by folder.
+
+Use native Ren'Py in lifecycle Content for presentation and audio:
+
+```renpy
+label room_enter_presentation:
+    scene room with dissolve
+    play music "audio/room.ogg" fadein 1.0
+    return
+```
 
 ## Public Runtime entry points
 
@@ -268,11 +315,19 @@ Do not call other internal `scene_*` helpers from game content.
 
 ## Ren'Py Screen
 
-The Node `Screen` displays a scene shell or HUD and does not wait for a return value. It must be parameterless:
+Screens and HUDs are native Ren'Py presentation and are not stored in the Node Schema. Content explicitly shows, hides, or calls them:
 
 ```renpy
 screen room_hud():
     text "Money: [scene_get_stat('money', 0)]"
+
+label room_enter_presentation:
+    show screen room_hud
+    return
+
+label room_exit_presentation:
+    hide screen room_hud
+    return
 ```
 
 Player input still comes from data-driven Options, Keyboard, or Mouse Triggers.

@@ -14,7 +14,7 @@ Scene Node Editor 是一套在本機瀏覽器執行的 Ren'Py 內容編輯器，
 | Conditions、Effects、Priority、Weight | 圖片、音效、字型與動畫素材 |
 | Stats、Memory Banks、Once 狀態 | 角色、對話、ATL、Transform |
 | Content label 引用與節點流程 | 道具、時間、任務等專案專屬系統 |
-| GOTO 關聯圖與專案檢查 | 劇情內容與遊戲設計 |
+| GOTO／REPLACE 關聯圖與專案檢查 | 劇情內容與遊戲設計 |
 
 Editor 不會覆寫創作者的 `gui.rpy`、`screens.rpy` 或其他介面文件，也不要求以自訂 Screen 取代資料化 Options。
 
@@ -40,16 +40,19 @@ label start:
 
 ```mermaid
 flowchart LR
-    A["Option / Keyboard / Mouse / Auto"] --> B["Trigger"]
+    A["Option / Keyboard / Mouse / Auto lifecycle"] --> B["Trigger"]
     B --> C["Event Conditions"]
     C --> D["Effects"]
     D --> E["Content label"]
-    E --> F["REDO / GOTO / EXIT"]
+    E --> F["REDO / GOTO / REPLACE / EXIT"]
 ```
 
 - Option 只產生 Trigger，不直接選擇 Event。
 - Event 負責 Conditions、Effects、Content 與流程結果。
 - Content 保存的是 Ren'Py `label` 名稱，不是 `.rpy` 文件名。
+- On Enter／On Exit 可在節點邊界依序執行多個 Events；On Node 沿用原本 Auto 的單一選擇。
+- REPLACE 會將 Stack 頂端直接替換為目標節點，不會恢復或重新執行父節點流程。
+- 背景、音訊與轉場由 Content 使用 Ren'Py 原生語法完成。
 - `gui.rpy` 與 `screens.rpy` 仍由創作者自行撰寫。
 
 ## 更新與資料安全

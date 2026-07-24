@@ -10,7 +10,7 @@
 輸入來源 → Trigger → Event → Effects → Content → End up
 ```
 
-輸入來源包含 Option、Keyboard、Mouse 與 Auto。Trigger 只描述「發生了什麼」；目前 Scene Node 的 Event Pool 才決定反應。
+輸入來源包含 Option、Keyboard、Mouse 與三種 Auto 時機。Trigger 只描述「發生了什麼」；目前 Scene Node 的 Event Pool 才決定反應。
 
 ## 責任邊界
 
@@ -29,28 +29,28 @@
 Scene Node 是一個玩家互動單位。每個節點可設定：
 
 - Name 與穩定 ID。
-- `game/images/` 中的 Background，或 `None`。
-- 一個無參數 Scene Screen。
 - 自己的 Options、Event Pool 與 Content 文件。
 
 ROOT 是 Runtime 的起點。要刪除 ROOT，必須先將另一個節點設為起始節點。仍被 Event 的 Next Node 引用的節點不能刪除。
 
-Scene Screen 適合 HUD 或場景外殼。它不選 Event、不執行 GOTO，也不取代 Options Renderer。
+Node 不保存 Screen。HUD、場景外殼與其他 Screen 由創作者在 `.rpy` 中定義，再由 Content 使用 Ren'Py 原生 `show screen`、`hide screen` 或 `call screen` 控制。
 
 ## 事件
 
 Event 是目前節點對 Trigger 的反應。主要欄位：
 
-- `Trigger`：Auto、Option、Keyboard 或 Mouse。
+- `Trigger`：On Enter、On Node、On Exit、Option、Keyboard 或 Mouse。
 - `Priority`：數字越小越優先；只在最低 Priority 層中選擇。
-- `Weight`：同 Trigger、同 Priority 且 Conditions 都通過時的相對機率。
+- `Weight`：On Node／玩家輸入中，同 Trigger、同 Priority且 Conditions 都通過時的相對機率。
 - `Once`：全遊戲只成功觸發一次。
 - `Conditions`：Event 是否能成為候選。
-- `Effects`：選中 Event 後先套用的狀態或音效改變。
+- `Effects`：Event 執行時先套用的 Stat 或 Memory 改變。
 - `Content`：接著呼叫的 Ren'Py label，可使用權重。
-- `End up`：Content 返回後執行 REDO、GOTO 或 EXIT。
+- `End up`：Content 返回後執行 REDO、GOTO、REPLACE 或 EXIT。GOTO／REPLACE 都可使用單一或權重 Next Node。
 
 UI 中的 `Option` 技術格式仍是 `Action:<id>`。Event 選擇器會列出目前節點 Options 已註冊的 Triggers。
+
+Picture 與 Preview Background 只列出 `game/images/`；Options 的 Hover Sound／Click Sound 只列出 `game/audio/`。資源可用子資料夾整理，Editor 會保留其階層供選擇，但選定欄位只顯示檔名。遊戲場景、BGM、SE 與轉場請在 Content 使用 Ren'Py 原生語法。
 
 ### Fallback
 
@@ -60,12 +60,16 @@ UI 中的 `Option` 技術格式仍是 `Action:<id>`。Event 選擇器會列出�
 
 | UI | 保存格式 | 用途 |
 | --- | --- | --- |
-| Auto | `Auto` | 每輪先由 Runner 主動檢查 |
+| On Enter | `Auto:Enter` | ROOT 啟動或 GOTO／REPLACE 進入節點時執行全部符合事件 |
+| On Node | `Auto:Node` | 每輪互動前沿用原 Auto 的單一事件選擇 |
+| On Exit | `Auto:Exit` | EXIT／REPLACE 將目前節點移出 Stack 前執行全部符合事件 |
 | Option | `Action:<id>` | 由資料化 Option 回傳 |
 | Keyboard | `Keyboard:<keysym>` | 在 Options 互動期間監聽鍵盤 |
 | Mouse | `Mouse:<button>` | 左、中、右鍵或滾輪 |
 
 Keyboard 欄位聚焦後直接按下按鍵或組合鍵即可錄製。
+
+On Enter／On Exit 會先以同一份狀態快照判斷 Conditions，再依 Priority、Event ID 執行所有符合 Events；它們沒有 Weight、End up 或 Next Node。GOTO 子節點不算父節點退出，而子節點 EXIT 回到父節點也不算重新進入父節點。REPLACE 則執行目前節點的 On Exit，再直接進入目標節點的 On Enter；中間的父節點不會執行生命週期、On Node 或 Options。
 
 ## 選項
 
@@ -79,19 +83,23 @@ Options 是固定資料化的玩家互動介面。所有顯示的選項都可操
 
 表單模式負責 Name、Text、Trigger、圖片與聲音。畫布模式負責位置、尺寸、圖層、Hover、顏色與視覺細節。
 
-畫布 Preview Background 預設繼承 Node Background；自選圖片只改變該 Options 文件的預覽。
+畫布 Preview Background 只改變該 Options 文件的 Editor 預覽；留空代表沒有預覽底圖，不影響遊戲畫面。
 
 Options 使用單一 Interaction 生命週期：玩家輸入 Trigger 後 Screen 結束；若 Event 使用 REDO，Runner 會重新呼叫它。
 
 ## 演出 Content
 
-Content 是 Editor 管理位置與引用的原生 `.rpy` 文件。創作者仍在 label 中撰寫對話、角色、轉場、ATL 或自訂 Python。
+Content 是 Editor 管理位置與引用的原生 `.rpy` 文件。創作者仍在 label 中撰寫對話、角色、背景、音訊、轉場、ATL 或自訂 Python。
 
 ```renpy
 label content_example:
+    scene room with dissolve
+    play music "audio/room.ogg" fadein 1.0
     "這是一段演出。"
     return
 ```
+
+要在進入節點時顯示背景或播放音樂，可讓 `Auto:Enter` Event 指向這個 label；離開時的淡出或清理則使用 `Auto:Exit` Content。
 
 Content label 應返回 Runner。不要在一般 Content 中自行複製 Event Effects 或直接改寫 Scene Stack。
 
@@ -109,7 +117,7 @@ Memory Banks 保存標籤。Conditions 使用 `has`／`not_has`，Effects 使用
 
 ## 關聯圖
 
-關聯圖依 GOTO／Next Node 產生唯讀有向圖。它不直接建立或修改 Event。
+關聯圖依 GOTO／REPLACE 的 Next Node 產生唯讀有向圖。GOTO 使用實線，REPLACE 使用同色虛線；若 `Parent → A` 是 GOTO 且 `A → B` 是 REPLACE，圖上另以較透明的實線顯示推導出的 `Parent → B` 管理關係。它不建立 Schema Parent，也不直接修改 Event。
 
 - 滾輪或觸控板雙指上下移動：以游標位置縮放。
 - 拖曳空白處：平移。
@@ -122,20 +130,21 @@ Memory Banks 保存標籤。Conditions 使用 `has`／`not_has`，Effects 使用
 在執行遊戲或提交版本前，使用「檢查」確認：
 
 - JSON 與 Schema 合法。
-- Stat、Memory、Content、Screen 與 Next Node 引用存在。
+- Stat、Memory、Content 與 Next Node 引用存在。
 - ROOT 與 Runtime 入口已設定。
 
 檢查通過不代表遊戲設計必然正確；Conditions、權重與劇情結果仍需實際遊玩驗證。
 
 ## 自訂 Ren'Py 介面
 
-`gui.rpy` 適合全域尺寸、字型與樣式變數；`screens.rpy` 或其他 `.rpy` 適合 Screen 結構。Editor 會掃描 Screen 名稱供節點引用，但不修改這些文件。
+`gui.rpy` 適合全域尺寸、字型與樣式變數；`screens.rpy` 或其他 `.rpy` 適合 Screen 結構。Editor 不掃描或保存 Screen 引用；顯示與關閉時機由 Content 的原生 Ren'Py 語法決定。
 
 若需要 Editor 尚未資料化的系統，例如背包、日曆或地圖，請在創作者 `.rpy` 中實作，再透過 Content、Stats、Memories 或公開 Runtime API 連接。不要把它藏進 Options Renderer。
 
 ## 儲存、更新與復原
 
-- Editor 預設自動儲存；切換節點或分頁前會完成待處理寫入。
+- Editor 預設自動儲存；較舊的儲存回應不會覆蓋較新的修改，切換節點或分頁前會完成目前待處理寫入。
+- 階層下拉選單可用 `↑`／`↓` 巡覽、`→` 進入子層、`←` 返回父層、Enter 選取及 Esc 關閉。
 - 快捷鍵與 Editor 設定存於專案根目錄 `.scene-node-editor/settings.json`。
 - 重新執行 Installer 只更新受管理 Editor／Runtime。
 - 刪除的節點移至 `.scene-node-trash/`，不會由 Ren'Py 載入。

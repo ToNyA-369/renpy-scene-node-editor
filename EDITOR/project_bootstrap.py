@@ -54,8 +54,6 @@ def default_root_node(root_node=ROOT_NODE_ID):
     return {
         "ID": root_node,
         "Name": "ROOT",
-        "Background": "",
-        "Screen": "",
     }
 
 

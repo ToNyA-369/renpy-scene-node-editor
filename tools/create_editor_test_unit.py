@@ -3,11 +3,15 @@
 
 import argparse
 import base64
+import io
 import json
+import math
 import os
 import platform
+import struct
 import subprocess
 import sys
+import wave
 from pathlib import Path
 
 import install
@@ -15,18 +19,56 @@ import install
 
 TEST_UI_FILE = "scene_editor_test_ui.rpy"
 TEST_IMAGE_FILE = "images/scene_editor_test_picture.png"
+TEST_IMAGE_GALLERY = tuple(
+    "images/editor_test/gallery/set_{}/asset_{:02d}.png".format("a" if index < 10 else "b", index + 1)
+    for index in range(18)
+)
+TEST_AUDIO_FILES = {
+    "audio/editor_test/music/theme_a.wav": (220.0, 1.0),
+    "audio/editor_test/music/theme_b.wav": (329.63, 1.0),
+    "audio/editor_test/sfx/layer_low.wav": (440.0, 0.45),
+    "audio/editor_test/sfx/ui/layer_high.wav": (659.25, 0.45),
+    "audio/editor_test/sfx/ui/deep/fourth_level.wav": (783.99, 0.45),
+}
 TEST_MANIFEST_FILE = "SCENE_EDITOR_TEST_UNIT.json"
 ROOT_NODE = "root"
 OPTIONS_NODE = "options_lab"
 BRANCH_NODE = "branch_lab"
 SUCCESS_NODE = "outcome_success"
 FALLBACK_NODE = "outcome_fallback"
-TEST_NODES = (ROOT_NODE, OPTIONS_NODE, BRANCH_NODE, SUCCESS_NODE, FALLBACK_NODE)
+REPLACE_PARENT_NODE = "replace_parent"
+REPLACE_CHILD_A_NODE = "replace_child_a"
+REPLACE_CHILD_B_NODE = "replace_child_b"
+TEST_NODES = (
+    ROOT_NODE,
+    OPTIONS_NODE,
+    BRANCH_NODE,
+    SUCCESS_NODE,
+    FALLBACK_NODE,
+    REPLACE_PARENT_NODE,
+    REPLACE_CHILD_A_NODE,
+    REPLACE_CHILD_B_NODE,
+)
 
 # A tiny valid PNG which the DATA Picture option stretches and tints.
 TEST_PNG = base64.b64decode(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
 )
+
+
+def test_wav(frequency, duration, sample_rate=22050):
+    frames = bytearray()
+    for index in range(int(sample_rate * duration)):
+        envelope = min(1.0, index / 400.0, (sample_rate * duration - index) / 800.0)
+        sample = int(7000 * envelope * math.sin(2 * math.pi * frequency * index / sample_rate))
+        frames.extend(struct.pack("<h", sample))
+    output = io.BytesIO()
+    with wave.open(output, "wb") as handle:
+        handle.setnchannels(1)
+        handle.setsampwidth(2)
+        handle.setframerate(sample_rate)
+        handle.writeframes(bytes(frames))
+    return output.getvalue()
 
 
 class EditorTestUnitError(Exception):
@@ -76,7 +118,7 @@ def assert_disposable_blank_project(project_root, game_root):
         game_root / TEST_UI_FILE,
         game_root / TEST_MANIFEST_FILE,
         game_root / TEST_IMAGE_FILE,
-    )
+    ) + tuple(game_root / path for path in TEST_IMAGE_GALLERY) + tuple(game_root / path for path in TEST_AUDIO_FILES)
     existing = [path for path in protected_paths if path.exists()]
     if existing:
         relative = [path.relative_to(project_root).as_posix() for path in existing]
@@ -121,19 +163,23 @@ def event_data(
     end_up="REDO",
     next_node=None,
 ):
-    return {
+    result = {
         "ID": event_id,
         "Name": name,
         "Trigger": trigger,
         "Priority": priority,
-        "Weight": weight,
         "Once": once,
         "Conditions": conditions or [],
         "Effects": effects or [],
         "Content": content,
-        "End up": end_up,
-        "Next Node": next_node if end_up == "GOTO" else None,
     }
+    if trigger not in ("Auto:Enter", "Auto:Exit"):
+        result.update({
+            "Weight": weight,
+            "End up": end_up,
+            "Next Node": next_node if end_up in ("GOTO", "REPLACE") else None,
+        })
+    return result
 
 
 def option_item(item_id, text, trigger):
@@ -146,7 +192,18 @@ def option_item(item_id, text, trigger):
     }
 
 
-def textbox_element(element_id, name, items, *, x=500, y=210, width=920, height=580):
+def textbox_element(
+    element_id,
+    name,
+    items,
+    *,
+    x=500,
+    y=210,
+    width=920,
+    height=580,
+    hover_sound="",
+    click_sound="",
+):
     return {
         "ID": element_id,
         "Name": name,
@@ -173,8 +230,8 @@ def textbox_element(element_id, name, items, *, x=500, y=210, width=920, height=
             "Text Align": 0.5,
         },
         "Hover": {"Enabled": True, "Color": "#35c99155"},
-        "Hover Sound": "",
-        "Click Sound": "",
+        "Hover Sound": hover_sound,
+        "Click Sound": click_sound,
         "Items": items,
     }
 
@@ -197,10 +254,21 @@ def root_options_data():
         option_item("spend", "花費 15 點（條件＋fallback）", "Action:spend"),
         option_item("once_bonus", "領取一次性 25 點獎勵", "Action:once_bonus"),
         option_item("open_options", "前往 Options 元件實驗室", "Action:open_options"),
+        option_item("open_replace", "前往 REPLACE Stack 實驗室", "Action:open_replace"),
         option_item("finish", "結束這次 Runtime 測試", "Action:finish"),
     ]
     return options_document([
-        textbox_element("root_actions", "綜合測試入口", items, x=600, y=260, width=720, height=520)
+        textbox_element(
+            "root_actions",
+            "綜合測試入口",
+            items,
+            x=600,
+            y=260,
+            width=720,
+            height=520,
+            hover_sound="audio/editor_test/sfx/layer_low.wav",
+            click_sound="audio/editor_test/sfx/ui/layer_high.wav",
+        )
     ])
 
 
@@ -268,8 +336,8 @@ def options_lab_data():
             "Opacity": 1,
             "Tint": "#35c991",
         },
-        "Hover Sound": "",
-        "Click Sound": "",
+        "Hover Sound": "audio/editor_test/sfx/layer_low.wav",
+        "Click Sound": "audio/editor_test/sfx/ui/layer_high.wav",
     }
     hitbox = {
         "ID": "hitbox_mark",
@@ -282,10 +350,12 @@ def options_lab_data():
             "Editor Color": "#28a47d",
             "Editor Opacity": 0.28,
         },
-        "Hover Sound": "",
-        "Click Sound": "",
+        "Hover Sound": "audio/editor_test/sfx/layer_low.wav",
+        "Click Sound": "audio/editor_test/sfx/ui/layer_high.wav",
     }
-    return options_document([textbox_element("data_actions", "DATA Options 綜合測試", items), picture, hitbox])
+    result = options_document([textbox_element("data_actions", "DATA Options 綜合測試", items), picture, hitbox])
+    result["Canvas"]["Preview Background"] = TEST_IMAGE_FILE
+    return result
 
 
 def branch_lab_data():
@@ -319,9 +389,54 @@ def branch_lab_data():
     ])
 
 
+def replace_parent_options_data():
+    return options_document([
+        textbox_element(
+            "replace_parent_actions",
+            "REPLACE Parent",
+            [
+                option_item("enter_child_a", "GOTO Child A", "Action:enter_child_a"),
+                option_item("replace_parent_back", "EXIT 回到 ROOT", "Action:replace_parent_back"),
+            ],
+            x=610,
+            y=360,
+            width=700,
+            height=270,
+        )
+    ])
+
+
+def replace_child_a_options_data():
+    return options_document([
+        textbox_element(
+            "replace_child_a_actions",
+            "REPLACE Child A",
+            [option_item("replace_child", "REPLACE 至 Child B", "Action:replace_child")],
+            x=610,
+            y=400,
+            width=700,
+            height=180,
+        )
+    ])
+
+
+def replace_child_b_options_data():
+    return options_document([
+        textbox_element(
+            "replace_child_b_actions",
+            "REPLACE Child B",
+            [option_item("exit_child_b", "EXIT 回到 Parent", "Action:exit_child_b")],
+            x=610,
+            y=400,
+            width=700,
+            height=180,
+        )
+    ])
+
+
 def screen_source():
     return '''# @display_name: Scene Editor 綜合測試介面
-# 這個文件由創作者自行維護；Editor 只引用 Screen 名稱。
+# 這個文件由創作者自行維護，並由 Content 使用原生 Ren'Py 語法顯示。
 
 screen scene_editor_test_hud():
     zorder 20
@@ -397,6 +512,36 @@ label test_finished:
 '''
 
 
+def lifecycle_content_source():
+    return '''# @display_name: 00 節點生命週期演出
+# 背景與音樂使用原生 Ren'Py 語法；Editor 只負責在節點邊界呼叫 label。
+
+image scene_editor_test_background = "images/scene_editor_test_picture.png"
+
+label test_enter_background:
+    scene scene_editor_test_background with dissolve
+    show screen scene_editor_test_hud
+    "On Enter（Priority 1）：原生 Ren'Py 背景演出已執行。"
+    return
+
+label test_enter_music:
+    play music "audio/editor_test/music/theme_a.wav" fadein 1.0
+    "On Enter（Priority 2）：第二個生命週期 Event 也有依序執行。"
+    return
+
+label test_on_node_once:
+    "On Node：沿用原本 Auto 的單一 Event 選擇，本測試只執行一次。"
+    return
+
+label test_exit_cleanup:
+    "On Exit：在根節點離開前執行原生 Ren'Py 淡出。"
+    hide screen scene_editor_test_hud
+    stop music fadeout 1.0
+    scene black with fade
+    return
+'''
+
+
 def options_content_source():
     return '''# @display_name: DATA Options 操作結果
 
@@ -459,6 +604,45 @@ label test_fallback_return:
 '''
 
 
+def replace_parent_content_source():
+    return '''# @display_name: REPLACE Parent 生命週期
+
+label test_replace_parent_enter:
+    "Parent On Enter：整段 REPLACE 測試只應在首次 GOTO Parent 時看見。"
+    return
+
+label test_replace_parent_node:
+    "Parent On Node：首次進入 Parent 時執行一次。"
+    return
+'''
+
+
+def replace_child_a_content_source():
+    return '''# @display_name: REPLACE Child A 演出
+
+label test_replace_requested:
+    "Child A Event Content：接下來應直接 REPLACE 至 Child B。"
+    return
+
+label test_replace_child_a_exit:
+    "Child A On Exit：REPLACE 前的離場生命週期已執行。"
+    return
+'''
+
+
+def replace_child_b_content_source():
+    return '''# @display_name: REPLACE Child B 演出
+
+label test_replace_child_b_enter:
+    "Child B On Enter：Stack 頂端已由 Child A 原子替換。"
+    return
+
+label test_replace_child_b_exit:
+    "Child B EXIT：應返回 Parent，不可返回 Child A。"
+    return
+'''
+
+
 def write_node(game_root, relative_path, node, options, events, contents):
     node_root = game_root / "SCENENODE" / relative_path
     (node_root / "EVENTPOOL").mkdir(parents=True, exist_ok=True)
@@ -475,8 +659,6 @@ def node_data(node_id, name):
     return {
         "ID": node_id,
         "Name": name,
-        "Background": "",
-        "Screen": "scene_editor_test_hud",
     }
 
 
@@ -509,6 +691,10 @@ def create_editor_test_unit(raw_target):
     )
     write_text(game_root / TEST_UI_FILE, screen_source())
     write_binary(game_root / TEST_IMAGE_FILE, TEST_PNG)
+    for path in TEST_IMAGE_GALLERY:
+        write_binary(game_root / path, TEST_PNG)
+    for path, (frequency, duration) in TEST_AUDIO_FILES.items():
+        write_binary(game_root / path, test_wav(frequency, duration))
     write_json(
         game_root / TEST_MANIFEST_FILE,
         {
@@ -521,6 +707,36 @@ def create_editor_test_unit(raw_target):
 
     action_count = stat_effect("test_actions", "+", 1)
     root_events = [
+        event_data(
+            "root_enter_background",
+            "進入節點：顯示背景",
+            "Auto:Enter",
+            priority=1,
+            content="test_enter_background",
+        ),
+        event_data(
+            "root_enter_music",
+            "進入節點：播放音樂",
+            "Auto:Enter",
+            priority=2,
+            content="test_enter_music",
+        ),
+        event_data(
+            "root_on_node_once",
+            "節點內自動事件",
+            "Auto:Node",
+            priority=0,
+            once=True,
+            effects=[action_count],
+            content="test_on_node_once",
+        ),
+        event_data(
+            "root_exit_cleanup",
+            "離開節點：收尾演出",
+            "Auto:Exit",
+            priority=1,
+            content="test_exit_cleanup",
+        ),
         event_data(
             "earn_points",
             "取得 10 點（權重 Content）",
@@ -572,6 +788,14 @@ def create_editor_test_unit(raw_target):
             next_node=OPTIONS_NODE,
         ),
         event_data(
+            "open_replace_lab",
+            "前往 REPLACE Stack 實驗室",
+            "Action:open_replace",
+            effects=[action_count],
+            end_up="GOTO",
+            next_node=REPLACE_PARENT_NODE,
+        ),
+        event_data(
             "keyboard_input",
             "鍵盤 K 輸入",
             "Keyboard:K_k",
@@ -601,6 +825,7 @@ def create_editor_test_unit(raw_target):
         root_options_data(),
         root_events,
         {
+            "00_lifecycle.rpy": lifecycle_content_source(),
             "01_rewards.rpy": root_reward_source(),
             "02_flow.rpy": root_flow_source(),
         },
@@ -757,6 +982,94 @@ def create_editor_test_unit(raw_target):
             ],
             {"result.rpy": outcome_content_source(success)},
         )
+
+    write_node(
+        game_root,
+        REPLACE_PARENT_NODE,
+        node_data(REPLACE_PARENT_NODE, "REPLACE Parent"),
+        replace_parent_options_data(),
+        [
+            event_data(
+                "replace_parent_enter",
+                "Parent 進入",
+                "Auto:Enter",
+                content="test_replace_parent_enter",
+            ),
+            event_data(
+                "replace_parent_node",
+                "Parent 節點內事件",
+                "Auto:Node",
+                priority=0,
+                once=True,
+                content="test_replace_parent_node",
+            ),
+            event_data(
+                "enter_replace_child_a",
+                "GOTO Child A",
+                "Action:enter_child_a",
+                effects=[action_count],
+                end_up="GOTO",
+                next_node=REPLACE_CHILD_A_NODE,
+            ),
+            event_data(
+                "replace_parent_back",
+                "返回 ROOT",
+                "Action:replace_parent_back",
+                effects=[action_count],
+                end_up="EXIT",
+            ),
+        ],
+        {"replace_parent.rpy": replace_parent_content_source()},
+    )
+
+    write_node(
+        game_root,
+        REPLACE_CHILD_A_NODE,
+        node_data(REPLACE_CHILD_A_NODE, "REPLACE Child A"),
+        replace_child_a_options_data(),
+        [
+            event_data(
+                "replace_child_a_exit",
+                "Child A 離場",
+                "Auto:Exit",
+                content="test_replace_child_a_exit",
+            ),
+            event_data(
+                "replace_child_a_with_b",
+                "REPLACE 至 Child B",
+                "Action:replace_child",
+                effects=[action_count],
+                content="test_replace_requested",
+                end_up="REPLACE",
+                next_node=REPLACE_CHILD_B_NODE,
+            ),
+        ],
+        {"replace_child_a.rpy": replace_child_a_content_source()},
+    )
+
+    write_node(
+        game_root,
+        REPLACE_CHILD_B_NODE,
+        node_data(REPLACE_CHILD_B_NODE, "REPLACE Child B"),
+        replace_child_b_options_data(),
+        [
+            event_data(
+                "replace_child_b_enter",
+                "Child B 進入",
+                "Auto:Enter",
+                content="test_replace_child_b_enter",
+            ),
+            event_data(
+                "replace_child_b_exit",
+                "Child B 返回 Parent",
+                "Action:exit_child_b",
+                effects=[action_count],
+                content="test_replace_child_b_exit",
+                end_up="EXIT",
+            ),
+        ],
+        {"replace_child_b.rpy": replace_child_b_content_source()},
+    )
 
     return {
         "project_root": project_root,

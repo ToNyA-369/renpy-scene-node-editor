@@ -14,7 +14,7 @@ Scene Node Editor is a local browser-based content editor for Ren'Py. It turns n
 | Conditions, Effects, Priority, and Weight | Images, audio, fonts, and animation assets |
 | Stats, Memory Banks, and Once state | Characters, dialogue, ATL, and transforms |
 | Content label references and node flow | Inventory, time, quests, and other game-specific systems |
-| The GOTO graph and project validation | Narrative content and game design |
+| The GOTO / REPLACE graph and project validation | Narrative content and game design |
 
 The editor does not overwrite creator-owned `gui.rpy`, `screens.rpy`, or other interface files, and custom screens do not replace the data-driven Options renderer.
 
@@ -40,16 +40,19 @@ Continue with [Build your first project](docs/en/FIRST_PROJECT.md).
 
 ```mermaid
 flowchart LR
-    A["Option / Keyboard / Mouse / Auto"] --> B["Trigger"]
+    A["Option / Keyboard / Mouse / Auto lifecycle"] --> B["Trigger"]
     B --> C["Event Conditions"]
     C --> D["Effects"]
     D --> E["Content label"]
-    E --> F["REDO / GOTO / EXIT"]
+    E --> F["REDO / GOTO / REPLACE / EXIT"]
 ```
 
 - An Option returns a Trigger; it does not select an Event directly.
 - Events own Conditions, Effects, Content, and the flow result.
 - Content stores a Ren'Py `label` name, not an `.rpy` filename.
+- On Enter and On Exit may run several Events at node boundaries; On Node preserves the former Auto single selection.
+- REPLACE swaps the top of the Scene Stack directly and never resumes or re-runs the parent during the transition.
+- Backgrounds, audio, and transitions use native Ren'Py inside Content.
 - Creators continue to own `gui.rpy` and `screens.rpy`.
 
 ## Updates and data safety

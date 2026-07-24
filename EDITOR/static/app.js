@@ -59,6 +59,11 @@ const EVENT_TRIGGER_MODES = [
   { id: "Keyboard", name: "Keyboard" },
   { id: "Mouse", name: "Mouse" },
 ];
+const AUTO_TRIGGER_CHOICES = [
+  { id: "Auto:Enter", name: "On Enter" },
+  { id: "Auto:Node", name: "On Node" },
+  { id: "Auto:Exit", name: "On Exit" },
+];
 const MOUSE_TRIGGER_CHOICES = [
   { id: "Mouse:Left", name: "左鍵" },
   { id: "Mouse:Middle", name: "中鍵" },
@@ -134,8 +139,8 @@ const state = {
   graphViewBox: null,
   graphLayoutSignature: "",
   graphSearch: "",
-  screenNames: [],
   images: [],
+  audio: [],
   stats: {},
   statsDraft: {},
   memories: {},
@@ -168,6 +173,7 @@ let failedAutosave = null;
 let autosaveRetryTimer = null;
 let autosaveQueuedCount = 0;
 let autosaveInFlight = Promise.resolve(true);
+let autosaveRevision = 0;
 let editorSettingsSave = Promise.resolve(true);
 let editorSettingsSaveFailureNotified = false;
 let workspaceAnimationTimer = null;
@@ -203,7 +209,6 @@ const dom = {
   autosaveDelay: document.querySelector("#autosaveDelay"),
   gridSize: document.querySelector("#gridSize"),
   shortcutList: document.querySelector("#shortcutList"),
-  screenNames: document.querySelector("#screenNames"),
   statNames: document.querySelector("#statNames"),
   nodeNames: document.querySelector("#nodeNames"),
   contentNames: document.querySelector("#contentNames"),
@@ -273,6 +278,7 @@ async function loadEditorSettings() {
 }
 
 function discardPendingAutosave() {
+  autosaveRevision += 1;
   if (autosaveTimer) window.clearTimeout(autosaveTimer);
   if (autosaveRetryTimer) window.clearTimeout(autosaveRetryTimer);
   autosaveTimer = null;
@@ -281,8 +287,14 @@ function discardPendingAutosave() {
   failedAutosave = null;
 }
 
+async function cancelAutosaveAndWait() {
+  discardPendingAutosave();
+  await autosaveInFlight;
+  discardPendingAutosave();
+}
+
 function scheduleAutosave(label, persist) {
-  pendingAutosave = { label, persist };
+  pendingAutosave = { label, persist, revision: ++autosaveRevision };
   failedAutosave = null;
   if (autosaveTimer) window.clearTimeout(autosaveTimer);
   if (autosaveRetryTimer) window.clearTimeout(autosaveRetryTimer);
@@ -290,6 +302,10 @@ function scheduleAutosave(label, persist) {
   setSaveState(state.editorSettings.autosave ? "等待自動儲存" : "尚未儲存", "saving");
   if (!state.editorSettings.autosave) return;
   autosaveTimer = window.setTimeout(runPendingAutosave, state.editorSettings.autosaveDelay);
+}
+
+function isCurrentAutosaveTask(task) {
+  return Boolean(task && task.revision === autosaveRevision);
 }
 
 function retryFailedAutosave() {
@@ -319,9 +335,10 @@ async function runPendingAutosave() {
   autosaveQueuedCount += 1;
   autosaveInFlight = autosaveInFlight.then(async () => {
     try {
-      await task.persist();
+      await task.persist(task);
       return true;
     } catch (error) {
+      if (!isCurrentAutosaveTask(task)) return true;
       const connectionLost = error.code === "NETWORK_ERROR";
       task.retryable = connectionLost;
       if (!pendingAutosave) failedAutosave = task;
@@ -337,6 +354,12 @@ async function runPendingAutosave() {
     }
   });
   const succeeded = await autosaveInFlight;
+  if (!isCurrentAutosaveTask(task)) {
+    if (pendingAutosave && state.editorSettings.autosave && !autosaveTimer) {
+      autosaveTimer = window.setTimeout(runPendingAutosave, state.editorSettings.autosaveDelay);
+    }
+    return true;
+  }
   if (pendingAutosave && state.editorSettings.autosave) {
     if (autosaveTimer) window.clearTimeout(autosaveTimer);
     autosaveTimer = window.setTimeout(runPendingAutosave, state.editorSettings.autosaveDelay);
@@ -419,26 +442,42 @@ function namedOptionTags(items, current, { includeNone = false } = {}) {
   }).join("");
 }
 
-function imageAssetChoices(current = "", leading = []) {
-  const imageDirectoryAssets = state.images.filter((path) => /^images\//i.test(path));
-  const choices = [...leading, ...imageDirectoryAssets.map((path) => ({ id: path, name: path }))];
-  if (current && !choices.some((choice) => choice.id === current)) {
-    choices.push({ id: current, name: `${current}（未找到）` });
-  }
-  return choices;
+function leafName(path) {
+  const parts = String(path || "").split("/").filter(Boolean);
+  return parts[parts.length - 1] || String(path || "");
 }
 
-function nodeBackgroundOptionTags(current = "") {
-  return namedOptionTags(imageAssetChoices(current), current, { includeNone: true });
+function assetOptionTags(paths, current = "", directory = "", leading = []) {
+  const prefix = `${directory.toLocaleLowerCase()}/`;
+  const assets = paths.filter((path) => String(path).toLocaleLowerCase().startsWith(prefix));
+  const known = new Set([...leading.map((item) => String(item.id)), ...assets.map(String)]);
+  const leadingTags = leading.map((item) => {
+    const id = String(item.id);
+    const selected = id === String(current || "") ? " selected" : "";
+    return `<option value="${escapeHtml(id)}"${selected}>${escapeHtml(item.name)}</option>`;
+  }).join("");
+  const assetTags = assets.map((path) => {
+    const value = String(path);
+    const relative = value.slice(directory.length + 1);
+    const selected = value === String(current || "") ? " selected" : "";
+    return `<option value="${escapeHtml(value)}" data-picker-path="${escapeHtml(relative)}"${selected}>${escapeHtml(leafName(value))}</option>`;
+  }).join("");
+  const missing = current && !known.has(String(current))
+    ? `<option value="${escapeHtml(current)}" selected>${escapeHtml(leafName(current))}（未找到）</option>`
+    : "";
+  return leadingTags + assetTags + missing;
+}
+
+function imageOptionTags(current = "", leading = []) {
+  return assetOptionTags(state.images, current, "images", leading);
+}
+
+function audioOptionTags(current = "", leading = []) {
+  return assetOptionTags(state.audio, current, "audio", leading);
 }
 
 function canvasBackgroundOptionTags(current = "") {
-  const nodeBackground = state.nodeDetail?.node?.Background || "";
-  const inheritedLabel = nodeBackground ? `Node Background · ${nodeBackground}` : "Node Background · None";
-  return namedOptionTags(imageAssetChoices(current, [
-    { id: "", name: inheritedLabel },
-    { id: "__none__", name: "None" },
-  ]), current);
+  return imageOptionTags(current, [{ id: "", name: "None" }]);
 }
 
 function actionTriggerName(trigger) {
@@ -453,10 +492,18 @@ function actionTriggerValue(name) {
 
 function eventTriggerMode(trigger) {
   const value = String(trigger || "").trim();
-  if (value === "Auto") return "Auto";
+  if (value.startsWith("Auto:")) return "Auto";
   if (value.startsWith("Keyboard:")) return "Keyboard";
   if (value.startsWith("Mouse:")) return "Mouse";
   return "Action";
+}
+
+function isLifecycleTrigger(trigger) {
+  return trigger === "Auto:Enter" || trigger === "Auto:Exit";
+}
+
+function endUpUsesNextNode(endUp) {
+  return endUp === "GOTO" || endUp === "REPLACE";
 }
 
 function keyboardTriggerKeysym(trigger) {
@@ -571,6 +618,14 @@ function keyboardKeysymDisplay(keysym) {
   return labels.join(isMac ? "" : " + ") || "按下鍵盤按鍵";
 }
 
+function eventTriggerDisplayName(trigger) {
+  const mode = eventTriggerMode(trigger);
+  if (mode === "Action") return actionTriggerName(trigger);
+  if (mode === "Keyboard") return keyboardKeysymDisplay(keyboardTriggerKeysym(trigger));
+  if (mode === "Mouse") return MOUSE_TRIGGER_CHOICES.find((item) => item.id === trigger)?.name || trigger;
+  return AUTO_TRIGGER_CHOICES.find((item) => item.id === trigger)?.name || trigger;
+}
+
 function statChoices() {
   return Object.entries(state.stats).map(([id, values]) => ({ id, name: values.Name || id }));
 }
@@ -611,10 +666,20 @@ function contentChoices() {
   const choices = [];
   for (const file of state.nodeDetail?.contents || []) {
     for (const id of file.labels || []) {
-      choices.push({ id, name: id, file: file.file || `${file.name}.rpy` });
+      choices.push({ id, name: contentLabelDisplayName(file, id), file: contentFileDisplayName(file) });
     }
   }
   return choices;
+}
+
+function contentFileDisplayName(file) {
+  return String(file?.displayName || leafName(file?.file || `${file?.name || "Content"}.rpy`));
+}
+
+function contentLabelDisplayName(file, label) {
+  const labels = file?.labels || [];
+  if (labels.length === 1) return contentFileDisplayName(file);
+  return String(label || "尚未選擇");
 }
 
 function contentLabelFile(label) {
@@ -627,11 +692,81 @@ function selectedOptionLabel(select) {
     || "尚未選擇";
 }
 
+const SUBMENU_GAP = 14;
+const SUBMENU_CLOSE_DELAY = 180;
+const SELECT_MENU_WIDTH = 240;
+const submenuCloseTimers = new WeakMap();
+
+function clearSubmenuClose(branch) {
+  const timer = submenuCloseTimers.get(branch);
+  if (timer) window.clearTimeout(timer);
+  submenuCloseTimers.delete(branch);
+}
+
+function closeSubmenuTree(branch) {
+  if (!branch) return;
+  [branch, ...branch.querySelectorAll(".select-choice-branch, .content-file-branch")].forEach((item) => {
+    clearSubmenuClose(item);
+    item.classList.remove("submenu-open");
+    item.querySelector(":scope > [aria-haspopup='menu']")?.setAttribute("aria-expanded", "false");
+  });
+}
+
+function setSubmenuOpen(branch, opening, position) {
+  if (!branch) return;
+  clearSubmenuClose(branch);
+  if (!opening) {
+    closeSubmenuTree(branch);
+    return;
+  }
+  if (opening) {
+    [...branch.parentElement.children].forEach((sibling) => {
+      if (sibling === branch || !sibling.classList?.contains(branch.classList[0])) return;
+      closeSubmenuTree(sibling);
+    });
+  }
+  branch.classList.add("submenu-open");
+  branch.querySelector(":scope > [aria-haspopup='menu']")?.setAttribute("aria-expanded", "true");
+  position(branch);
+}
+
+function scheduleSubmenuClose(branch) {
+  clearSubmenuClose(branch);
+  submenuCloseTimers.set(branch, window.setTimeout(() => {
+    setSubmenuOpen(branch, false, () => {});
+  }, SUBMENU_CLOSE_DELAY));
+}
+
+function directMenuItems(menu, folderSelector, choiceSelector) {
+  if (!menu) return [];
+  return [...menu.children].map((child) => {
+    if (child.matches?.(choiceSelector)) return child;
+    return child.querySelector?.(`:scope > ${folderSelector}`) || null;
+  }).filter((item) => item && !item.disabled && item.offsetParent !== null);
+}
+
+function focusRelativeMenuItem(active, key, folderSelector, choiceSelector) {
+  const menu = active.closest(".select-choice-menu, .select-choice-submenu, .content-choice-menu, .content-label-submenu");
+  const items = directMenuItems(menu, folderSelector, choiceSelector);
+  const current = items.indexOf(active);
+  if (current < 0 || !items.length) return false;
+  const next = key === "Home" ? 0
+    : key === "End" ? items.length - 1
+      : (current + (key === "ArrowDown" ? 1 : -1) + items.length) % items.length;
+  items[next]?.focus();
+  return true;
+}
+
 function closeSelectPickers(except = null) {
   document.querySelectorAll(".select-choice-picker.open").forEach((picker) => {
     if (picker === except) return;
     picker.classList.remove("open");
     picker.querySelector("[data-select-picker-toggle]")?.setAttribute("aria-expanded", "false");
+    picker.querySelectorAll(".select-choice-branch").forEach((branch) => {
+      clearSubmenuClose(branch);
+      branch.classList.remove("submenu-open");
+      branch.querySelector(":scope > [data-select-folder-toggle]")?.setAttribute("aria-expanded", "false");
+    });
   });
 }
 
@@ -639,7 +774,7 @@ function populateSelectMenu(select, picker) {
   const menu = picker.querySelector(".select-choice-menu");
   if (!menu) return;
   menu.replaceChildren();
-  const appendOption = (option) => {
+  const appendOption = (option, parent = menu) => {
     if (option.hidden) return;
     const choice = document.createElement("button");
     choice.type = "button";
@@ -649,8 +784,44 @@ function populateSelectMenu(select, picker) {
     choice.disabled = option.disabled;
     choice.setAttribute("role", "option");
     choice.setAttribute("aria-selected", String(option.selected));
-    menu.append(choice);
+    parent.append(choice);
   };
+  const flatOptions = [...select.options];
+  if (flatOptions.some((option) => option.dataset.pickerPath)) {
+    const root = { folders: new Map(), options: [] };
+    flatOptions.filter((option) => !option.dataset.pickerPath).forEach((option) => appendOption(option));
+    flatOptions.filter((option) => option.dataset.pickerPath).forEach((option) => {
+      const parts = option.dataset.pickerPath.split("/").filter(Boolean);
+      let branch = root;
+      parts.slice(0, -1).forEach((part) => {
+        if (!branch.folders.has(part)) branch.folders.set(part, { folders: new Map(), options: [] });
+        branch = branch.folders.get(part);
+      });
+      branch.options.push(option);
+    });
+    const appendBranch = (name, branch, parent) => {
+      const wrapper = document.createElement("div");
+      wrapper.className = "select-choice-branch";
+      const folder = document.createElement("button");
+      folder.type = "button";
+      folder.className = "select-choice-folder";
+      folder.dataset.selectFolderToggle = "";
+      folder.setAttribute("aria-haspopup", "menu");
+      folder.setAttribute("aria-expanded", "false");
+      folder.innerHTML = `<span>${escapeHtml(name)}</span><i aria-hidden="true">›</i>`;
+      const submenu = document.createElement("div");
+      submenu.className = "select-choice-submenu";
+      submenu.setAttribute("role", "menu");
+      submenu.setAttribute("aria-label", name);
+      branch.folders.forEach((child, childName) => appendBranch(childName, child, submenu));
+      branch.options.forEach((option) => appendOption(option, submenu));
+      wrapper.append(folder, submenu);
+      parent.append(wrapper);
+    };
+    root.folders.forEach((branch, name) => appendBranch(name, branch, menu));
+    root.options.forEach((option) => appendOption(option));
+    return;
+  }
   [...select.children].forEach((child) => {
     if (child.tagName === "OPTGROUP") {
       const heading = document.createElement("div");
@@ -662,6 +833,33 @@ function populateSelectMenu(select, picker) {
       appendOption(child);
     }
   });
+}
+
+function positionSelectSubmenu(branch) {
+  const trigger = branch.querySelector(":scope > .select-choice-folder");
+  const submenu = branch.querySelector(":scope > .select-choice-submenu");
+  if (!trigger || !submenu) return;
+  const rect = trigger.getBoundingClientRect();
+  const rootMenu = branch.closest(".select-choice-menu");
+  if (!rootMenu) return;
+  const rootRect = rootMenu.getBoundingClientRect();
+  const edge = 12;
+  const gap = SUBMENU_GAP;
+  const width = Math.min(SELECT_MENU_WIDTH, window.innerWidth - edge * 2);
+  const height = Math.min(submenu.scrollHeight, 320);
+  let depth = 1;
+  for (let parent = branch.parentElement; parent && parent !== rootMenu; parent = parent.parentElement) {
+    if (parent.classList.contains("select-choice-submenu")) depth += 1;
+  }
+  const opensLeft = rootMenu.dataset.submenuDirection === "left";
+  const requestedLeft = opensLeft
+    ? rootRect.left - depth * (width + gap)
+    : rootRect.left + depth * (width + gap);
+  submenu.classList.toggle("opens-left", opensLeft);
+  submenu.style.width = `${width}px`;
+  submenu.style.left = `${Math.max(edge, Math.min(requestedLeft, window.innerWidth - width - edge))}px`;
+  submenu.style.top = `${Math.max(edge, Math.min(rect.top - 7, window.innerHeight - height - edge))}px`;
+  submenu.style.zIndex = String(310 + depth);
 }
 
 function syncSelectPicker(select) {
@@ -680,9 +878,34 @@ function positionSelectMenu(picker) {
   if (!trigger || !menu) return;
   const rect = trigger.getBoundingClientRect();
   const edge = 12;
-  const width = Math.min(Math.max(rect.width, 220), window.innerWidth - edge * 2);
+  const width = Math.min(SELECT_MENU_WIDTH, window.innerWidth - edge * 2);
+  const maximumDepth = (container) => {
+    let depth = 0;
+    container.querySelectorAll(":scope > .select-choice-branch").forEach((branch) => {
+      const submenu = branch.querySelector(":scope > .select-choice-submenu");
+      if (submenu) depth = Math.max(depth, 1 + maximumDepth(submenu));
+    });
+    return depth;
+  };
+  const depth = maximumDepth(menu);
+  const pitch = width + SUBMENU_GAP;
+  const totalWidth = width + depth * pitch;
+  const naturalRightLeft = Math.max(edge, Math.min(rect.left, window.innerWidth - width - edge));
+  const naturalLeftLeft = Math.max(edge, Math.min(rect.right - width, window.innerWidth - width - edge));
+  const rightFits = naturalRightLeft + totalWidth <= window.innerWidth - edge;
+  const leftFits = naturalLeftLeft - depth * pitch >= edge;
+  const rightSpace = window.innerWidth - naturalRightLeft;
+  const leftSpace = naturalLeftLeft + width;
+  const opensLeft = !rightFits && (leftFits || leftSpace > rightSpace);
+  menu.dataset.submenuDirection = opensLeft ? "left" : "right";
+  let left = opensLeft ? naturalLeftLeft : naturalRightLeft;
+  if (totalWidth <= window.innerWidth - edge * 2) {
+    left = opensLeft
+      ? Math.max(left, edge + depth * pitch)
+      : Math.min(left, window.innerWidth - edge - totalWidth);
+  }
   menu.style.width = `${width}px`;
-  menu.style.left = `${Math.max(edge, Math.min(rect.left, window.innerWidth - width - edge))}px`;
+  menu.style.left = `${Math.max(edge, Math.min(left, window.innerWidth - width - edge))}px`;
   menu.style.top = `${rect.bottom + 7}px`;
   const height = Math.min(menu.scrollHeight, 320);
   if (rect.bottom + 7 + height > window.innerHeight - edge && rect.top > height + edge) {
@@ -723,6 +946,13 @@ function enhanceSelect(select) {
   syncSelectPicker(select);
 
   picker.addEventListener("click", (event) => {
+    const folder = event.target.closest("[data-select-folder-toggle]");
+    if (folder) {
+      const branch = folder.closest(".select-choice-branch");
+      setSubmenuOpen(branch, true, positionSelectSubmenu);
+      event.preventDefault();
+      return;
+    }
     const choice = event.target.closest("[data-select-value]");
     if (choice && !choice.disabled) {
       const changed = select.value !== choice.dataset.selectValue;
@@ -749,23 +979,56 @@ function enhanceSelect(select) {
     }
     event.preventDefault();
   });
+  picker.addEventListener("pointerover", (event) => {
+    let branch = event.target.closest(".select-choice-branch");
+    while (branch && picker.contains(branch)) {
+      clearSubmenuClose(branch);
+      branch = branch.parentElement?.closest(".select-choice-branch");
+    }
+    const folder = event.target.closest("[data-select-folder-toggle]");
+    if (folder) setSubmenuOpen(folder.closest(".select-choice-branch"), true, positionSelectSubmenu);
+  });
+  picker.addEventListener("pointerout", (event) => {
+    const branch = event.target.closest(".select-choice-branch");
+    if (branch && !branch.contains(event.relatedTarget)) scheduleSubmenuClose(branch);
+  });
+  picker.addEventListener("focusin", (event) => {
+    const branch = event.target.closest(".select-choice-branch");
+    if (branch) setSubmenuOpen(branch, true, positionSelectSubmenu);
+  });
   picker.addEventListener("keydown", (event) => {
-    const options = [...picker.querySelectorAll("[data-select-value]:not(:disabled)")];
-    const current = options.indexOf(document.activeElement);
+    const folder = event.target.closest("[data-select-folder-toggle]");
+    if (folder && ["Enter", " ", "ArrowRight"].includes(event.key)) {
+      const branch = folder.closest(".select-choice-branch");
+      setSubmenuOpen(branch, true, positionSelectSubmenu);
+      directMenuItems(
+        branch.querySelector(":scope > .select-choice-submenu"),
+        "[data-select-folder-toggle]",
+        "[data-select-value]",
+      )[0]?.focus();
+      event.preventDefault();
+      return;
+    }
+    if (event.key === "ArrowLeft" && event.target.closest(".select-choice-submenu")) {
+      const branch = event.target.closest(".select-choice-submenu").parentElement;
+      setSubmenuOpen(branch, false, positionSelectSubmenu);
+      branch.querySelector(":scope > [data-select-folder-toggle]")?.focus();
+      event.preventDefault();
+      return;
+    }
     if (event.target === trigger && ["ArrowDown", "ArrowUp"].includes(event.key)) {
       if (!picker.classList.contains("open")) trigger.click();
+      const options = directMenuItems(menu, "[data-select-folder-toggle]", "[data-select-value]");
       const selected = options.find((option) => option.getAttribute("aria-selected") === "true");
       (selected || options[event.key === "ArrowDown" ? 0 : options.length - 1])?.focus();
       event.preventDefault();
       return;
     }
-    if (current >= 0 && ["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) {
-      const next = event.key === "Home" ? 0
-        : event.key === "End" ? options.length - 1
-          : (current + (event.key === "ArrowDown" ? 1 : -1) + options.length) % options.length;
-      options[next]?.focus();
+    const choice = event.target.closest("[data-select-value]");
+    if ((folder || choice) && ["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) {
+      focusRelativeMenuItem(event.target, event.key, "[data-select-folder-toggle]", "[data-select-value]");
       event.preventDefault();
-    } else if (current >= 0 && ["Enter", " "].includes(event.key)) {
+    } else if (choice && ["Enter", " "].includes(event.key)) {
       document.activeElement.click();
       event.preventDefault();
     } else if (event.key === "Escape") {
@@ -793,11 +1056,12 @@ function observeSelects() {
 
 function contentPickerHtml(label, index) {
   const selectedFile = contentLabelFile(label);
-  const selectedFileName = selectedFile?.file || "找不到來源文件";
-  const selectedLabel = label || "尚未選擇 label";
+  const selectedName = selectedFile
+    ? contentLabelDisplayName(selectedFile, label)
+    : (label ? `${leafName(label)}（未找到）` : "尚未選擇");
   const files = state.nodeDetail?.contents || [];
   const fileRows = files.map((file) => {
-    const fileName = file.file || `${file.name}.rpy`;
+    const fileName = contentFileDisplayName(file);
     const labels = file.labels || [];
     if (!labels.length) {
       return `<button class="content-file-choice is-disabled" type="button" disabled><span>${escapeHtml(fileName)}</span><small>沒有 label</small></button>`;
@@ -805,7 +1069,7 @@ function contentPickerHtml(label, index) {
     if (labels.length === 1) {
       return `
         <button class="content-file-choice" type="button" role="menuitem" data-content-label-choice="${escapeHtml(labels[0])}">
-          <span>${escapeHtml(fileName)}</span>
+          <span>${escapeHtml(contentLabelDisplayName(file, labels[0]))}</span>
         </button>
       `;
     }
@@ -816,7 +1080,7 @@ function contentPickerHtml(label, index) {
         </button>
         <div class="content-label-submenu" role="menu" aria-label="${escapeHtml(fileName)} labels">
           ${labels.map((item) => `
-            <button type="button" role="menuitem" data-content-label-choice="${escapeHtml(item)}">${escapeHtml(item)}</button>
+            <button type="button" role="menuitem" data-content-label-choice="${escapeHtml(item)}">${escapeHtml(contentLabelDisplayName(file, item))}</button>
           `).join("")}
         </div>
       </div>
@@ -828,7 +1092,7 @@ function contentPickerHtml(label, index) {
       <input name="contentWeightedId" type="hidden" value="${escapeHtml(label)}">
       <div class="content-choice-picker" data-content-picker-index="${index}">
         <button class="content-choice-trigger" type="button" aria-haspopup="menu" aria-expanded="false" data-content-picker-toggle>
-          <span><strong>${escapeHtml(selectedFileName)}</strong><small>${escapeHtml(selectedLabel)}</small></span><i aria-hidden="true">⌄</i>
+          <span><strong>${escapeHtml(selectedName)}</strong></span><i aria-hidden="true">⌄</i>
         </button>
         <div class="content-choice-menu" role="menu">
           ${fileRows || '<div class="content-choice-empty">目前節點沒有 Content 文件。</div>'}
@@ -843,12 +1107,48 @@ function closeContentPickers(except = null) {
     if (picker === except) return;
     picker.classList.remove("open");
     picker.querySelector("[data-content-picker-toggle]")?.setAttribute("aria-expanded", "false");
-    picker.querySelectorAll(".content-file-branch.submenu-open").forEach((branch) => branch.classList.remove("submenu-open"));
+    picker.querySelectorAll(".content-file-branch").forEach((branch) => {
+      clearSubmenuClose(branch);
+      branch.classList.remove("submenu-open");
+      branch.querySelector(":scope > [data-content-file-expand]")?.setAttribute("aria-expanded", "false");
+    });
   });
 }
 
+function positionContentSubmenu(branch) {
+  const trigger = branch?.querySelector(":scope > [data-content-file-expand]");
+  const submenu = branch?.querySelector(":scope > .content-label-submenu");
+  if (!trigger || !submenu) return;
+  const rect = trigger.getBoundingClientRect();
+  const parentRect = branch.parentElement.getBoundingClientRect();
+  const edge = 12;
+  const gap = SUBMENU_GAP;
+  const width = Math.min(SELECT_MENU_WIDTH, window.innerWidth - edge * 2);
+  const height = Math.min(submenu.scrollHeight || 320, 320);
+  const fitsRight = parentRect.right + gap + width <= window.innerWidth - edge;
+  submenu.classList.toggle("opens-left", !fitsRight);
+  submenu.style.width = `${width}px`;
+  submenu.style.left = `${fitsRight ? parentRect.right + gap : Math.max(edge, parentRect.left - gap - width)}px`;
+  submenu.style.top = `${Math.max(edge, Math.min(rect.top - 7, window.innerHeight - height - edge))}px`;
+}
+
+function positionContentMenu(picker) {
+  const trigger = picker?.querySelector(":scope > [data-content-picker-toggle]");
+  const menu = picker?.querySelector(":scope > .content-choice-menu");
+  if (!trigger || !menu) return;
+  const rect = trigger.getBoundingClientRect();
+  const edge = 12;
+  const width = Math.min(SELECT_MENU_WIDTH, window.innerWidth - edge * 2);
+  const height = Math.min(menu.scrollHeight, 320);
+  menu.style.width = `${width}px`;
+  menu.style.left = `${Math.max(edge, Math.min(rect.left, window.innerWidth - width - edge))}px`;
+  menu.style.top = `${rect.bottom + 7}px`;
+  if (rect.bottom + 7 + height > window.innerHeight - edge && rect.top > height + edge) {
+    menu.style.top = `${rect.top - height - 7}px`;
+  }
+}
+
 function updateDatalists() {
-  dom.screenNames.innerHTML = state.screenNames.map((name) => `<option value="${escapeHtml(name)}"></option>`).join("");
   dom.statNames.innerHTML = Object.keys(state.stats).sort().map((name) => `<option value="${escapeHtml(name)}"></option>`).join("");
   dom.nodeNames.innerHTML = state.nodes.map((node) => `<option value="${escapeHtml(node.id)}"></option>`).join("");
   const labels = new Set();
@@ -908,8 +1208,8 @@ async function loadProject({ preserveNode = true } = {}) {
     state.rootNodeId = data.rootNodeId || null;
     state.nodes = data.nodes || [];
     state.graph = data.graph || { edges: [] };
-    state.screenNames = data.screenNames || [];
     state.images = data.images || [];
+    state.audio = data.audio || [];
     state.stats = data.stats || {};
     state.statsDraft = clone(state.stats);
     state.memories = data.memories || { memory: { Name: "Memory" } };
@@ -1030,6 +1330,35 @@ function renderNodePanel() {
   }
   const node = state.nodeDetail.node;
   const isRoot = node.ID === state.rootNodeId;
+  const events = (state.nodeDetail.events || []).map((entry) => entry.data || {});
+  const optionsCount = state.nodeDetail.options?.Elements?.length || 0;
+  const labelCount = (state.nodeDetail.contents || []).reduce((total, content) => total + (content.labels?.length || 0), 0);
+  const outgoing = (state.graph?.edges || []).filter((edge) => String(edge.source) === String(node.ID));
+  const incoming = (state.graph?.edges || []).filter((edge) => String(edge.target) === String(node.ID));
+  const nodeName = (nodeId) => state.nodes.find((item) => String(item.id) === String(nodeId))?.name || nodeId;
+  const groupConnections = (items, direction) => {
+    const grouped = new Map();
+    items.forEach((edge) => {
+      const relatedNode = direction === "out" ? edge.target : edge.source;
+      const endUp = edge.endUp || "GOTO";
+      const key = `${relatedNode}\u0000${endUp}`;
+      if (!grouped.has(key)) grouped.set(key, { relatedNode, endUp, count: 0 });
+      grouped.get(key).count += 1;
+    });
+    return [...grouped.values()];
+  };
+  const incomingConnections = groupConnections(incoming, "in");
+  const outgoingConnections = groupConnections(outgoing, "out");
+  const connectionChips = (items) => {
+    if (!items.length) return '<span class="node-flow-empty">None</span>';
+    return items.map((connection) => `
+      <span class="node-flow-chip is-${String(connection.endUp).toLocaleLowerCase()}">
+        ${escapeHtml(nodeName(connection.relatedNode))}
+        <small>${escapeHtml(connection.endUp)}${connection.count > 1 ? ` ×${connection.count}` : ""}</small>
+      </span>
+    `).join("");
+  };
+  const lifecycleCount = (trigger) => events.filter((event) => event.Trigger === trigger).length;
   dom.nodePanel.innerHTML = `
     <div class="panel-page node-panel-page">
       <div class="node-editor-shell">
@@ -1054,19 +1383,37 @@ function renderNodePanel() {
               </label>
             </div>
           </div>
-          <div class="form-section node-form-section">
-            <div class="form-grid two-columns">
-              <label class="field">
-                <span>Background</span>
-                <select name="Background" aria-label="Background">${nodeBackgroundOptionTags(node.Background || "")}</select>
-              </label>
-              <label class="field">
-                <span>Scene Screen</span>
-                <input name="Screen" list="screenNames" value="${escapeHtml(node.Screen || "")}" placeholder="選填 Screen 名稱">
-              </label>
-            </div>
-          </div>
         </form>
+
+        <section class="node-overview" aria-label="Node overview">
+          <div class="node-overview-metrics">
+            <article><span>Events</span><strong>${events.length}</strong></article>
+            <article><span>Options</span><strong>${optionsCount}</strong></article>
+            <article><span>Content Labels</span><strong>${labelCount}</strong></article>
+            <article><span>Flow Links</span><strong>${outgoingConnections.length}</strong></article>
+          </div>
+          <div class="node-overview-details">
+            <article class="node-overview-card">
+              <header><span>FLOW</span><strong>Node Connections</strong></header>
+              <div class="node-flow-row">
+                <span>Incoming</span>
+                <div>${connectionChips(incomingConnections)}</div>
+              </div>
+              <div class="node-flow-row">
+                <span>Outgoing</span>
+                <div>${connectionChips(outgoingConnections)}</div>
+              </div>
+            </article>
+            <article class="node-overview-card">
+              <header><span>LIFECYCLE</span><strong>Event Phases</strong></header>
+              <div class="node-lifecycle-grid">
+                <div><span>On Enter</span><strong>${lifecycleCount("Auto:Enter")}</strong></div>
+                <div><span>On Node</span><strong>${lifecycleCount("Auto:Node")}</strong></div>
+                <div><span>On Exit</span><strong>${lifecycleCount("Auto:Exit")}</strong></div>
+              </div>
+            </article>
+          </div>
+        </section>
 
         <div class="editor-danger-zone">
           <button class="danger-button" id="deleteNodeButton" type="button" ${isRoot ? 'disabled title="請先將其他節點設為起始節點"' : ""}>刪除節點</button>
@@ -1111,22 +1458,19 @@ function readNodeForm(form = document.querySelector("#nodeForm")) {
     node: {
       ID: values.get("ID"),
       Name: values.get("Name"),
-      Background: values.get("Background"),
-      Screen: values.get("Screen"),
     },
   };
 }
 
-async function persistNodeSnapshot(snapshot) {
+async function persistNodeSnapshot(snapshot, task = null) {
   await api("/api/node", { method: "PUT", body: snapshot });
+  if (task && !isCurrentAutosaveTask(task)) return;
   if (state.selectedNodePath !== snapshot.path || !state.nodeDetail) return;
   state.nodeDetail.node = { ...state.nodeDetail.node, ...snapshot.node };
   const summary = state.nodes.find((node) => node.path === snapshot.path);
   if (summary) {
     summary.name = snapshot.node.Name || snapshot.node.ID;
     summary.id = snapshot.node.ID;
-    summary.background = snapshot.node.Background;
-    summary.screen = snapshot.node.Screen;
   }
   updateHeader();
   renderNodeList();
@@ -1134,7 +1478,7 @@ async function persistNodeSnapshot(snapshot) {
 
 function scheduleNodeAutosave() {
   const snapshot = readNodeForm();
-  if (snapshot) scheduleAutosave("節點設定未能儲存", () => persistNodeSnapshot(snapshot));
+  if (snapshot) scheduleAutosave("節點設定未能儲存", (task) => persistNodeSnapshot(snapshot, task));
 }
 
 async function saveNode(event) {
@@ -1154,7 +1498,6 @@ async function saveNode(event) {
 }
 
 async function deleteNode() {
-  if (!await flushAutosave()) return;
   const node = state.nodeDetail?.node;
   if (!node) return;
   try {
@@ -1168,6 +1511,7 @@ async function deleteNode() {
     const contentCount = state.nodeDetail.contents.length;
     const confirmed = window.confirm(`確定刪除「${node.Name || node.ID}」？\n\n${eventCount} 個 Event、${contentCount} 個 Content 將移至可復原區。`);
     if (!confirmed) return;
+    await cancelAutosaveAndWait();
     const result = await api(`/api/nodes?path=${encodeURIComponent(state.selectedNodePath)}`, { method: "DELETE" });
     state.selectedNodePath = null;
     state.nodeDetail = null;
@@ -1183,21 +1527,21 @@ function eventActionChoices(current = "") {
   const options = state.optionsDraft || state.nodeDetail?.options || defaultOptionsDraft();
   const choices = [];
   const seen = new Set();
-  const addChoice = (trigger, name) => {
+  const addChoice = (trigger) => {
     const value = String(trigger || "").trim();
-    if (!value || value === "Auto" || seen.has(value)) return;
+    if (!value || value.startsWith("Auto:") || seen.has(value)) return;
     seen.add(value);
-    choices.push({ id: value, name: String(name || actionTriggerName(value)) });
+    choices.push({ id: value, name: actionTriggerName(value) });
   };
   (options.Elements || []).forEach((element) => {
     if (element.Type === "TEXTBOX") {
-      (element.Items || []).forEach((item) => addChoice(item.Trigger, item.Name || item.Text || item.ID));
+      (element.Items || []).forEach((item) => addChoice(item.Trigger));
     } else {
-      addChoice(element.Trigger, element.Name || element.ID);
+      addChoice(element.Trigger);
     }
   });
   const currentValue = String(current || "").trim();
-  if (currentValue && currentValue !== "Auto" && !seen.has(currentValue)) {
+  if (currentValue && !currentValue.startsWith("Auto:") && !seen.has(currentValue)) {
     choices.push({ id: currentValue, name: `${actionTriggerName(currentValue)}（未找到）` });
   }
   return choices;
@@ -1207,7 +1551,7 @@ function defaultEvent(id = generateId("event")) {
   return {
     ID: id,
     Name: "新事件",
-    Trigger: eventActionChoices()[0]?.id || "Auto",
+    Trigger: eventActionChoices()[0]?.id || "Auto:Node",
     Priority: 5,
     Weight: 1,
     Once: false,
@@ -1228,7 +1572,7 @@ function eventListHtml() {
       <button class="subnav-item ${event.ID === state.selectedEventId ? "active" : ""}" type="button" data-event-id="${escapeHtml(event.ID)}">
         <span class="subnav-item-copy">
           <strong>${escapeHtml(event.Name || event.ID || entry.file)}</strong>
-          <span>${escapeHtml(event.Trigger || "尚未設定 Trigger")}</span>
+          <span>${escapeHtml(eventTriggerDisplayName(event.Trigger))}</span>
         </span>
         <span class="priority-badge" title="Priority">${escapeHtml(event.Priority ?? 5)}</span>
       </button>
@@ -1335,17 +1679,17 @@ function effectRowsHtml(effects) {
   return effects.map((effect, index) => {
     const type = effect.type === "tag" ? "memory" : (effect.type || "stat");
     const isStat = type === "stat";
-    const isMemory = type === "memory";
-    const opItems = isStat ? ["set", "+", "-", "*", "/"] : isMemory ? ["add", "remove", "clear"] : ["play", "stop"];
+    const opItems = isStat ? ["set", "+", "-", "*", "/"] : ["add", "remove", "clear"];
     const valueField = isStat
       ? `<label class="field"><span class="visually-hidden">值</span><input name="effectValue" aria-label="值" type="number" step="any" value="${escapeHtml(effect.value ?? 0)}"></label>`
-      : isMemory
-        ? `<label class="field"><span class="visually-hidden">記憶標籤</span><input name="effectId" aria-label="記憶標籤" value="${escapeHtml(effect.id || "")}" placeholder="${effect.op === "clear" ? "清空整個記憶庫" : "標籤"}" ${effect.op === "clear" ? "disabled" : ""}></label>`
-        : `<label class="checkbox-field"><input name="effectPersistent" type="checkbox" ${effect.persistent ? "checked" : ""}><span>Persistent</span></label>`;
+      : `<label class="field"><span class="visually-hidden">記憶標籤</span><input name="effectId" aria-label="記憶標籤" value="${escapeHtml(effect.id || "")}" placeholder="${effect.op === "clear" ? "清空整個記憶庫" : "標籤"}" ${effect.op === "clear" ? "disabled" : ""}></label>`;
+    const resourceField = isStat
+      ? `<select name="effectId" aria-label="Stat">${namedOptionTags(statChoices(), effect.id)}</select>`
+      : `<select name="effectBank" aria-label="記憶庫">${namedOptionTags(memoryChoices(), effect.bank || "memory")}</select>`;
     return `
       <div class="repeat-row effect-row" data-index="${index}" data-effect-type="${escapeHtml(type)}">
-        <label class="field"><span class="visually-hidden">類型</span><select name="effectType" aria-label="效果類型">${optionTags(["stat", "memory", "bgm", "se"], type)}</select></label>
-        <label class="field"><span class="visually-hidden">${isStat ? "Stat" : isMemory ? "記憶庫" : "資源 ID"}</span>${isStat ? `<select name="effectId" aria-label="Stat">${namedOptionTags(statChoices(), effect.id)}</select>` : isMemory ? `<select name="effectBank" aria-label="記憶庫">${namedOptionTags(memoryChoices(), effect.bank || "memory")}</select>` : `<input name="effectId" aria-label="資源 ID" value="${escapeHtml(effect.id || "")}">`}</label>
+        <label class="field"><span class="visually-hidden">類型</span><select name="effectType" aria-label="效果類型">${optionTags(["stat", "memory"], type)}</select></label>
+        <label class="field"><span class="visually-hidden">${isStat ? "Stat" : "記憶庫"}</span>${resourceField}</label>
         <label class="field"><span class="visually-hidden">操作</span><select name="effectOp" aria-label="操作">${optionTags(opItems, effect.op)}</select></label>
         ${valueField}
         <button class="row-button" type="button" data-remove-effect="${index}" title="移除 Effect" aria-label="移除 Effect">×</button>
@@ -1390,6 +1734,7 @@ function choiceBlockHtml(value, kind) {
 
 function eventEditorHtml(event) {
   const triggerMode = eventTriggerMode(event.Trigger);
+  const lifecycle = isLifecycleTrigger(event.Trigger);
   const triggerInput = triggerMode === "Action"
     ? `<select name="Trigger" aria-label="Option 選項" required>${namedOptionTags(eventActionChoices(event.Trigger), event.Trigger)}</select>`
     : triggerMode === "Keyboard"
@@ -1397,7 +1742,7 @@ function eventEditorHtml(event) {
          <input name="Trigger" type="hidden" value="${escapeHtml(event.Trigger)}">`
       : triggerMode === "Mouse"
         ? `<select name="Trigger" aria-label="Mouse 按鍵" required>${namedOptionTags(MOUSE_TRIGGER_CHOICES, event.Trigger)}</select>`
-        : '<input name="Trigger" type="hidden" value="Auto">';
+        : `<select name="Trigger" aria-label="Auto 時機" required>${namedOptionTags(AUTO_TRIGGER_CHOICES, event.Trigger)}</select>`;
   return `
     <form class="editor-page" id="eventForm">
       <div class="form-section event-primary-section">
@@ -1411,9 +1756,9 @@ function eventEditorHtml(event) {
             </div>
           </div>
         </div>
-        <div class="form-grid event-primary-settings-grid">
+        <div class="form-grid event-primary-settings-grid ${lifecycle ? "is-lifecycle" : ""}">
           <label class="field"><span>Priority</span><input name="Priority" type="number" min="0" max="5" step="1" value="${escapeHtml(event.Priority ?? 5)}"></label>
-          <label class="field"><span>Weight</span><input name="Weight" type="number" min="0.0001" step="any" value="${escapeHtml(event.Weight ?? 1)}"></label>
+          ${lifecycle ? "" : `<label class="field"><span>Weight</span><input name="Weight" type="number" min="0.0001" step="any" value="${escapeHtml(event.Weight ?? 1)}"></label>`}
           <label class="field event-once-field">
             <span>Once</span>
             <span class="boolean-control">
@@ -1449,18 +1794,18 @@ function eventEditorHtml(event) {
         <div class="collapsible-section-body">${choiceBlockHtml(event.Content, "content")}</div>
       </details>
 
-      <details class="form-section collapsible-section event-choice-section" open>
+      ${lifecycle ? "" : `<details class="form-section collapsible-section event-choice-section" open>
         <summary class="form-section-header">
           <div><h3>End up</h3><span>${escapeHtml(event["End up"] || "REDO")}</span></div>
-          ${event["End up"] === "GOTO" ? '<button class="icon-button section-add-button add-button" type="button" data-add-weighted="next" title="新增節點" aria-label="新增節點">＋</button>' : ""}
+          ${endUpUsesNextNode(event["End up"]) ? '<button class="icon-button section-add-button add-button" type="button" data-add-weighted="next" title="新增節點" aria-label="新增節點">＋</button>' : ""}
         </summary>
         <div class="collapsible-section-body">
           <div class="end-up-control">
-            <label class="field"><span class="visually-hidden">End up</span><select name="EndUp" aria-label="End up">${optionTags(["REDO", "GOTO", "EXIT"], event["End up"] || "REDO")}</select></label>
+            <label class="field"><span class="visually-hidden">End up</span><select name="EndUp" aria-label="End up">${optionTags(["REDO", "GOTO", "REPLACE", "EXIT"], event["End up"] || "REDO")}</select></label>
           </div>
-          <div id="nextNodeBlock">${event["End up"] === "GOTO" ? choiceBlockHtml(event["Next Node"], "next") : ""}</div>
+          <div id="nextNodeBlock">${endUpUsesNextNode(event["End up"]) ? choiceBlockHtml(event["Next Node"], "next") : ""}</div>
         </div>
-      </details>
+      </details>`}
 
       ${state.eventOriginalId ? '<div class="editor-danger-zone"><button class="danger-button" id="deleteEventButton" type="button">刪除事件</button></div>' : ""}
     </form>
@@ -1513,26 +1858,27 @@ function readEventForm() {
     } else if (type === "memory") {
       result.bank = row.querySelector('[name="effectBank"]').value;
       if (result.op !== "clear") result.id = row.querySelector('[name="effectId"]').value.trim();
-    } else {
-      result.id = row.querySelector('[name="effectId"]').value.trim();
-      result.persistent = row.querySelector('[name="effectPersistent"]').checked;
     }
     return result;
   });
-  const endUp = form.elements.EndUp.value;
-  return {
+  const trigger = form.elements.Trigger.value.trim();
+  const lifecycle = isLifecycleTrigger(trigger);
+  const result = {
     ID: form.elements.ID.value.trim(),
     Name: form.elements.Name.value.trim(),
-    Trigger: form.elements.Trigger.value.trim(),
+    Trigger: trigger,
     Priority: Math.trunc(numberValue(form.elements.Priority.value, 5)),
-    Weight: numberValue(form.elements.Weight.value, 1),
     Once: form.elements.Once.checked,
     Conditions: conditions,
     Effects: effects,
     Content: readChoice(form, "content"),
-    "End up": endUp,
-    "Next Node": endUp === "GOTO" ? readChoice(form, "next") : null,
   };
+  if (lifecycle) return result;
+  const endUp = form.elements.EndUp?.value || state.eventDraft?.["End up"] || "REDO";
+  result.Weight = numberValue(form.elements.Weight?.value ?? state.eventDraft?.Weight, 1);
+  result["End up"] = endUp;
+  result["Next Node"] = endUpUsesNextNode(endUp) ? readChoice(form, "next") : null;
+  return result;
 }
 
 function bindEventPanel() {
@@ -1557,23 +1903,66 @@ function bindEventPanel() {
   form.addEventListener("keydown", (event) => {
     if (event.key === "Escape" && event.target.closest(".content-choice-picker")) {
       closeContentPickers();
+      event.target.closest(".content-choice-picker")?.querySelector("[data-content-picker-toggle]")?.focus();
       event.preventDefault();
       return;
     }
-    if (event.key === "ArrowRight" && event.target.matches("[data-content-file-expand]")) {
+    const picker = event.target.closest(".content-choice-picker");
+    const pickerToggle = event.target.closest("[data-content-picker-toggle]");
+    const fileExpand = event.target.closest("[data-content-file-expand]");
+    const labelChoice = event.target.closest("[data-content-label-choice]");
+    if (pickerToggle && ["ArrowDown", "ArrowUp"].includes(event.key)) {
+      if (!picker.classList.contains("open")) pickerToggle.click();
+      const items = directMenuItems(
+        picker.querySelector(":scope > .content-choice-menu"),
+        "[data-content-file-expand]",
+        "[data-content-label-choice]",
+      );
+      items[event.key === "ArrowDown" ? 0 : items.length - 1]?.focus();
+      event.preventDefault();
+    } else if (fileExpand && ["ArrowRight", "Enter", " "].includes(event.key)) {
       const branch = event.target.closest(".content-file-branch");
-      branch?.classList.add("submenu-open");
-      event.target.setAttribute("aria-expanded", "true");
-      branch?.querySelector(".content-label-submenu button")?.focus();
+      setSubmenuOpen(branch, true, positionContentSubmenu);
+      directMenuItems(
+        branch.querySelector(":scope > .content-label-submenu"),
+        "[data-content-file-expand]",
+        "[data-content-label-choice]",
+      )[0]?.focus();
       event.preventDefault();
     } else if (event.key === "ArrowLeft" && event.target.closest(".content-label-submenu")) {
-      const branch = event.target.closest(".content-file-branch");
-      branch?.classList.remove("submenu-open");
-      const parent = branch?.querySelector("[data-content-file-expand]");
-      parent?.setAttribute("aria-expanded", "false");
-      parent?.focus();
+      const branch = event.target.closest(".content-label-submenu").parentElement;
+      setSubmenuOpen(branch, false, positionContentSubmenu);
+      branch.querySelector(":scope > [data-content-file-expand]")?.focus();
+      event.preventDefault();
+    } else if ((fileExpand || labelChoice) && ["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) {
+      focusRelativeMenuItem(
+        event.target,
+        event.key,
+        "[data-content-file-expand]",
+        "[data-content-label-choice]",
+      );
+      event.preventDefault();
+    } else if (labelChoice && ["Enter", " "].includes(event.key)) {
+      labelChoice.click();
       event.preventDefault();
     }
+  });
+  form.addEventListener("pointerover", (event) => {
+    let branch = event.target.closest(".content-file-branch");
+    while (branch && form.contains(branch)) {
+      clearSubmenuClose(branch);
+      branch = branch.parentElement?.closest(".content-file-branch");
+    }
+    const fileExpand = event.target.closest("[data-content-file-expand]");
+    if (fileExpand) setSubmenuOpen(fileExpand.closest(".content-file-branch"), true, positionContentSubmenu);
+  });
+  form.addEventListener("pointerout", (event) => {
+    const branch = event.target.closest(".content-file-branch");
+    if (branch && !branch.contains(event.relatedTarget)) scheduleSubmenuClose(branch);
+  });
+  form.addEventListener("focusin", (event) => {
+    const branch = event.target.closest(".content-file-branch");
+    if (branch) setSubmenuOpen(branch, true, positionContentSubmenu);
   });
   document.querySelector("#deleteEventButton")?.addEventListener("click", deleteEvent);
   document.querySelector("#addConditionButton")?.addEventListener("click", (event) => {
@@ -1602,14 +1991,13 @@ function bindEventPanel() {
       closeContentPickers(opening ? picker : null);
       picker.classList.toggle("open", opening);
       pickerToggle.setAttribute("aria-expanded", String(opening));
+      if (opening) positionContentMenu(picker);
       event.preventDefault();
       return;
     }
     if (fileExpand) {
       const branch = fileExpand.closest(".content-file-branch");
-      const opening = !branch.classList.contains("submenu-open");
-      branch.classList.toggle("submenu-open", opening);
-      fileExpand.setAttribute("aria-expanded", String(opening));
+      setSubmenuOpen(branch, true, positionContentSubmenu);
       event.preventDefault();
       return;
     }
@@ -1668,7 +2056,10 @@ function bindEventPanel() {
       if (event.target.value === "Action") {
         const action = eventActionChoices()[0]?.id;
         if (!action) {
-          draft.Trigger = "Auto";
+          draft.Trigger = "Auto:Node";
+          draft.Weight ??= 1;
+          draft["End up"] ??= "REDO";
+          draft["Next Node"] ??= null;
           state.eventDraft = draft;
           scheduleEventAutosave({ useDraft: true });
           renderEventsPanel({ preserveView: true });
@@ -1681,7 +2072,25 @@ function bindEventPanel() {
       } else if (event.target.value === "Mouse") {
         draft.Trigger = MOUSE_TRIGGER_CHOICES[0].id;
       } else {
-        draft.Trigger = "Auto";
+        draft.Trigger = "Auto:Node";
+      }
+      draft.Weight ??= 1;
+      draft["End up"] ??= "REDO";
+      draft["Next Node"] ??= null;
+      state.eventDraft = draft;
+      scheduleEventAutosave({ useDraft: true });
+      renderEventsPanel({ preserveView: true });
+      return;
+    } else if (event.target.name === "Trigger" && eventTriggerMode(event.target.value) === "Auto") {
+      const draft = readEventForm();
+      if (isLifecycleTrigger(draft.Trigger)) {
+        delete draft.Weight;
+        delete draft["End up"];
+        delete draft["Next Node"];
+      } else {
+        draft.Weight ??= 1;
+        draft["End up"] ??= "REDO";
+        draft["Next Node"] ??= null;
       }
       state.eventDraft = draft;
       scheduleEventAutosave({ useDraft: true });
@@ -1711,9 +2120,7 @@ function bindEventPanel() {
       const type = event.target.value;
       const effect = type === "stat"
         ? defaultStatEffect()
-        : type === "memory"
-          ? defaultMemoryEffect()
-          : { type, id: "", op: "play", persistent: false };
+        : defaultMemoryEffect();
       if (!effect) {
         event.target.value = row.dataset.effectType;
         state.eventDraft = readEventForm();
@@ -1732,13 +2139,13 @@ function bindEventPanel() {
     } else if (event.target.name === "EndUp") {
       state.eventDraft = readEventForm();
       state.eventDraft["End up"] = event.target.value;
-      state.eventDraft["Next Node"] = event.target.value === "GOTO" ? (state.nodes[0]?.id || "") : null;
+      state.eventDraft["Next Node"] = endUpUsesNextNode(event.target.value) ? (state.nodes[0]?.id || "") : null;
       renderEventsPanel({ preserveView: true });
     }
     scheduleEventAutosave();
   });
   form.addEventListener("input", (event) => {
-    if (["conditionType", "effectType", "EndUp"].includes(event.target.name)) return;
+    if (["Trigger", "conditionType", "effectType", "EndUp"].includes(event.target.name)) return;
     scheduleEventAutosave();
   });
 }
@@ -1764,11 +2171,12 @@ async function createEventDraft() {
   document.querySelector('[name="Name"]')?.focus();
 }
 
-async function persistEventSnapshot(snapshot) {
+async function persistEventSnapshot(snapshot, task = null) {
   const saved = await api("/api/events", {
     method: "POST",
     body: { node: snapshot.node, originalId: snapshot.originalId, event: snapshot.event },
   });
+  if (task && !isCurrentAutosaveTask(task)) return saved;
   if (state.selectedNodePath !== snapshot.node || !state.nodeDetail) return saved;
   const originalId = snapshot.originalId || snapshot.event.ID;
   const index = state.nodeDetail.events.findIndex((item) => item.data.ID === originalId);
@@ -1792,7 +2200,7 @@ function scheduleEventAutosave({ useDraft = false } = {}) {
     event: clone(state.eventDraft),
   };
   if (!state.eventOriginalId) state.eventOriginalId = snapshot.event.ID;
-  scheduleAutosave("Event 未能儲存", () => persistEventSnapshot(snapshot));
+  scheduleAutosave("Event 未能儲存", (task) => persistEventSnapshot(snapshot, task));
 }
 
 async function saveEvent(event) {
@@ -1816,9 +2224,9 @@ async function saveEvent(event) {
 }
 
 async function deleteEvent() {
-  if (!await flushAutosave()) return;
   if (!state.eventOriginalId || !window.confirm(`確定刪除 Event「${state.eventOriginalId}」？`)) return;
   try {
+    await cancelAutosaveAndWait();
     await api(`/api/events?node=${encodeURIComponent(state.selectedNodePath)}&id=${encodeURIComponent(state.eventOriginalId)}`, { method: "DELETE" });
     state.selectedEventId = null;
     state.eventOriginalId = null;
@@ -2077,10 +2485,7 @@ function optionStageHtml() {
   const canvas = options.Canvas || {};
   const width = Math.max(320, numberValue(canvas.Width, 1920));
   const height = Math.max(180, numberValue(canvas.Height, 1080));
-  const previewBackground = canvas["Preview Background"] || "";
-  const background = previewBackground === "__none__"
-    ? ""
-    : previewBackground || state.nodeDetail?.node?.Background || "";
+  const background = canvas["Preview Background"] || "";
   const elements = [...(options.Elements || [])].sort((a, b) => numberValue(a.Layout?.["Z Order"], 10) - numberValue(b.Layout?.["Z Order"], 10));
   return `
     <div class="option-stage-shell" id="optionStageShell" style="aspect-ratio:${width} / ${height}">
@@ -2133,7 +2538,7 @@ function optionHoverFields(element, { picture = false } = {}) {
     ${optionBooleanField("Hover 效果", 'data-option-path="Hover.Enabled"', hoverEnabled)}
     ${hoverEnabled ? `
       ${transparentColorField("Hover 顏色", "Hover.Color", hover.Color, "#ffffff18")}
-      ${picture ? `<label class="field"><span>Hover 圖片</span><input data-option-path="Picture.Hover" list="imageAssets" value="${escapeHtml(pictureData.Hover || "")}"></label>` : ""}
+      ${picture ? `<label class="field"><span>Hover 圖片</span><select data-option-path="Picture.Hover" aria-label="Hover 圖片">${imageOptionTags(pictureData.Hover || "", [{ id: "", name: "None" }])}</select></label>` : ""}
     ` : ""}
   `;
 }
@@ -2143,8 +2548,8 @@ function optionSoundSection(element) {
     <div class="form-section option-sound-section">
       <div class="form-section-header option-static-header"><div><h3>聲音</h3></div></div>
       <div class="form-grid two-columns option-field-grid">
-        <label class="field"><span>Hover Sound</span><input data-option-path="Hover Sound" value="${escapeHtml(element["Hover Sound"] || "")}"></label>
-        <label class="field"><span>Click Sound</span><input data-option-path="Click Sound" value="${escapeHtml(element["Click Sound"] || "")}"></label>
+        <label class="field"><span>Hover Sound</span><select data-option-path="Hover Sound" aria-label="Hover Sound">${audioOptionTags(element["Hover Sound"] || "", [{ id: "", name: "None" }])}</select></label>
+        <label class="field"><span>Click Sound</span><select data-option-path="Click Sound" aria-label="Click Sound">${audioOptionTags(element["Click Sound"] || "", [{ id: "", name: "None" }])}</select></label>
       </div>
     </div>
   `;
@@ -2267,7 +2672,7 @@ function optionInspectorHtml() {
         <div class="form-grid two-columns option-field-grid">
           <label class="field"><span>Name</span><input data-option-path="Name" value="${escapeHtml(element.Name || "")}"></label>
           <label class="field"><span>Trigger</span><input data-option-path="Trigger" value="${escapeHtml(actionTriggerName(element.Trigger))}"></label>
-          <label class="field"><span>Idle 圖片</span><input data-option-path="Picture.Idle" list="imageAssets" value="${escapeHtml(picture.Idle || "")}"></label>
+          <label class="field"><span>Idle 圖片</span><select data-option-path="Picture.Idle" aria-label="Idle 圖片">${imageOptionTags(picture.Idle || "", [{ id: "", name: "None" }])}</select></label>
           ${optionBooleanField("只讓不透明部分可點擊", 'data-option-path="Picture.Alpha Hit Test"', Boolean(picture["Alpha Hit Test"]))}
         </div>
       `;
@@ -2971,8 +3376,9 @@ function optionsSnapshot() {
   };
 }
 
-async function persistOptionsSnapshot(snapshot) {
+async function persistOptionsSnapshot(snapshot, task = null) {
   const saved = await api("/api/options", { method: "PUT", body: snapshot });
+  if (task && !isCurrentAutosaveTask(task)) return saved;
   if (state.selectedNodePath !== snapshot.node || !state.nodeDetail) return saved;
   state.nodeDetail.options = clone(saved.options || snapshot.options);
   if (saved.node) state.nodeDetail.node = saved.node;
@@ -2982,7 +3388,7 @@ async function persistOptionsSnapshot(snapshot) {
 function scheduleOptionsAutosave() {
   if (!state.nodeDetail || !state.optionsDraft) return;
   const snapshot = optionsSnapshot();
-  scheduleAutosave("選項設定未能儲存", () => persistOptionsSnapshot(snapshot));
+  scheduleAutosave("選項設定未能儲存", (task) => persistOptionsSnapshot(snapshot, task));
 }
 
 async function saveOptions() {
@@ -3012,7 +3418,7 @@ function fileListHtml(files, selected, dataName) {
       <button class="subnav-item ${file.name === selected ? "active" : ""}" type="button" data-${dataName}="${escapeHtml(file.name)}">
         <span class="subnav-item-copy">
           <strong>${escapeHtml(file.displayName || file.name)}</strong>
-          <span>${escapeHtml(file.name)}.rpy · ${escapeHtml(symbols.join(", ") || "尚未偵測到宣告")}</span>
+          <span>${symbols.length ? `${symbols.length} 個 label` : "尚未偵測到 label"}</span>
         </span>
       </button>
     `;
@@ -3076,8 +3482,9 @@ function contentSnapshot() {
   };
 }
 
-async function persistContentSnapshot(snapshot) {
+async function persistContentSnapshot(snapshot, task = null) {
   const saved = await api("/api/content", { method: "POST", body: snapshot });
+  if (task && !isCurrentAutosaveTask(task)) return saved;
   if (state.selectedNodePath !== snapshot.node || state.selectedContent !== snapshot.originalName) return saved;
   state.selectedContent = saved.name;
   state.selectedContentDisplayName = saved.displayName;
@@ -3095,7 +3502,7 @@ function scheduleContentAutosave() {
   const snapshot = contentSnapshot();
   state.selectedContentDisplayName = snapshot.displayName;
   state.contentSource = snapshot.source;
-  scheduleAutosave("Content 未能儲存", () => persistContentSnapshot(snapshot));
+  scheduleAutosave("Content 未能儲存", (task) => persistContentSnapshot(snapshot, task));
 }
 
 async function saveContent() {
@@ -3120,9 +3527,7 @@ async function deleteContent() {
   if (!state.selectedContent || !window.confirm(`確定刪除 Content「${state.selectedContent}.rpy」？`)) return;
   const node = state.selectedNodePath;
   const name = state.selectedContent;
-  discardPendingAutosave();
-  await autosaveInFlight;
-  discardPendingAutosave();
+  await cancelAutosaveAndWait();
   setSaveState("刪除中", "saving");
   try {
     await api(`/api/content?node=${encodeURIComponent(node)}&name=${encodeURIComponent(name)}`, { method: "DELETE" });
@@ -3272,8 +3677,9 @@ function removeMemory(index) {
   scheduleStatsAutosave();
 }
 
-async function persistStatsSnapshot(stats, memories) {
+async function persistStatsSnapshot(stats, memories, task = null) {
   const data = await api("/api/state", { method: "PUT", body: { stats, memories } });
+  if (task && !isCurrentAutosaveTask(task)) return data;
   state.stats = clone(data.stats);
   state.statsDraft = clone(data.stats);
   state.memories = clone(data.memories);
@@ -3287,7 +3693,7 @@ function scheduleStatsAutosave() {
   const memories = readMemoriesForm();
   state.statsDraft = clone(stats);
   state.memoriesDraft = clone(memories);
-  scheduleAutosave("狀態定義未能儲存", () => persistStatsSnapshot(stats, memories));
+  scheduleAutosave("狀態定義未能儲存", (task) => persistStatsSnapshot(stats, memories, task));
 }
 
 async function saveStats() {
@@ -3312,11 +3718,34 @@ function graphRelationships(nodes) {
   for (const edge of state.graph?.edges || []) {
     const source = String(edge.source || "");
     const target = String(edge.target || "");
+    const endUp = edge.endUp === "REPLACE" ? "REPLACE" : "GOTO";
     if (!nodeIds.has(source) || !nodeIds.has(target)) continue;
-    const key = `${source}\u0000${target}`;
-    if (!grouped.has(key)) grouped.set(key, { source, target, events: [] });
+    const key = `${source}\u0000${target}\u0000${endUp}`;
+    if (!grouped.has(key)) grouped.set(key, { source, target, endUp, events: [] });
     grouped.get(key).events.push(edge);
   }
+  const directRelationships = [...grouped.values()];
+  const gotoParents = new Map();
+  directRelationships.filter((relationship) => relationship.endUp === "GOTO").forEach((relationship) => {
+    if (!gotoParents.has(relationship.target)) gotoParents.set(relationship.target, new Set());
+    gotoParents.get(relationship.target).add(relationship.source);
+  });
+  directRelationships.filter((relationship) => relationship.endUp === "REPLACE").forEach((relationship) => {
+    for (const parent of gotoParents.get(relationship.source) || []) {
+      const key = `${parent}\u0000${relationship.target}\u0000MANAGEMENT`;
+      if (!grouped.has(key)) {
+        grouped.set(key, {
+          source: parent,
+          target: relationship.target,
+          endUp: "MANAGEMENT",
+          events: [],
+        });
+      }
+      relationship.events.forEach((event) => {
+        grouped.get(key).events.push({ ...event, replacedNode: relationship.source });
+      });
+    }
+  });
   return [...grouped.values()];
 }
 
@@ -3390,9 +3819,10 @@ function buildGraphLayout(nodes, relationships) {
   };
 }
 
-function graphEdgePath(source, target, layout, index) {
-  const sourceCenterY = source.y + layout.nodeHeight / 2;
-  const targetCenterY = target.y + layout.nodeHeight / 2;
+function graphEdgePath(source, target, layout, index, endUp) {
+  const laneOffset = endUp === "MANAGEMENT" ? 12 : endUp === "REPLACE" ? 5 : -5;
+  const sourceCenterY = source.y + layout.nodeHeight / 2 + laneOffset;
+  const targetCenterY = target.y + layout.nodeHeight / 2 + laneOffset;
   if (target.x > source.x) {
     const startX = source.x + layout.nodeWidth;
     const endX = target.x;
@@ -3402,7 +3832,7 @@ function graphEdgePath(source, target, layout, index) {
   const lift = 58 + (index % 4) * 24;
   const startX = source.x + layout.nodeWidth * 0.7;
   const endX = target.x + layout.nodeWidth * 0.3;
-  return `M ${startX} ${source.y} C ${startX + 70} ${source.y - lift}, ${endX - 70} ${target.y - lift}, ${endX} ${target.y}`;
+  return `M ${startX} ${source.y + laneOffset} C ${startX + 70} ${source.y - lift + laneOffset}, ${endX - 70} ${target.y - lift + laneOffset}, ${endX} ${target.y + laneOffset}`;
 }
 
 function graphViewBoxValue() {
@@ -3534,7 +3964,7 @@ function renderGraphPanel() {
   const relationships = graphRelationships(nodes);
   const signature = JSON.stringify({
     nodes: nodes.map((node) => [node.id, node.path, node.name]),
-    edges: relationships.map((edge) => [edge.source, edge.target, edge.events.length]),
+    edges: relationships.map((edge) => [edge.source, edge.target, edge.endUp, edge.events.length]),
   });
   const layout = buildGraphLayout(nodes, relationships);
   if (signature !== state.graphLayoutSignature) {
@@ -3542,18 +3972,22 @@ function renderGraphPanel() {
     state.graphViewBox = { x: 0, y: 0, width: layout.width, height: layout.height };
   }
   if (!nodes.length) {
-    dom.graphPanel.innerHTML = '<div class="panel-page wide"><div class="success-state">建立 Scene Node 後，關聯圖會顯示 GOTO 關係。</div></div>';
+    dom.graphPanel.innerHTML = '<div class="panel-page wide"><div class="success-state">建立 Scene Node 後，關聯圖會顯示 GOTO／REPLACE 關係。</div></div>';
     return;
   }
+  const nodeNames = new Map(nodes.map((node) => [String(node.id), String(node.name || node.id)]));
   const edgesHtml = relationships.map((relationship, index) => {
     const source = layout.positions.get(relationship.source);
     const target = layout.positions.get(relationship.target);
     if (!source || !target) return "";
-    const descriptions = relationship.events.map((event) => `${event.eventName} · ${event.trigger || "Auto"}${event.weight === 1 ? "" : ` · Weight ${event.weight}`}`);
+    const descriptions = relationship.events.map((event) => relationship.endUp === "MANAGEMENT"
+      ? `${nodeNames.get(String(event.replacedNode)) || event.replacedNode} · ${event.eventName} · ${eventTriggerDisplayName(event.trigger)} · REPLACE 管理關係`
+      : `${event.eventName} · ${eventTriggerDisplayName(event.trigger)} · ${relationship.endUp}${event.weight === 1 ? "" : ` · Weight ${event.weight}`}`);
     const selected = relationship.source === String(state.nodeDetail?.node?.ID || "") || relationship.target === String(state.nodeDetail?.node?.ID || "");
+    const marker = relationship.endUp === "MANAGEMENT" ? "Management" : "Goto";
     return `
-      <g class="graph-edge ${selected ? "is-related" : ""}">
-        <path d="${graphEdgePath(source, target, layout, index)}" marker-end="url(#graphArrow)"><title>${escapeHtml(descriptions.join("\n"))}</title></path>
+      <g class="graph-edge is-${relationship.endUp.toLocaleLowerCase()} ${selected ? "is-related" : ""}" data-end-up="${relationship.endUp}">
+        <path d="${graphEdgePath(source, target, layout, index, relationship.endUp)}" marker-end="url(#graphArrow${marker})"><title>${escapeHtml(descriptions.join("\n"))}</title></path>
         ${relationship.events.length > 1 ? `<text x="${(source.x + target.x + layout.nodeWidth) / 2}" y="${(source.y + target.y + layout.nodeHeight) / 2 - 8}">×${relationship.events.length}</text>` : ""}
       </g>
     `;
@@ -3584,8 +4018,11 @@ function renderGraphPanel() {
         <button class="graph-reset-button" id="resetGraphView" type="button" title="重新置中" aria-label="重新置中">
           <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"></circle><path d="M12 3v3M12 18v3M3 12h3M18 12h3"></path></svg>
         </button>
-        <svg id="projectGraphSvg" role="img" aria-label="Scene Node GOTO 有向關聯圖" viewBox="${graphViewBoxValue()}" data-graph-width="${layout.width}" data-graph-height="${layout.height}">
-          <defs><marker id="graphArrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z"></path></marker></defs>
+        <svg id="projectGraphSvg" role="img" aria-label="Scene Node GOTO 與 REPLACE 有向關聯圖" viewBox="${graphViewBoxValue()}" data-graph-width="${layout.width}" data-graph-height="${layout.height}">
+          <defs>
+            <marker id="graphArrowGoto" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z"></path></marker>
+            <marker id="graphArrowManagement" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z"></path></marker>
+          </defs>
           <g class="graph-edges">${edgesHtml}</g>
           <g class="graph-nodes">${nodesHtml}</g>
         </svg>
@@ -3637,8 +4074,8 @@ async function refreshAfterSave() {
   state.rootNodeId = project.rootNodeId || null;
   state.nodes = project.nodes || [];
   state.graph = project.graph || { edges: [] };
-  state.screenNames = project.screenNames || [];
   state.images = project.images || [];
+  state.audio = project.audio || [];
   state.stats = project.stats || {};
   state.statsDraft = clone(state.stats);
   state.memories = project.memories || { memory: { Name: "Memory" } };
@@ -3677,11 +4114,6 @@ async function createNamedFile(name) {
 
 function openNodeDialog() {
   dom.nodeDialogForm.reset();
-  const background = dom.nodeDialogForm.elements.background;
-  if (background) {
-    background.innerHTML = nodeBackgroundOptionTags("");
-    syncSelectPicker(background);
-  }
   updateDatalists();
   dom.nodeDialog.showModal();
   window.setTimeout(() => dom.nodeDialogForm.elements.name.focus(), 0);
@@ -3691,8 +4123,6 @@ async function createNodeFromDialog() {
   const form = new FormData(dom.nodeDialogForm);
   const payload = {
     name: form.get("name"),
-    background: form.get("background"),
-    screen: form.get("screen"),
   };
   setSaveState("建立中", "saving");
   try {
@@ -3992,7 +4422,11 @@ function bindGlobalEvents() {
     closeSelectPickers();
     syncTabFocusIndicator({ immediate: true });
   });
-  window.addEventListener("scroll", () => closeSelectPickers(), true);
+  window.addEventListener("scroll", (event) => {
+    if (event.target instanceof Element && event.target.closest(".select-choice-menu, .select-choice-submenu, .content-choice-menu, .content-label-submenu")) return;
+    closeSelectPickers();
+    closeContentPickers();
+  }, true);
   document.querySelectorAll("[data-close-dialog]").forEach((button) => button.addEventListener("click", () => {
     document.querySelector(`#${button.dataset.closeDialog}`)?.close();
   }));
