@@ -10,7 +10,7 @@ This guide defines the editor's scope and its seven workspaces. If you do not ye
 Input source → Trigger → Event → Effects → Content → End up
 ```
 
-Input sources are Option, Keyboard, Mouse, and Auto. A Trigger only describes what happened; the current Scene Node's Event Pool decides the reaction.
+Input sources are Option, Keyboard, Mouse, and three Auto phases. A Trigger only describes what happened; the current Scene Node's Event Pool decides the reaction.
 
 ## Responsibility boundary
 
@@ -29,28 +29,28 @@ Normal game content should not edit `game/FRAMEWORK/runtime.rpy` or `option_rend
 A Scene Node is one unit of player interaction. Each node owns:
 
 - A display Name and stable ID.
-- A Background from `game/images/`, or `None`.
-- An optional parameterless Scene Screen.
 - Its own Options, Event Pool, and Content files.
 
 ROOT is the Runtime entry node. Select another root before deleting it. A node cannot be deleted while an Event still references it as Next Node.
 
-Scene Screen is appropriate for a HUD or scene shell. It does not select Events, execute GOTO, or replace the Options renderer.
+Nodes do not store a Screen. Define HUDs, scene shells, and other Screens in creator-owned `.rpy`, then control them from Content with native Ren'Py `show screen`, `hide screen`, or `call screen`.
 
 ## Events
 
 An Event is the current node's reaction to a Trigger:
 
-- `Trigger`: Auto, Option, Keyboard, or Mouse.
+- `Trigger`: On Enter, On Node, On Exit, Option, Keyboard, or Mouse.
 - `Priority`: lower numbers win; only the lowest matching layer is considered.
-- `Weight`: relative chance among matching Events at the same Priority.
+- `Weight`: relative chance among matching On Node or player-input Events at the same Priority.
 - `Once`: allows one successful selection for the entire game.
 - `Conditions`: decide whether the Event is a candidate.
-- `Effects`: state or audio changes applied after selection.
+- `Effects`: Stat or Memory changes applied when the Event runs.
 - `Content`: a Ren'Py label called after Effects, optionally weighted.
-- `End up`: REDO, GOTO, or EXIT after Content returns.
+- `End up`: REDO, GOTO, REPLACE, or EXIT after Content returns. GOTO and REPLACE accept one or weighted Next Node.
 
 The UI calls the source `Option`; the technical format remains `Action:<id>`. The Event picker lists Triggers registered by the current node's Options.
+
+Picture and Preview Background images are listed only from `game/images/`; Options Hover Sound and Click Sound are listed only from `game/audio/`. You may organize assets in subdirectories: the Editor preserves that hierarchy in the picker but shows only the filename after selection. Write game scenes, BGM, SE, transitions, and fades in Content with native Ren'Py syntax.
 
 ### Fallback Events
 
@@ -60,12 +60,16 @@ If all conditional Events for a Trigger can fail, add a lower-priority unconditi
 
 | UI | Stored format | Purpose |
 | --- | --- | --- |
-| Auto | `Auto` | Checked by the Runner before interactive input |
+| On Enter | `Auto:Enter` | Runs every matching Event when ROOT starts or GOTO / REPLACE enters the node |
+| On Node | `Auto:Node` | Preserves the old Auto single-selection behavior before each interaction |
+| On Exit | `Auto:Exit` | Runs every matching Event before EXIT / REPLACE removes the current node |
 | Option | `Action:<id>` | Returned by a data-driven Option |
 | Keyboard | `Keyboard:<keysym>` | Listened for during the Options interaction |
 | Mouse | `Mouse:<button>` | Left, middle, right, or wheel input |
 
 Focus the Keyboard field and press a key or combination to record it.
+
+On Enter and On Exit first test Conditions against one state snapshot, then run every match ordered by Priority and Event ID. They have no Weight, End up, or Next Node. Pushing a child through GOTO is not a parent exit, and returning from a child through EXIT is not a new parent entry. REPLACE runs the current node's On Exit and then the destination's On Enter; the parent runs no lifecycle, On Node, or Options between them.
 
 ## Options
 
@@ -79,19 +83,23 @@ The three Element types are:
 
 Form mode edits Name, Text, Trigger, images, and sounds. Canvas mode edits position, size, layer, Hover, colors, and visual details.
 
-The Canvas Preview Background inherits the Node Background by default. Selecting another image changes only that Options preview.
+Canvas Preview Background affects only that Options document in the editor. Leaving it empty means no preview image and never changes the game scene.
 
 Options have one Interaction lifecycle. Returning a Trigger closes the screen; REDO starts a new Runner iteration and calls it again.
 
 ## Content
 
-Content is native `.rpy` managed for location and references by the editor. Creators still write dialogue, characters, transitions, ATL, and custom Python inside labels.
+Content is native `.rpy` managed for location and references by the editor. Creators still write dialogue, characters, backgrounds, audio, transitions, ATL, and custom Python inside labels.
 
 ```renpy
 label content_example:
+    scene room with dissolve
+    play music "audio/room.ogg" fadein 1.0
     "This is a presentation label."
     return
 ```
+
+Point an `Auto:Enter` Event at this label to establish the scene or music when entering a node. Use `Auto:Exit` Content for exit fades or cleanup.
 
 A Content label should return to the Runner. Do not duplicate Event Effects or directly rewrite the Scene Stack in ordinary Content.
 
@@ -109,7 +117,7 @@ The default `Memory` bank cannot be deleted and also tracks Once Events. Custom 
 
 ## Graph
 
-The graph is a read-only directed view generated from GOTO / Next Node. It does not create or modify Events.
+The graph is a read-only directed view generated from GOTO / REPLACE Next Node values. GOTO is solid and REPLACE is dashed in the same color. When `Parent → A` is GOTO and `A → B` is REPLACE, a more transparent solid `Parent → B` edge shows the derived management relation. It adds no Schema Parent and does not modify Events.
 
 - Wheel or two-finger vertical movement: zoom around the pointer.
 - Drag empty space: pan.
@@ -122,20 +130,21 @@ The graph is a read-only directed view generated from GOTO / Next Node. It does 
 Before running or submitting the game, use Check Project to verify:
 
 - JSON and Schema validity.
-- Stat, Memory, Content, Screen, and Next Node references.
+- Stat, Memory, Content, and Next Node references.
 - ROOT and Runtime entry configuration.
 
 A clean check does not prove game-design correctness. Playtest Conditions, weights, and narrative outcomes.
 
 ## Custom Ren'Py interfaces
 
-Use `gui.rpy` for global dimensions, fonts, and style variables. Use `screens.rpy` or another creator-owned `.rpy` for Screen structure. The editor scans Screen names for node references but does not edit those files.
+Use `gui.rpy` for global dimensions, fonts, and style variables. Use `screens.rpy` or another creator-owned `.rpy` for Screen structure. The editor neither scans nor stores Screen references; native Ren'Py in Content decides when to show or hide them.
 
 Implement systems that are not data-driven by the editor—such as inventory, calendars, or maps—in creator-owned `.rpy`, then connect them through Content, Stats, Memories, or public Runtime APIs. Do not hide them inside the Options renderer.
 
 ## Saving, updating, and recovery
 
-- Autosave is enabled by default; pending writes finish before node or tab switches.
+- Autosave is enabled by default. Older save responses cannot overwrite newer edits, and the current pending write finishes before node or tab switches.
+- Nested menus support Up/Down navigation, Right to enter a submenu, Left to return, Enter to select, and Escape to close.
 - Shortcuts and editor settings live in `.scene-node-editor/settings.json` at the project root.
 - Re-running the installer updates only managed Editor / Runtime files.
 - Deleted nodes move to `.scene-node-trash/`, outside Ren'Py's game scan.

@@ -28,10 +28,8 @@ Do not create a second `label start`.
 Open Nodes:
 
 1. Change Name to “At the door”.
-2. Select a Background from `game/images/`, or keep `None`.
-3. Leave Scene Screen empty for now.
 
-Background is the scene image. Scene Screen is an optional HUD or interface shell that you write in a creator-owned `.rpy` file.
+The rest of the Node page is a derived summary of Events, Options, Content, and flow references; it adds no Schema fields. Establish backgrounds, music, and Screens later with native Ren'Py inside an On Enter Event's Content.
 
 ## 4. Create a player Option
 
@@ -111,10 +109,11 @@ The complete flow is now:
 Option → Action:open_door → Event → Effect → Content → GOTO
 ```
 
-## 9. Understand the flow results
+## 9. Understand the four flow results
 
 - `REDO`: stay in the current node and show its Options again after Content returns.
 - `GOTO`: enter another node and push it onto the Scene Stack.
+- `REPLACE`: require an actual parent in the current Stack and atomically replace the current node; exiting the destination returns to that original parent.
 - `EXIT`: leave the current node and return to its parent; EXIT at ROOT ends the Runner.
 
 ## 10. Validate and run
@@ -129,8 +128,10 @@ Option → Action:open_door → Event → Effect → Content → GOTO
 
 - Add a high-priority conditional Event and an unconditional fallback for the same Trigger.
 - Try Keyboard and Mouse Triggers.
+- Add On Enter Content with `scene room with dissolve` or `play music ... fadein 1.0` for entry presentation.
+- Add On Exit Content for exit fades or audio cleanup.
 - Add a Picture or Hitbox in the Canvas.
 - Use Memory for keys, chapters, or seen events.
-- Write a HUD in `screens.rpy` and reference it as the node's Scene Screen.
+- Write a HUD in `screens.rpy`, then control it from On Enter / On Exit Content with `show screen` / `hide screen`.
 
 Continue with the [Editor user guide](USER_GUIDE.md) and [Schema / Runtime reference](REFERENCE.md).

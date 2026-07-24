@@ -59,6 +59,10 @@ class InstallerTest(unittest.TestCase):
             )
             root_node = game_root / "SCENENODE" / "root"
             self.assertTrue((root_node / "Node.json").exists())
+            self.assertEqual(
+                json.loads((root_node / "Node.json").read_text(encoding="utf-8")),
+                {"ID": "root", "Name": "ROOT"},
+            )
             self.assertTrue((root_node / "Options.json").exists())
             self.assertFalse((root_node / "SCENEOPTION.rpy").exists())
             self.assertTrue((root_node / "EVENTPOOL").is_dir())
@@ -108,14 +112,6 @@ class InstallerTest(unittest.TestCase):
                 "screen creator_options():\n    textbutton \"繼續\" action Return(\"Action:continue\")\n",
                 encoding="utf-8",
             )
-            root_node_file = root_node / "Node.json"
-            root_node_data = json.loads(root_node_file.read_text(encoding="utf-8"))
-            root_node_data["Screen"] = "creator_hud"
-            root_node_file.write_text(
-                json.dumps(root_node_data, ensure_ascii=False, indent=2) + "\n",
-                encoding="utf-8",
-            )
-
             install.install(game_root)
 
             self.assertEqual(json.loads(stats_file.read_text(encoding="utf-8")), custom_stats)
@@ -179,8 +175,7 @@ class InstallerTest(unittest.TestCase):
                 self.assertEqual(project_data["nodes"][0]["id"], "root")
                 self.assertTrue(project_data["nodes"][0]["isRoot"])
                 self.assertEqual(project_data["graph"], {"edges": []})
-                self.assertIn("creator_hud", project_data["screenNames"])
-                self.assertIn("creator_options", project_data["screenNames"])
+                self.assertNotIn("screenNames", project_data)
                 self.assertEqual(project_data["issues"], [])
 
                 with self.assertRaises(urllib.error.HTTPError) as screen_api_error:

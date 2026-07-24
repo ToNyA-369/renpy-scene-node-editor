@@ -17,7 +17,6 @@ init -100 python:
         "WheelDown": "mousedown_5",
     }
 
-
     def scene_read_json(path):
         handle = renpy.file(path, encoding="utf-8-sig")
         try:
@@ -89,8 +88,6 @@ init -100 python:
         global scene_memories
         global scene_memory_legacy_migrated
         global scene_stack
-        global scene_active_screen
-        global scene_local_audio
         global scene_option_adjustments
 
         scene_stats = dict(
@@ -100,8 +97,6 @@ init -100 python:
         scene_memories = dict((bank_id, []) for bank_id in scene_catalog["memories"])
         scene_memory_legacy_migrated = True
         scene_stack = []
-        scene_active_screen = None
-        scene_local_audio = {}
         scene_option_adjustments = {}
 
 
@@ -293,6 +288,19 @@ init -100 python:
         )
 
 
+    def scene_lifecycle_events(node_id, trigger):
+        matches = [
+            event
+            for event in scene_catalog["events"].get(node_id, [])
+            if scene_event_matches(event, trigger)
+        ]
+        matches.sort(key=lambda event: (
+            int(event.get("Priority", 5)),
+            str(event.get("ID") or ""),
+        ))
+        return [scene_prepare_event(node_id, event) for event in matches]
+
+
     def scene_input_bindings(node_id):
         bindings = []
         seen = set()
@@ -320,30 +328,20 @@ init -100 python:
         }
 
 
-    def scene_track_local_audio(node_id, channel, persistent):
-        global scene_local_audio
+    def scene_validate_prepared_transition(prepared):
+        end_up = prepared["end_up"]
+        if end_up not in ("GOTO", "REPLACE"):
+            return
 
-        updated = dict((key, list(value)) for key, value in scene_local_audio.items())
-        for key in list(updated):
-            updated[key] = [item for item in updated[key] if item != channel]
-            if not updated[key]:
-                del updated[key]
-        if not persistent:
-            updated[node_id] = updated.get(node_id, []) + [channel]
-        scene_local_audio = updated
+        next_node = prepared["next_node"]
+        if not next_node:
+            raise Exception("{} Event did not select a Next Node.".format(end_up))
+        scene_get_node(next_node)
 
-
-    def scene_release_node_audio(node_id):
-        global scene_local_audio
-
-        channels = scene_local_audio.get(node_id, [])
-        for channel in channels:
-            renpy.music.stop(channel=channel)
-        scene_local_audio = dict(
-            (key, list(value))
-            for key, value in scene_local_audio.items()
-            if key != node_id
-        )
+        if end_up == "REPLACE" and len(scene_stack) <= 1:
+            raise Exception(
+                "REPLACE requires a parent Scene Node; current stack depth is {}.".format(len(scene_stack))
+            )
 
 
     def scene_apply_stat_effect(effect):
@@ -379,33 +377,6 @@ init -100 python:
         scene_stats = updated
 
 
-    def scene_apply_audio_effect(node_id, effect):
-        effect_type = str(effect.get("type") or "").lower()
-        channel = "music" if effect_type == "bgm" else "sound"
-        operation = str(effect.get("op") or "play").lower()
-
-        if operation == "stop":
-            renpy.music.stop(channel=channel, fadeout=effect.get("fadeout"))
-            scene_track_local_audio(node_id, channel, True)
-            return
-        if operation != "play":
-            raise Exception("Unknown audio operation: {}".format(operation))
-
-        filename = effect.get("id")
-        if not filename:
-            raise Exception("Audio play effect is missing an id.")
-        loop = effect.get("loop", effect_type == "bgm")
-        renpy.music.play(
-            filename,
-            channel=channel,
-            loop=loop,
-            fadein=effect.get("fadein", 0),
-            fadeout=effect.get("fadeout"),
-            if_changed=effect.get("if_changed", True),
-        )
-        scene_track_local_audio(node_id, channel, bool(effect.get("persistent", False)))
-
-
     def scene_apply_effect(node_id, effect):
         effect_type = str(effect.get("type") or "").lower()
         if effect_type == "stat":
@@ -421,8 +392,6 @@ init -100 python:
                 scene_memory_clear(bank_id)
             else:
                 raise Exception("Unknown Memory operation: {}".format(operation))
-        elif effect_type in ("bgm", "se"):
-            scene_apply_audio_effect(node_id, effect)
         else:
             raise Exception("Unknown Effect type: {}".format(effect_type))
 
@@ -470,26 +439,6 @@ init -100 python:
         scene_stack = [root_node]
 
 
-    def scene_show_current_node():
-        global scene_active_screen
-
-        node = scene_current_node()
-        background = str(node.get("Background") or "").strip()
-        renpy.scene()
-        if background and renpy.has_image(background):
-            renpy.show(background)
-        elif background and renpy.loadable(background):
-            renpy.show("scene_node_background", what=background)
-
-        screen_name = str(node.get("Screen") or "").strip()
-        if screen_name:
-            renpy.show_screen(screen_name, _tag="scene_runtime")
-            scene_active_screen = screen_name
-        elif scene_active_screen:
-            renpy.hide_screen("scene_runtime")
-            scene_active_screen = None
-
-
     def scene_resolve_prepared(prepared):
         global scene_stack
 
@@ -497,13 +446,10 @@ init -100 python:
         if end_up == "REDO":
             return
 
-        scene_release_node_audio(prepared["node_id"])
         if end_up == "GOTO":
-            next_node = prepared["next_node"]
-            if not next_node:
-                raise Exception("GOTO Event did not select a Next Node.")
-            scene_get_node(next_node)
-            scene_stack = scene_stack + [next_node]
+            scene_stack = scene_stack + [prepared["next_node"]]
+        elif end_up == "REPLACE":
+            scene_stack = scene_stack[:-1] + [prepared["next_node"]]
         elif end_up == "EXIT":
             scene_stack = scene_stack[:-1]
         else:
@@ -634,31 +580,40 @@ init -100 python:
         )
 
 
-    def scene_cleanup_ui():
-        global scene_active_screen
-
-        if scene_active_screen:
-            renpy.hide_screen("scene_runtime")
-        scene_active_screen = None
-
-
 default scene_stats = {}
 default scene_memories = {}
 default scene_memory_legacy_migrated = False
 default scene_stack = []
-default scene_active_screen = None
-default scene_local_audio = {}
 default scene_option_adjustments = {}
+
+
+label scene_run_lifecycle(node_id, trigger):
+    $ _scene_lifecycle_queue = scene_lifecycle_events(node_id, trigger)
+
+    while _scene_lifecycle_queue:
+        $ _scene_lifecycle_prepared = _scene_lifecycle_queue[0]
+        $ _scene_lifecycle_queue = _scene_lifecycle_queue[1:]
+        $ scene_apply_prepared(_scene_lifecycle_prepared)
+
+        if _scene_lifecycle_prepared["content"]:
+            call expression _scene_lifecycle_prepared["content"]
+
+    return
 
 
 label scene_runtime_start(root_node=None):
     $ scene_begin(root_node)
+    $ _scene_enter_pending = True
 
     while scene_stack:
         $ _scene_node_id = scene_current_node_id()
         $ _scene_node = scene_current_node()
-        $ scene_show_current_node()
-        $ _scene_event = scene_select_event(_scene_node_id, "Auto")
+
+        if _scene_enter_pending:
+            call scene_run_lifecycle(_scene_node_id, "Auto:Enter")
+            $ _scene_enter_pending = False
+
+        $ _scene_event = scene_select_event(_scene_node_id, "Auto:Node")
 
         if _scene_event is None:
             $ _scene_trigger = scene_call_option_screen(_scene_node_id)
@@ -672,7 +627,13 @@ label scene_runtime_start(root_node=None):
         if _scene_prepared["content"]:
             call expression _scene_prepared["content"]
 
-        $ scene_resolve_prepared(_scene_prepared)
+        $ scene_validate_prepared_transition(_scene_prepared)
 
-    $ scene_cleanup_ui()
+        if _scene_prepared["end_up"] in ("EXIT", "REPLACE"):
+            call scene_run_lifecycle(_scene_node_id, "Auto:Exit")
+
+        $ _scene_transition = _scene_prepared["end_up"]
+        $ scene_resolve_prepared(_scene_prepared)
+        $ _scene_enter_pending = _scene_transition in ("GOTO", "REPLACE")
+
     return

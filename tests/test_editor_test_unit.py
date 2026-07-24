@@ -49,6 +49,11 @@ class EditorTestUnitTest(unittest.TestCase):
             self.assertIn("screen scene_editor_test_hud():", screen_source)
             self.assertNotIn("scene_editor_test_root_actions", screen_source)
             self.assertNotIn("scene_editor_test_result_actions", screen_source)
+            lifecycle_source = (
+                game_root / "SCENENODE" / "root" / "CONTENT" / "00_lifecycle.rpy"
+            ).read_text(encoding="utf-8")
+            self.assertIn("show screen scene_editor_test_hud", lifecycle_source)
+            self.assertIn("hide screen scene_editor_test_hud", lifecycle_source)
 
             stats = json.loads((game_root / "DATA" / "Stats.json").read_text(encoding="utf-8"))
             memories = json.loads((game_root / "DATA" / "Memories.json").read_text(encoding="utf-8"))
@@ -59,7 +64,8 @@ class EditorTestUnitTest(unittest.TestCase):
             root_node = json.loads(
                 (game_root / "SCENENODE" / "root" / "Node.json").read_text(encoding="utf-8")
             )
-            self.assertEqual(root_node["Screen"], "scene_editor_test_hud")
+            self.assertNotIn("Screen", root_node)
+            self.assertNotIn("Background", root_node)
             self.assertNotIn("Option Mode", root_node)
             self.assertNotIn("Option Screen", root_node)
             self.assertFalse((game_root / "SCENENODE" / "root" / "SCENEOPTION.rpy").exists())
@@ -107,6 +113,61 @@ class EditorTestUnitTest(unittest.TestCase):
             self.assertEqual(keyboard_event["Trigger"], "Keyboard:K_k")
             self.assertEqual(mouse_event["Trigger"], "Mouse:Right")
 
+            enter_background = json.loads(
+                (
+                    game_root
+                    / "SCENENODE"
+                    / "root"
+                    / "EVENTPOOL"
+                    / "root_enter_background.json"
+                ).read_text(encoding="utf-8")
+            )
+            enter_music = json.loads(
+                (
+                    game_root
+                    / "SCENENODE"
+                    / "root"
+                    / "EVENTPOOL"
+                    / "root_enter_music.json"
+                ).read_text(encoding="utf-8")
+            )
+            on_node = json.loads(
+                (
+                    game_root
+                    / "SCENENODE"
+                    / "root"
+                    / "EVENTPOOL"
+                    / "root_on_node_once.json"
+                ).read_text(encoding="utf-8")
+            )
+            exit_cleanup = json.loads(
+                (
+                    game_root
+                    / "SCENENODE"
+                    / "root"
+                    / "EVENTPOOL"
+                    / "root_exit_cleanup.json"
+                ).read_text(encoding="utf-8")
+            )
+            self.assertEqual(
+                [enter_background["Trigger"], enter_music["Trigger"], on_node["Trigger"], exit_cleanup["Trigger"]],
+                ["Auto:Enter", "Auto:Enter", "Auto:Node", "Auto:Exit"],
+            )
+            self.assertLess(enter_background["Priority"], enter_music["Priority"])
+            for lifecycle_event in (enter_background, enter_music, exit_cleanup):
+                self.assertNotIn("Weight", lifecycle_event)
+                self.assertNotIn("End up", lifecycle_event)
+                self.assertNotIn("Next Node", lifecycle_event)
+            self.assertTrue(on_node["Once"])
+            self.assertEqual(on_node["End up"], "REDO")
+
+            lifecycle_source = (
+                game_root / "SCENENODE" / "root" / "CONTENT" / "00_lifecycle.rpy"
+            ).read_text(encoding="utf-8")
+            self.assertIn("scene scene_editor_test_background with dissolve", lifecycle_source)
+            self.assertIn('play music "audio/editor_test/music/theme_a.wav" fadein 1.0', lifecycle_source)
+            self.assertIn("stop music fadeout 1.0", lifecycle_source)
+
             options = json.loads(
                 (game_root / "SCENENODE" / "options_lab" / "Options.json").read_text(encoding="utf-8")
             )
@@ -117,6 +178,9 @@ class EditorTestUnitTest(unittest.TestCase):
             self.assertTrue(textbox["List"]["Show Scrollbar"])
             self.assertTrue(textbox["Hover"]["Enabled"])
             self.assertIn("Hover Sound", textbox)
+            self.assertEqual(options["Canvas"]["Preview Background"], create_editor_test_unit.TEST_IMAGE_FILE)
+            self.assertEqual(options["Elements"][1]["Hover Sound"], "audio/editor_test/sfx/layer_low.wav")
+            self.assertEqual(options["Elements"][1]["Click Sound"], "audio/editor_test/sfx/ui/layer_high.wav")
             self.assertNotIn("Mousewheel", textbox["List"])
             self.assertNotIn("Remember Scroll", textbox["List"])
             self.assertNotIn("Visible Conditions", textbox)
@@ -133,20 +197,34 @@ class EditorTestUnitTest(unittest.TestCase):
             )
             self.assertEqual(random_event["Next Node"], {"outcome_success": 1, "outcome_fallback": 1})
 
+            replace_event = json.loads(
+                (
+                    game_root
+                    / "SCENENODE"
+                    / create_editor_test_unit.REPLACE_CHILD_A_NODE
+                    / "EVENTPOOL"
+                    / "replace_child_a_with_b.json"
+                ).read_text(encoding="utf-8")
+            )
+            self.assertEqual(replace_event["End up"], "REPLACE")
+            self.assertEqual(replace_event["Next Node"], create_editor_test_unit.REPLACE_CHILD_B_NODE)
+
             previous_project_root = app.PROJECT_ROOT
             try:
                 app.PROJECT_ROOT = game_root
-                self.assertEqual(set(app.scan_screen_names()), {
-                    "scene_editor_test_hud",
-                    "scene_option_hitbox",
-                    "scene_option_picture",
-                    "scene_option_renderer",
-                    "scene_option_textbox",
-                })
                 root_detail = app.read_node("root")
                 self.assertEqual(
                     [(item["file"], item["labels"]) for item in root_detail["contents"]],
                     [
+                        (
+                            "00_lifecycle.rpy",
+                            [
+                                "test_enter_background",
+                                "test_enter_music",
+                                "test_on_node_once",
+                                "test_exit_cleanup",
+                            ],
+                        ),
                         (
                             "01_rewards.rpy",
                             [
@@ -160,23 +238,48 @@ class EditorTestUnitTest(unittest.TestCase):
                         ),
                         (
                             "02_flow.rpy",
-                            ["test_spent", "test_insufficient", "test_finished"],
+                            [
+                                "test_spent",
+                                "test_insufficient",
+                                "test_finished",
+                            ],
                         ),
                     ],
                 )
+                self.assertEqual(len(app.scan_image_assets()), 19)
+                self.assertEqual(
+                    app.scan_audio_assets(),
+                    sorted(create_editor_test_unit.TEST_AUDIO_FILES, key=str.casefold),
+                )
+                for event_path in (game_root / "SCENENODE").rglob("EVENTPOOL/*.json"):
+                    event = json.loads(event_path.read_text(encoding="utf-8"))
+                    self.assertTrue(
+                        all(effect.get("type") in ("stat", "memory") for effect in event["Effects"]),
+                        event_path,
+                    )
                 edges = app.project_graph()["edges"]
-                self.assertEqual(len(edges), 8)
+                self.assertEqual(len(edges), 11)
                 self.assertEqual(
                     {(edge["source"], edge["target"]) for edge in edges},
                     {
                         ("root", "options_lab"),
+                        ("root", create_editor_test_unit.REPLACE_PARENT_NODE),
                         ("options_lab", "branch_lab"),
                         ("options_lab", "outcome_success"),
                         ("options_lab", "outcome_fallback"),
                         ("branch_lab", "outcome_success"),
                         ("branch_lab", "outcome_fallback"),
+                        (create_editor_test_unit.REPLACE_PARENT_NODE, create_editor_test_unit.REPLACE_CHILD_A_NODE),
+                        (create_editor_test_unit.REPLACE_CHILD_A_NODE, create_editor_test_unit.REPLACE_CHILD_B_NODE),
                     },
                 )
+                replace_edges = [edge for edge in edges if edge["endUp"] == "REPLACE"]
+                self.assertEqual(
+                    [(edge["source"], edge["target"]) for edge in replace_edges],
+                    [(create_editor_test_unit.REPLACE_CHILD_A_NODE, create_editor_test_unit.REPLACE_CHILD_B_NODE)],
+                )
+                references = app.node_references(create_editor_test_unit.REPLACE_CHILD_B_NODE)["references"]
+                self.assertEqual([item["eventId"] for item in references], ["replace_child_a_with_b"])
                 self.assertEqual(app.validate_project(), [])
             finally:
                 app.PROJECT_ROOT = previous_project_root

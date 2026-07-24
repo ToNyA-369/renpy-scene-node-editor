@@ -7,7 +7,7 @@ This file is a compact contract for AI assistants working inside a Ren'Py game t
 Scene Node Editor manages structured interaction flow. It does not replace Ren'Py's screen language, narrative scripting, assets, or game-specific systems.
 
 ```text
-Input source -> Trigger -> Event -> Effects -> Content label -> REDO/GOTO/EXIT
+Input or lifecycle source -> Trigger -> Event -> Effects -> Content label -> optional REDO/GOTO/REPLACE/EXIT
 ```
 
 ## Ownership
@@ -48,16 +48,17 @@ Content files under `game/SCENENODE/**/CONTENT/` are native Ren'Py, but their la
 
 1. A displayed Option is always actionable. Put conditions and fallback behavior in Events or separate Nodes, not per-Option visibility rules.
 2. The UI calls the source “Option”; stored Triggers remain `Action:<id>`.
-3. Other Trigger formats are `Auto`, `Keyboard:<Ren'Py keysym>`, and `Mouse:<Left|Middle|Right|WheelUp|WheelDown>`.
-4. An Option returns a Trigger. It does not directly choose an Event, run Effects, call Content, or perform GOTO.
-5. Events own Conditions, Priority, Weight, Once, Effects, Content, and End up.
+3. Other Trigger formats are `Auto:Enter`, `Auto:Node`, `Auto:Exit`, `Keyboard:<Ren'Py keysym>`, and `Mouse:<Left|Middle|Right|WheelUp|WheelDown>`.
+4. An Option returns a Trigger. It does not directly choose an Event, run Effects, call Content, or change the Scene Stack.
+5. On Node and player-input Events own Conditions, Priority, Weight, Once, Effects, Content, and End up. On Enter / On Exit lifecycle Events omit Weight, End up, and Next Node.
 6. Event Content stores a Ren'Py label name, not an `.rpy` filename.
-7. Content Effects run before the Content label. Content should normally `return` to the Runner.
-8. `REDO` repeats the current Node, `GOTO` pushes a child Node, and `EXIT` pops back to the parent. EXIT at ROOT ends the Runner.
-9. Scene Screen is a parameterless visual shell or HUD. It does not replace the Options renderer and should not select Events.
-10. Do not rename stable Node, Event, Stat, Memory Bank, Element, Item, or Content IDs casually.
-11. Do not introduce new Schema fields or change public Runtime semantics without explicit creator approval.
-12. Do not overwrite creator-owned `gui.rpy`, `screens.rpy`, or game data during framework updates.
+7. Event Effects are limited to Stats and Memories and run before Content. Backgrounds, audio, transitions, and other presentation use native Ren'Py in Content, which should normally `return` to the Runner.
+8. On Enter / On Exit evaluate Conditions as a snapshot and run every match ordered by Priority then Event ID. On Node retains the old Auto minimum-Priority / Weight selection.
+9. `REDO` repeats the current Node, `GOTO` pushes a destination Node, `REPLACE` atomically swaps the Stack top, and `EXIT` pops back to the parent. REPLACE requires an actual parent in the current Stack: `[parent, current] -> [parent, target]`. It runs current On Exit and target On Enter without resuming any parent lifecycle, On Node, or Options. EXIT at the first Stack level ends the Runner. GOTO does not exit the parent, and returning from a child does not re-enter the parent.
+10. Node has no Background or Screen field. Backgrounds, audio, transitions, Screens, and HUDs are creator-owned presentation controlled from Content with native Ren'Py.
+11. Do not rename stable Node, Event, Stat, Memory Bank, Element, Item, or Content IDs casually.
+12. Do not introduce new Schema fields or change public Runtime semantics without explicit creator approval.
+13. Do not overwrite creator-owned `gui.rpy`, `screens.rpy`, or game data during framework updates.
 
 ## State
 
@@ -81,8 +82,8 @@ Do not rely on other internal `scene_*` functions from creator code.
 
 - Use `gui.rpy` for global GUI variables, fonts, sizes, and styles.
 - Use `screens.rpy` or another creator-owned `.rpy` for Screen structure.
-- A Node references the Screen by name in `Node.json`.
-- Keep the Screen parameterless unless the framework contract is explicitly redesigned.
+- Show, hide, or call the Screen from Content with native Ren'Py statements.
+- Keep Screen flow separate from data-driven Options unless the framework contract is explicitly redesigned.
 - Read state using public helpers; avoid changing Event flow directly from the Screen.
 
 ## Custom systems

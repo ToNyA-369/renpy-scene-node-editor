@@ -34,15 +34,17 @@ CONTENT_DIR = "CONTENT"
 OPTIONS_FILE = "Options.json"
 EDITOR_SETTINGS_FILE = "settings.json"
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".avif"}
+AUDIO_EXTENSIONS = {".opus", ".ogg", ".mp3", ".mp2", ".flac", ".wav"}
 
 LABEL_RE = re.compile(r"^\s*label\s+([A-Za-z_][A-Za-z0-9_.]*)\s*:", re.MULTILINE)
-SCREEN_RE = re.compile(r"^\s*screen\s+([A-Za-z_][A-Za-z0-9_]*)\s*(?:\([^)]*\))?\s*:", re.MULTILINE)
 DISPLAY_NAME_RE = re.compile(r"^\s*#\s*@display_name:\s*(.+?)\s*$", re.MULTILINE)
 KEYBOARD_KEYSYM_RE = re.compile(
     r"^(?:(?:alt|meta|ctrl|osctrl|anymod|shift|noshift|caps|nocaps|num|nonum|repeat|anyrepeat|keydown|keyup)_)*"
     r"(?:K_[A-Za-z0-9_]+|KP_[A-Za-z0-9_]+|[^\s])$"
 )
 MOUSE_TRIGGER_VALUES = {"Left", "Middle", "Right", "WheelUp", "WheelDown"}
+AUTO_TRIGGER_PHASES = {"Enter", "Node", "Exit"}
+LIFECYCLE_TRIGGERS = {"Auto:Enter", "Auto:Exit"}
 
 
 class ApiError(Exception):
@@ -260,15 +262,6 @@ def validate_effect(effect, field="Effect"):
         result.pop("value", None)
         return result
 
-    if effect_type in ("bgm", "se"):
-        operation = str(result.get("op") or "play").lower()
-        if operation not in ("play", "stop"):
-            raise ApiError(HTTPStatus.BAD_REQUEST, f"{field} 的音效操作不合法。")
-        result["op"] = operation
-        if operation == "play" and not str(result.get("id") or "").strip():
-            raise ApiError(HTTPStatus.BAD_REQUEST, f"{field} 的資源 ID 不可為空。")
-        return result
-
     raise ApiError(HTTPStatus.BAD_REQUEST, f"{field} 的類型不合法：{effect_type}。")
 
 
@@ -420,17 +413,24 @@ def option_triggers(options):
     return [trigger for trigger in triggers if trigger]
 
 
-def scan_image_assets():
-    ignored = {"cache", "saves", "tl"}
+def scan_assets(directory, extensions):
+    root = PROJECT_ROOT / directory
+    if not root.is_dir():
+        return []
     assets = []
-    for path in PROJECT_ROOT.rglob("*"):
-        if not path.is_file() or path.suffix.casefold() not in IMAGE_EXTENSIONS:
+    for path in root.rglob("*"):
+        if not path.is_file() or path.suffix.casefold() not in extensions:
             continue
-        relative = path.relative_to(PROJECT_ROOT)
-        if any(part.casefold() in ignored for part in relative.parts):
-            continue
-        assets.append(relative.as_posix())
+        assets.append(path.relative_to(PROJECT_ROOT).as_posix())
     return sorted(assets, key=str.casefold)
+
+
+def scan_image_assets():
+    return scan_assets("images", IMAGE_EXTENSIONS)
+
+
+def scan_audio_assets():
+    return scan_assets("audio", AUDIO_EXTENSIONS)
 
 
 def node_summary(directory):
@@ -454,8 +454,6 @@ def node_summary(directory):
         "path": relative,
         "id": data.get("ID", directory.name),
         "name": data.get("Name", data.get("ID", directory.name)),
-        "background": data.get("Background", ""),
-        "screen": data.get("Screen", ""),
         "eventCount": len(events),
         "contentCount": len(contents),
         "optionCount": len(option_elements),
@@ -486,7 +484,8 @@ def project_graph():
                 event = read_json(path, {}) or {}
             except ApiError:
                 continue
-            if event.get("End up") != "GOTO":
+            end_up = str(event.get("End up") or "")
+            if end_up not in ("GOTO", "REPLACE"):
                 continue
             target = event.get("Next Node")
             if isinstance(target, str):
@@ -505,6 +504,7 @@ def project_graph():
                     "eventId": str(event.get("ID") or path.stem),
                     "eventName": str(event.get("Name") or event.get("ID") or path.stem),
                     "trigger": str(event.get("Trigger") or ""),
+                    "endUp": end_up,
                     "weight": weight,
                 })
     return {
@@ -637,17 +637,17 @@ def validate_event_trigger(value):
     trigger = str(value or "").strip()
     if not trigger:
         raise ApiError(HTTPStatus.BAD_REQUEST, "Event Trigger 不可為空。")
-    if trigger == "Auto":
-        return trigger
     if ":" not in trigger:
-        raise ApiError(HTTPStatus.BAD_REQUEST, "Event Trigger 必須使用 Auto 或 Source:Value 格式。")
+        raise ApiError(HTTPStatus.BAD_REQUEST, "Event Trigger 必須使用 Source:Value 格式。")
 
     source, payload = trigger.split(":", 1)
     payload = payload.strip()
-    if source not in ("Action", "Keyboard", "Mouse"):
+    if source not in ("Auto", "Action", "Keyboard", "Mouse"):
         raise ApiError(HTTPStatus.BAD_REQUEST, f"Event Trigger 來源不合法：{source}。")
     if not payload:
         raise ApiError(HTTPStatus.BAD_REQUEST, f"{source} Trigger 不可為空。")
+    if source == "Auto" and payload not in AUTO_TRIGGER_PHASES:
+        raise ApiError(HTTPStatus.BAD_REQUEST, f"Auto Trigger 不合法：{payload}。")
     if source == "Keyboard" and not (
         KEYBOARD_KEYSYM_RE.fullmatch(payload) or (len(payload) == 1 and not payload.isspace())
     ):
@@ -662,12 +662,13 @@ def validate_event(event):
         raise ApiError(HTTPStatus.BAD_REQUEST, "Event 必須是 JSON object。")
     event_id = clean_file_name(event.get("ID") or generate_id("event"), ".json")
     trigger = validate_event_trigger(event.get("Trigger"))
+    is_lifecycle = trigger in LIFECYCLE_TRIGGERS
 
     priority = event.get("Priority", 5)
-    weight = event.get("Weight", 1)
     if not isinstance(priority, int) or isinstance(priority, bool) or not 0 <= priority <= 5:
         raise ApiError(HTTPStatus.BAD_REQUEST, "Priority 必須是 0 到 5 的整數。")
-    if not isinstance(weight, (int, float)) or isinstance(weight, bool) or weight <= 0:
+    weight = event.get("Weight", 1)
+    if not is_lifecycle and (not isinstance(weight, (int, float)) or isinstance(weight, bool) or weight <= 0):
         raise ApiError(HTTPStatus.BAD_REQUEST, "Weight 必須大於 0。")
 
     conditions = event.get("Conditions", [])
@@ -678,33 +679,37 @@ def validate_event(event):
         raise ApiError(HTTPStatus.BAD_REQUEST, "Effects 必須是 object 陣列。")
 
     content = event.get("Content")
-    end_up = event.get("End up", "REDO")
-    next_node = event.get("Next Node")
     validate_weight_map(content, "Content")
-    validate_weight_map(next_node, "Next Node")
-    if end_up not in ("REDO", "GOTO", "EXIT"):
-        raise ApiError(HTTPStatus.BAD_REQUEST, "End up 必須是 REDO、GOTO 或 EXIT。")
-    if end_up == "GOTO" and next_node is None:
-        raise ApiError(HTTPStatus.BAD_REQUEST, "GOTO Event 必須設定 Next Node。")
-
-    return {
+    result = {
         "ID": event_id,
         "Name": str(event.get("Name") or event_id),
         "Trigger": trigger,
         "Priority": priority,
-        "Weight": weight,
         "Once": bool(event.get("Once", False)),
         "Conditions": [validate_condition(item, "Event Condition") for item in conditions],
         "Effects": [validate_effect(item, "Event Effect") for item in effects],
         "Content": content,
-        "End up": end_up,
-        "Next Node": next_node if end_up == "GOTO" else None,
     }
+    if is_lifecycle:
+        return result
+
+    end_up = event.get("End up", "REDO")
+    next_node = event.get("Next Node")
+    validate_weight_map(next_node, "Next Node")
+    if end_up not in ("REDO", "GOTO", "REPLACE", "EXIT"):
+        raise ApiError(HTTPStatus.BAD_REQUEST, "End up 必須是 REDO、GOTO、REPLACE 或 EXIT。")
+    if end_up in ("GOTO", "REPLACE") and next_node is None:
+        raise ApiError(HTTPStatus.BAD_REQUEST, f"{end_up} Event 必須設定 Next Node。")
+    result.update({
+        "Weight": weight,
+        "End up": end_up,
+        "Next Node": next_node if end_up in ("GOTO", "REPLACE") else None,
+    })
+    return result
 
 
 def all_rpy_symbols():
     labels = set()
-    screens = set()
     for path in PROJECT_ROOT.rglob("*.rpy"):
         if EDITOR_ROOT in path.parents:
             continue
@@ -713,12 +718,7 @@ def all_rpy_symbols():
         except OSError:
             continue
         labels.update(LABEL_RE.findall(source))
-        screens.update(SCREEN_RE.findall(source))
-    return labels, screens
-
-
-def scan_screen_names():
-    return sorted(all_rpy_symbols()[1], key=str.casefold)
+    return labels
 
 
 def validate_project():
@@ -739,7 +739,7 @@ def validate_project():
 
     nodes = scan_nodes()
     node_ids = {item["id"] for item in nodes}
-    labels, screens = all_rpy_symbols()
+    labels = all_rpy_symbols()
     seen_node_ids = set()
 
     if scene_project_path().exists():
@@ -770,9 +770,6 @@ def validate_project():
         if node_id in seen_node_ids:
             issues.append({"level": "error", "location": location, "message": f"Node ID {node_id} 重複。"})
         seen_node_ids.add(node_id)
-        if summary["screen"] and summary["screen"] not in screens:
-            issues.append({"level": "warning", "location": location, "message": f"找不到 Screen：{summary['screen']}。"})
-
         try:
             detail = read_node(summary["path"])
         except ApiError as exc:
@@ -819,7 +816,7 @@ def validate_project():
                 if label not in labels:
                     issues.append({"level": "warning", "location": event_location, "message": f"找不到 Content label：{label}。"})
 
-            target = event["Next Node"]
+            target = event.get("Next Node")
             target_names = [target] if isinstance(target, str) else list(target or {})
             for target_id in target_names:
                 if target_id not in node_ids:
@@ -842,8 +839,6 @@ def create_node(payload):
     write_json(directory / "Node.json", {
         "ID": node_id,
         "Name": node_name,
-        "Background": str(payload.get("background") or ""),
-        "Screen": str(payload.get("screen") or ""),
     })
     write_json(directory / OPTIONS_FILE, default_options())
     return node_summary(directory)
@@ -859,8 +854,6 @@ def save_node(payload):
     write_json(directory / "Node.json", {
         "ID": node_id,
         "Name": str(node.get("Name") or node_id),
-        "Background": str(node.get("Background") or ""),
-        "Screen": str(node.get("Screen") or ""),
     })
     return node_summary(directory)
 
@@ -1013,8 +1006,8 @@ class EditorHandler(BaseHTTPRequestHandler):
                     "memories": read_json(memories_path(), {}) or {},
                     "nodes": scan_nodes(),
                     "graph": project_graph(),
-                    "screenNames": scan_screen_names(),
                     "images": scan_image_assets(),
+                    "audio": scan_audio_assets(),
                     "issues": validate_project(),
                 })
                 return

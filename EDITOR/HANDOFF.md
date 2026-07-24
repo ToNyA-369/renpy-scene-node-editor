@@ -1,6 +1,6 @@
 # Scene Node Editor 專案交接
 
-最後整理日期：2026-07-19
+最後整理日期：2026-07-22
 
 這份文件提供給新開啟的 Codex 對話。開始修改前，先閱讀本文件及「規格來源」列出的文件，不要重新設計已經定案的遊戲架構。
 
@@ -35,17 +35,18 @@
 ### 3.1 核心流程
 
 ```text
-Action / Keyboard / Mouse / Auto Trigger + Global State
+Action / Keyboard / Mouse / Auto:Node Trigger + Global State
 -> 收集目前 Scene Node 的候選 Events
 -> 檢查 Conditions
 -> 選擇最低 Priority 的候選層
 -> 依 Weight 選出唯一 Event
--> 播放 Content（可為 None）
 -> 套用 Effects
--> 依 REDO / GOTO / EXIT 決定節點流程
+-> 播放 Content（可為 None）
+-> 依 REDO / GOTO / REPLACE / EXIT 決定節點流程
 ```
 
-- Option、Keyboard 與 Mouse 都可作為玩家輸入來源，只產生 Trigger，不直接選 Event；Auto 由 Runner 每輪主動檢查。
+- Option、Keyboard 與 Mouse 都可作為玩家輸入來源，只產生 Trigger，不直接選 Event；`Auto:Node` 由 Runner 每輪主動檢查。
+- `Auto:Enter` 在 ROOT 啟動或 GOTO／REPLACE 進入節點時執行；`Auto:Exit` 在 EXIT／REPLACE 移除目前節點前執行。
 - State 系統全遊戲只有一份，包含 Stats 與可自訂的 Memory Banks。
 - 每個 Scene Node 都有自己的 Event Pool。
 - 凡是包含選項的互動單位都是 Scene Node。
@@ -56,20 +57,27 @@ Action / Keyboard / Mouse / Auto Trigger + Global State
 ### 3.2 節點流程
 
 ```text
-REDO  重新執行目前節點的完整流程，包含 Auto 檢查
+REDO  重新執行目前節點的互動流程，包含 Auto:Node 檢查
 GOTO  將子節點推入 stack
+REPLACE 需要實際父層，原子替換 stack 頂端
 EXIT  離開目前節點並回到父節點
 ```
 
 內容設計上可以視為樹狀，但 Runtime 實際使用 stack。
 
+GOTO 子節點不視為父節點 `Auto:Exit`；子節點 EXIT 回到父節點也不重新執行父節點 `Auto:Enter`。
+
+REPLACE 是 `[父, 目前] → [父, 目標]` 的單一 Stack 操作。它先跑主 Event Effects／Content並確認 prepare 階段選出的目標存在，再執行目前節點 `Auto:Exit`、替換頂端、執行目標 `Auto:Enter`，最後進入目標 `Auto:Node`／Options。父節點在過程中不得執行任何生命週期、`Auto:Node` 或 Options；目標 EXIT 後回到原本父節點。父層限制依實際 Stack 深度判斷，不依 Root Node ID、資料夾或靜態 Parent 欄位。
+
 ### 3.3 Event 決策
 
-- 一次輸入 Trigger 只會對應到一個 Event。
+- `Auto:Node` 與每次玩家輸入 Trigger 只會對應到一個 Event。
 - Priority 數字越小越優先，目前範圍為 0 到 5，0 和 1 保留給系統或特殊事件。
 - 同 Trigger、Conditions 通過且 Priority 相同時，才使用 Weight 抽選。
-- Event 的 Content 與 Next Node 都可另外使用權重物件。
+- Event 的 Content 與 GOTO／REPLACE Next Node 都可另外使用權重物件。
 - `Once: true` 等同由系統在預設 `memory` 記憶庫註冊 `once:<event_id>` 標籤。
+- `Auto:Enter`／`Auto:Exit` 先以同一份狀態快照篩選 Conditions 與 Once，再依 Priority、Event ID 執行所有符合 Events。
+- `Auto:Enter`／`Auto:Exit` 不含 Weight、End up 或 Next Node；保留 Conditions、Priority、Once、Effects 與 Content。
 
 ### 3.4 Memories
 
@@ -83,9 +91,9 @@ EXIT  離開目前節點並回到父節點
 
 創作者可在編輯器「狀態」工作區新增其他記憶庫。每個庫支援檢查、新增、移除指定標籤與清空全部。記憶庫不帶硬編碼的每日／每週生命週期；換日等流程應明確呼叫 `scene_memory_clear(bank_id)`。舊 `type: "tag"` 資料在讀取時映射至預設庫，下次儲存時轉成新格式。
 
-### 3.5 Scene Effects
+### 3.5 演出責任
 
-BGM、SE 等效果預留在 Effects 的 `type` 中，並以 `persistent` 決定是否延續到子節點。這部分屬於可擴充能力，修改前要先確認 Runtime 現有支援程度。
+Event Effects 僅包含 Stat 與 Memory。Node 不保存 Background；BGM、SE、背景、轉場與淡入淡出由 Content label 使用 Ren'Py 原生語法完成。Options 的 Picture、Preview Background、Hover Sound 與 Click Sound 仍由資料化 Options Renderer 管理。
 
 ## 4. 創作者會編輯的內容
 
@@ -108,7 +116,7 @@ SCENENODE/
 
 - Options、Events、Stats、Memory Banks 主要透過表單與 JSON 管理。
 - Content 使用 Editor 管理的原生 `.rpy`；Ren'Py Screen 則由創作者在 `game/` 內自行撰寫。
-- Options 固定使用資料化 Renderer；創作者的 `.rpy` Screen 只作為 Scene Screen／HUD，不取代 Options。
+- Options 固定使用資料化 Renderer；創作者的 `.rpy` Screen／HUD 由 Content 使用原生 Ren'Py 控制，不取代 Options。
 - 創作者可使用中文顯示名稱；編輯器會產生穩定 ASCII 技術 ID。
 - 顯示名稱可修改，技術 ID 不應跟著改名，以保護引用與存檔。
 - Trigger、記憶標籤、玩家文字可直接使用中文。
@@ -145,20 +153,21 @@ Options 沒有個別顯示／可用條件，也沒有 CUSTOM Screen 來源。所
 - 空白專案初始化 ROOT 節點、安全辨識各語系 Ren'Py 預設範本並接線 `script.rpy`、切換起始節點與 Root 刪除保護。
 - 單一 Memory 架構：預設 `Memory`、自訂記憶庫、標籤 add/remove/clear、Runtime API 與舊 Tag 延遲遷移。
 - Scene Node、Event、Stats、Memory Banks 與 Content 的建立與編輯。
-- Node Background 由 `game/images/` 圖片選單或 `None` 設定；Runtime 同時接受圖片檔路徑與已宣告的 Ren'Py image 名稱。Options 畫布未指定 Preview Background 時繼承 Node。
-- 掃描整個 `game/` 的 Screen 宣告，供 Scene Screen 引用及驗證。
+- Options Picture 與 Preview Background 只掃描 `game/images/`，並以子目錄階層選單呈現；選定欄位只顯示葉節點檔名。Preview Background 留空時不顯示預覽圖，也不影響遊戲場景。
+- Node Schema 不保存 Background 或 Screen；兩者與音訊、轉場一樣由 Content 使用 Ren'Py 原生語法管理。
 - Editor 不提供 Screen 文件工作區或 CRUD API；Installer 也不管理創作者的 `gui.rpy`、`screens.rpy` 與其他介面文件。
 - 中文顯示名稱與穩定技術 ID 映射。
 - Event Conditions、Effects、Content、Next Node 與權重表單。
-- Event Trigger 的 Options 來源在 UI 顯示為 `Option`，JSON／Runtime 契約仍是 `Action:<id>`；Keyboard、Mouse 與 Auto 不變。
-- Event Content 使用 `.rpy` 文件第一層與 label 第二層的階層選單；實際保存值仍是 label。
-- 所有固定選項 `<select>` 由前端提升為共用自訂選單；原始欄位仍保留在表單內，確保既有表單讀取與 API payload 不變。
+- Event Trigger 的 Options 來源在 UI 顯示為 `Option`，JSON／Runtime 契約仍是 `Action:<id>`；Auto 顯示為 On Enter／On Node／On Exit，保存為 `Auto:Enter`／`Auto:Node`／`Auto:Exit`。
+- Event Content 使用創作者命名的文件第一層與 label 第二層的階層選單；只有一個 label 的文件在 UI 直接映射為創作者名稱，實際保存值仍是技術 label。
+- 所有固定選項 `<select>` 由前端提升為共用自訂選單；長清單可在選單內捲動。圖片與音訊依路徑資料建立任意深度的父子選單，父子框之間固定保留間隔與透明滑鼠通道，並支援方向鍵、Enter、Esc；欄位只顯示檔名。原始欄位仍保留在表單內，確保既有表單讀取與 API payload 不變。
+- Options 的 Hover Sound 與 Click Sound 只掃描 `game/audio/`。Event 不提供 BGM／SE Effect 或 Persistent；音訊演出由 Content 使用 Ren'Py 原生語法。
 - TEXTBOX、PICTURE、HITBOX 選項表單。
 - Options 拖曳把手式表單／畫布切換，以及畫布拖曳、縮放、格線與吸附。
-- 自動儲存；切換節點、分頁或文件前先完成待處理寫入。
+- 自動儲存採遞增 revision；過期請求不得覆蓋較新的草稿、狀態或儲存提示。切換節點、分頁或文件前先完成目前 revision，刪除則先取消並等待舊寫入，避免刪除後的競態與假失敗。
 - 節點刪除引用檢查與 `.scene-node-trash/` 可復原區。
 - 專案引用檢查。
-- 依 `GOTO / Next Node` 產生唯讀有向關聯圖，可搜尋、以滾輪／觸控板雙指縮放、平移並切換節點；搜尋與圓形重新置中按鈕分置底部兩角，拖曳圖面不得產生文字反白。
+- 依 `GOTO / REPLACE / Next Node` 產生唯讀有向關聯圖；GOTO 為實線、REPLACE 為同色虛線。若 `Parent → A` 是 GOTO 且 `A → B` 是 REPLACE，前端另推導半透明實線 `Parent → B` 管理邊，但不寫入 Parent Schema。圖可搜尋、以滾輪／觸控板雙指縮放、平移並切換節點。
 - 編輯器快捷鍵與自訂設定。
 - 編輯器設定透過 `/api/editor-settings` 寫入專案根目錄 `.scene-node-editor/settings.json`，不可退回只依賴隨機連接埠來源的 `localStorage`。
 - 安裝到空白 Ren'Py 專案及原地更新。
@@ -255,7 +264,7 @@ tools/create_editor_test_unit.py
   只對全新空白專案建立可拋棄的 Editor／Runtime 綜合測試內容；安全閘門會拒絕既有 Editor 資料。
 
 INTEGRATION/EDITOR_TEST_UNIT.md
-  5 節點關聯圖、Content、Options、Event、State、外部 Screen 與 Runtime 流程的手動驗證步驟。
+  8 節點關聯圖、Content、Options、Event、State、原生 Screen 演出與 Runtime 流程的手動驗證步驟，包含 parent → child A → REPLACE child B → EXIT parent。
 
 tests/test_install.py
   乾淨安裝、更新保護與 Editor 啟動測試。

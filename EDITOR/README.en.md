@@ -25,7 +25,7 @@ The Editor runs only on your computer. Closing the launcher's terminal window st
 1. Create or select a Scene Node in Nodes.
 2. Add a player-facing Text Box, Picture, or Hitbox in Options.
 3. Create a Content label and write its Ren'Py presentation.
-4. Connect Content, Effects, and End Up in Events with an Option, Keyboard, Mouse, or Auto Trigger.
+4. Connect Content and Effects with Option, Keyboard, Mouse, On Enter, On Node, or On Exit Triggers; interactive Events also define End Up.
 5. Resolve reference problems in Validation, then run the game from Ren'Py.
 
 For a complete walkthrough, read [Your First Playable Flow](https://github.com/ToNyA-369/renpy-scene-node-editor/blob/main/docs/en/FIRST_PROJECT.md).
@@ -34,15 +34,20 @@ For a complete walkthrough, read [Your First Playable Flow](https://github.com/T
 
 - An Option emits a Trigger. Its Event decides conditions, state changes, and routing.
 - Content stores a Ren'Py `label` name, not an `.rpy` filename.
-- `REDO` reruns the current node, `GOTO` enters a child node, and `EXIT` returns to the parent.
+- `REDO` reruns the current node, `GOTO` pushes a destination, `REPLACE` atomically swaps the stack top, and `EXIT` returns to the parent.
 - Every visible Option is interactive and ends with the current interaction. The Runtime creates it again for a later round.
-- A Scene Screen is a scene shell or HUD. Define it in `screens.rpy` or another `.rpy`, then select it on the node.
+- Define screens and HUDs in `screens.rpy` or another `.rpy`, then control them from Content with native Ren'Py `show screen`, `hide screen`, or `call screen`.
+- On Enter and On Exit run every matching Event ordered by Priority and Event ID. On Node preserves the former Auto single-selection behavior.
+- Picture and Preview Background assets come only from `game/images/`; Options Hover Sound and Click Sound come only from `game/audio/`. Subdirectories appear as nested menus, while a selected field shows only the filename.
+- Write game backgrounds, BGM, SE, transitions, and fades with native Ren'Py inside Content labels.
 
 See the [Technical Reference](https://github.com/ToNyA-369/renpy-scene-node-editor/blob/main/docs/en/REFERENCE.md) for the data and Runtime contracts.
 
 ## Saving and settings
 
 The Editor saves automatically. It also flushes pending changes before switching nodes, files, or workspaces.
+
+Older save responses cannot overwrite newer input. Nested menus support arrow-key navigation, Enter to select, and Escape to close.
 
 Shortcuts, autosave delay, and grid size are stored in:
 
@@ -71,7 +76,7 @@ When using AI assistance, ask it to read `.scene-node-editor/AI_CONTEXT.md` firs
 
 - The game does not enter a Scene Node: confirm that `label start` calls `scene_runtime_start()`.
 - Content is absent from the menu: confirm the `.rpy` is under `game/` and contains a valid `label`.
-- A Scene Screen is missing: confirm it is declared in an `.rpy` under `game/`, then refresh the Editor.
+- A Screen is missing: confirm that Content uses native Ren'Py `show screen` or `call screen`, then check the Screen name.
 - A Trigger does nothing: confirm the current node has an Event with the same Trigger and keep an unconditional fallback Event when practical.
 - A node was deleted accidentally: look for recoverable data in `.scene-node-trash/` at the project root.
 

@@ -38,7 +38,7 @@ Read .scene-node-editor/AI_CONTEXT.md first.
 Create a parameterless room_hud Screen in game/screens.rpy that displays the money Stat.
 Read it with scene_get_stat("money", 0); do not mutate State directly.
 Do not modify FRAMEWORK or Options.json.
-Tell me which name to select in the Node's Scene Screen field.
+Use show screen room_hud in the specified On Enter Content and hide screen room_hud in its matching On Exit Content.
 ```
 
 ## Write Content presentation
@@ -69,7 +69,7 @@ Do not put inventory code in option_renderer.rpy or add Schema fields without my
 
 - Editing `FRAMEWORK/runtime.rpy` or `option_renderer.rpy`.
 - Adding or removing Schema fields.
-- Changing Trigger, REDO, GOTO, EXIT, or Scene Stack semantics.
+- Changing Trigger, REDO, GOTO, REPLACE, EXIT, or Scene Stack semantics.
 - Renaming stable IDs or moving referenced labels.
 - Changing installer overwrite boundaries or save compatibility.
 
