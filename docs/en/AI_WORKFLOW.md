@@ -57,6 +57,14 @@ First propose a creator-owned .rpy module boundary and how it connects through C
 Do not put inventory code in option_renderer.rpy or add Schema fields without my approval.
 ```
 
+## Create a global rule
+
+```text
+Read AI_CONTEXT first and model day rollover as an On Node Event in the Global Node.
+It must share the current node's Priority / Weight candidate flow; do not invent a Parent or put __global__ on the Stack.
+If the rule must run synchronously before a local Event's End up, explain the Global On Node timing limit instead of treating it as a post-event hook.
+```
+
 ## Work AI may perform directly
 
 - Write or adjust `gui.rpy`, `screens.rpy`, and HUDs.

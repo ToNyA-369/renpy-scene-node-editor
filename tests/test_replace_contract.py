@@ -25,6 +25,7 @@ class ReplaceContractTest(unittest.TestCase):
         write_json(root / "DATA" / "SceneProject.json", {"Version": 1, "Root Node": "source"})
         write_json(root / "DATA" / "Stats.json", {})
         write_json(root / "DATA" / "Memories.json", {"memory": {"Name": "Memory"}})
+        write_json(root / "GLOBALNODE" / "Node.json", {"ID": "__global__", "Name": "GLOBAL"})
         (root / "script.rpy").write_text(
             "label start:\n    call scene_runtime_start()\n    return\n",
             encoding="utf-8",

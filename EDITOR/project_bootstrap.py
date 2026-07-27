@@ -10,6 +10,8 @@ from pathlib import Path
 
 PROJECT_CONFIG_RELATIVE = Path("DATA") / "SceneProject.json"
 MEMORIES_RELATIVE = Path("DATA") / "Memories.json"
+GLOBAL_NODE_DIRECTORY = "GLOBALNODE"
+GLOBAL_NODE_ID = "__global__"
 ROOT_NODE_PATH = "root"
 ROOT_NODE_ID = "root"
 DEFAULT_MEMORY_ID = "memory"
@@ -54,6 +56,13 @@ def default_root_node(root_node=ROOT_NODE_ID):
     return {
         "ID": root_node,
         "Name": "ROOT",
+    }
+
+
+def default_global_node():
+    return {
+        "ID": GLOBAL_NODE_ID,
+        "Name": "GLOBAL",
     }
 
 
@@ -175,11 +184,17 @@ def connect_root_script(game_root):
 
 def initialize_scene_project(game_root, connect_script=True):
     game_root = Path(game_root)
-    for directory in ("DATA", "SCENENODE"):
+    for directory in ("DATA", "SCENENODE", GLOBAL_NODE_DIRECTORY):
         (game_root / directory).mkdir(parents=True, exist_ok=True)
     memories_path = game_root / MEMORIES_RELATIVE
     if not memories_path.exists():
         write_json(memories_path, default_memories())
+
+    global_node = game_root / GLOBAL_NODE_DIRECTORY
+    (global_node / "EVENTPOOL").mkdir(parents=True, exist_ok=True)
+    (global_node / "CONTENT").mkdir(parents=True, exist_ok=True)
+    if not (global_node / "Node.json").exists():
+        write_json(global_node / "Node.json", default_global_node())
 
     nodes = list((game_root / "SCENENODE").rglob("Node.json"))
     config_path = game_root / PROJECT_CONFIG_RELATIVE

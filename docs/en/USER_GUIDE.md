@@ -10,7 +10,7 @@ This guide defines the editor's scope and its seven workspaces. If you do not ye
 Input source → Trigger → Event → Effects → Content → End up
 ```
 
-Input sources are Option, Keyboard, Mouse, and three Auto phases. A Trigger only describes what happened; the current Scene Node's Event Pool decides the reaction.
+Input sources are Option, Keyboard, Mouse, and three Auto phases. A Trigger only describes what happened; the current Scene Node and Global Node Event Pools decide the reaction together.
 
 ## Responsibility boundary
 
@@ -34,6 +34,19 @@ A Scene Node is one unit of player interaction. Each node owns:
 ROOT is the Runtime entry node. Select another root before deleting it. A node cannot be deleted while an Event still references it as Next Node.
 
 Nodes do not store a Screen. Define HUDs, scene shells, and other Screens in creator-owned `.rpy`, then control them from Content with native Ren'Py `show screen`, `hide screen`, or `call screen`.
+
+### Global Node
+
+The top of the node list contains a fixed, undeletable Global Node. It is an authoring scope for global Events and Content, not a real Scene Node:
+
+- It never enters the Scene Stack and cannot be ROOT or a GOTO / REPLACE destination.
+- It has no Options workspace, and Global Events cannot use Option Triggers.
+- On Node, Keyboard, and Mouse Events merge with the current real node's same-Trigger Events before Conditions, Priority, and Weight selection.
+- On Enter / On Exit join every real node's matching lifecycle queue.
+- A Global Event's REDO, GOTO, REPLACE, or EXIT operates on the real Stack-top node at trigger time.
+- Global Once state uses `once:global:<event_id>` and does not collide with ordinary node Once state.
+
+Global On Node is checked on the next node-interaction iteration. If a local Event advances time and then uses GOTO, the rollover Event runs after the destination's On Enter and before its On Node; it is not a synchronous hook between the original Event's Content and End up.
 
 ## Events
 
@@ -117,7 +130,7 @@ The default `Memory` bank cannot be deleted and also tracks Once Events. Custom 
 
 ## Graph
 
-The graph is a read-only directed view generated from GOTO / REPLACE Next Node values. GOTO is solid and REPLACE is dashed in the same color. When `Parent → A` is GOTO and `A → B` is REPLACE, a more transparent solid `Parent → B` edge shows the derived management relation. It adds no Schema Parent and does not modify Events.
+The graph is a read-only directed view generated from GOTO / REPLACE Next Node values. GOTO is solid and REPLACE is dashed in the same color. When `Parent → A` is GOTO and `A → B` is REPLACE, a more transparent solid `Parent → B` edge shows the derived management relation. Global Event edges are marked as Contextual Transitions: their real source is the Stack top at trigger time, not a Runtime visit to the Global Node. The graph adds no Schema Parent and does not modify Events.
 
 - Wheel or two-finger vertical movement: zoom around the pointer.
 - Drag empty space: pan.

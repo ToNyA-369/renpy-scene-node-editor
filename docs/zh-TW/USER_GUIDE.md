@@ -10,7 +10,7 @@
 輸入來源 → Trigger → Event → Effects → Content → End up
 ```
 
-輸入來源包含 Option、Keyboard、Mouse 與三種 Auto 時機。Trigger 只描述「發生了什麼」；目前 Scene Node 的 Event Pool 才決定反應。
+輸入來源包含 Option、Keyboard、Mouse 與三種 Auto 時機。Trigger 只描述「發生了什麼」；目前 Scene Node 與 Global Node 的 Event Pool 共同決定反應。
 
 ## 責任邊界
 
@@ -34,6 +34,19 @@ Scene Node 是一個玩家互動單位。每個節點可設定：
 ROOT 是 Runtime 的起點。要刪除 ROOT，必須先將另一個節點設為起始節點。仍被 Event 的 Next Node 引用的節點不能刪除。
 
 Node 不保存 Screen。HUD、場景外殼與其他 Screen 由創作者在 `.rpy` 中定義，再由 Content 使用 Ren'Py 原生 `show screen`、`hide screen` 或 `call screen` 控制。
+
+### Global Node
+
+節點列表頂端固定有一個不可刪除的 Global Node。它是全局 Event 與 Content 的編輯作用域，不是真實 Scene Node：
+
+- 不進入 Scene Stack，不能成為 ROOT、GOTO 或 REPLACE 的目標。
+- 沒有 Options 工作區，Global Event 不能使用 Option Trigger。
+- On Node、Keyboard、Mouse Event 會與目前實際節點的同 Trigger Events 合併，再一起比較 Conditions、Priority 與 Weight。
+- On Enter／On Exit 會在每個實際節點的對應生命週期中與本地 Events 一起依序執行。
+- Global Event 的 REDO、GOTO、REPLACE、EXIT 都作用於當時的實際 Stack 頂端節點。
+- Global Once 以 `once:global:<event_id>` 記錄，不會與一般節點的 Once 混用。
+
+Global On Node 會在下一次節點互動循環檢查。若本地 Event 先增加時間再 GOTO，換日 Event 會在目標節點的 On Enter 之後、On Node 之前執行；它不是原 Event Content 與 End up 之間的同步 hook。
 
 ## 事件
 
@@ -117,7 +130,7 @@ Memory Banks 保存標籤。Conditions 使用 `has`／`not_has`，Effects 使用
 
 ## 關聯圖
 
-關聯圖依 GOTO／REPLACE 的 Next Node 產生唯讀有向圖。GOTO 使用實線，REPLACE 使用同色虛線；若 `Parent → A` 是 GOTO 且 `A → B` 是 REPLACE，圖上另以較透明的實線顯示推導出的 `Parent → B` 管理關係。它不建立 Schema Parent，也不直接修改 Event。
+關聯圖依 GOTO／REPLACE 的 Next Node 產生唯讀有向圖。GOTO 使用實線，REPLACE 使用同色虛線；若 `Parent → A` 是 GOTO 且 `A → B` 是 REPLACE，圖上另以較透明的實線顯示推導出的 `Parent → B` 管理關係。Global Event 的線條標示為 Contextual Transition，表示實際來源是觸發當下的 Stack 頂端，不代表 Runtime 進入 Global Node。關聯圖不建立 Schema Parent，也不直接修改 Event。
 
 - 滾輪或觸控板雙指上下移動：以游標位置縮放。
 - 拖曳空白處：平移。

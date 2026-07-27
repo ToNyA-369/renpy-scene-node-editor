@@ -112,6 +112,7 @@ def assert_disposable_blank_project(project_root, game_root):
         project_root / ".scene-node-editor",
         project_root / install.PROJECT_LAUNCHER,
         game_root / "DATA",
+        game_root / "GLOBALNODE",
         game_root / "SCENENODE",
         game_root / "FRAMEWORK" / "runtime.rpy",
         game_root / "FRAMEWORK" / "option_renderer.rpy",
@@ -643,6 +644,30 @@ label test_replace_child_b_exit:
 '''
 
 
+def global_content_source():
+    return '''# @display_name: Global Node 系統演出
+
+label test_global_checkpoint:
+    "Global Node：操作次數達到門檻，已在目前節點的 Context 中執行全局事件。"
+    return
+
+label test_global_keyboard:
+    "Global Keyboard：任何節點按下 G 都能觸發這個事件。"
+    return
+'''
+
+
+def write_global_node(game_root, events, contents):
+    node_root = game_root / "GLOBALNODE"
+    (node_root / "EVENTPOOL").mkdir(parents=True, exist_ok=True)
+    (node_root / "CONTENT").mkdir(parents=True, exist_ok=True)
+    write_json(node_root / "Node.json", {"ID": "__global__", "Name": "全局系統"})
+    for event in events:
+        write_json(node_root / "EVENTPOOL" / (event["ID"] + ".json"), event)
+    for filename, source in contents.items():
+        write_text(node_root / "CONTENT" / filename, source)
+
+
 def write_node(game_root, relative_path, node, options, events, contents):
     node_root = game_root / "SCENENODE" / relative_path
     (node_root / "EVENTPOOL").mkdir(parents=True, exist_ok=True)
@@ -706,6 +731,32 @@ def create_editor_test_unit(raw_target):
     )
 
     action_count = stat_effect("test_actions", "+", 1)
+    write_global_node(
+        game_root,
+        [
+            event_data(
+                "global_action_checkpoint",
+                "全局操作次數檢查",
+                "Auto:Node",
+                priority=0,
+                conditions=[stat_condition("test_actions", ">=", 3)],
+                effects=[
+                    stat_effect("test_actions", "-", 3),
+                    memory_effect("test_session", "add", "global_checkpoint"),
+                ],
+                content="test_global_checkpoint",
+            ),
+            event_data(
+                "global_keyboard",
+                "全局 Keyboard G",
+                "Keyboard:K_g",
+                priority=1,
+                effects=[stat_effect("test_points", "+", 7), action_count],
+                content="test_global_keyboard",
+            ),
+        ],
+        {"global_systems.rpy": global_content_source()},
+    )
     root_events = [
         event_data(
             "root_enter_background",
