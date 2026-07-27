@@ -10,7 +10,7 @@ Scene Node Editor is a local browser-based content editor for Ren'Py. It turns n
 
 | Scene Node Editor manages | The creator designs |
 | --- | --- |
-| Scene Nodes, Events, and Options | `gui.rpy`, `screens.rpy`, and HUD layouts |
+| Scene Nodes, the Global Node, Events, and Options | `gui.rpy`, `screens.rpy`, and HUD layouts |
 | Conditions, Effects, Priority, and Weight | Images, audio, fonts, and animation assets |
 | Stats, Memory Banks, and Once state | Characters, dialogue, ATL, and transforms |
 | Content label references and node flow | Inventory, time, quests, and other game-specific systems |
@@ -51,6 +51,7 @@ flowchart LR
 - Events own Conditions, Effects, Content, and the flow result.
 - Content stores a Ren'Py `label` name, not an `.rpy` filename.
 - On Enter and On Exit may run several Events at node boundaries; On Node preserves the former Auto single selection.
+- The fixed, undeletable Global Node provides a global Event scope. It never enters the Stack, has no Options, and cannot use Option Triggers.
 - REPLACE swaps the top of the Scene Stack directly and never resumes or re-runs the parent during the transition.
 - Backgrounds, audio, and transitions use native Ren'Py inside Content.
 - Creators continue to own `gui.rpy` and `screens.rpy`.
@@ -61,6 +62,7 @@ Run the installer again to update the managed editor and runtime. These creator-
 
 ```text
 game/DATA/
+game/GLOBALNODE/
 game/SCENENODE/
 game/gui.rpy
 game/screens.rpy

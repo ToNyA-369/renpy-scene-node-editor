@@ -36,7 +36,7 @@
 
 ```text
 Action / Keyboard / Mouse / Auto:Node Trigger + Global State
--> 收集目前 Scene Node 的候選 Events
+-> 合併目前 Scene Node 與 Global Node 的候選 Events
 -> 檢查 Conditions
 -> 選擇最低 Priority 的候選層
 -> 依 Weight 選出唯一 Event
@@ -48,7 +48,8 @@ Action / Keyboard / Mouse / Auto:Node Trigger + Global State
 - Option、Keyboard 與 Mouse 都可作為玩家輸入來源，只產生 Trigger，不直接選 Event；`Auto:Node` 由 Runner 每輪主動檢查。
 - `Auto:Enter` 在 ROOT 啟動或 GOTO／REPLACE 進入節點時執行；`Auto:Exit` 在 EXIT／REPLACE 移除目前節點前執行。
 - State 系統全遊戲只有一份，包含 Stats 與可自訂的 Memory Banks。
-- 每個 Scene Node 都有自己的 Event Pool。
+- 每個 Scene Node 都有自己的 Event Pool；固定 `__global__` Global Node 另提供跨節點 Event Pool。
+- Global Node 只是一個 Editor／資料作用域，不進入 stack、沒有 Options、不可使用 Option Trigger，也不能成為 Root 或 Next Node。Global Event End up 作用於觸發當下的實際 stack 頂端。
 - 凡是包含選項的互動單位都是 Scene Node。
 - Content 由創作者自行撰寫 Ren'Py label，也可以是 `null`。
 - State 的改變原則上寫在 Event Effects，而不是藏在 Content label。
@@ -76,6 +77,7 @@ REPLACE 是 `[父, 目前] → [父, 目標]` 的單一 Stack 操作。它先跑
 - 同 Trigger、Conditions 通過且 Priority 相同時，才使用 Weight 抽選。
 - Event 的 Content 與 GOTO／REPLACE Next Node 都可另外使用權重物件。
 - `Once: true` 等同由系統在預設 `memory` 記憶庫註冊 `once:<event_id>` 標籤。
+- Global Once 使用 `once:global:<event_id>`，避免與一般節點 Event 混用。
 - `Auto:Enter`／`Auto:Exit` 先以同一份狀態快照篩選 Conditions 與 Once，再依 Priority、Event ID 執行所有符合 Events。
 - `Auto:Enter`／`Auto:Exit` 不含 Weight、End up 或 Next Node；保留 Conditions、Priority、Once、Effects 與 Content。
 
@@ -102,6 +104,13 @@ DATA/
   SceneProject.json
   Stats.json
   Memories.json
+
+GLOBALNODE/
+  Node.json
+  EVENTPOOL/
+    <event_id>.json
+  CONTENT/
+    <label_name>.rpy
 
 SCENENODE/
   <node_path>/
@@ -167,7 +176,7 @@ Options 沒有個別顯示／可用條件，也沒有 CUSTOM Screen 來源。所
 - 自動儲存採遞增 revision；過期請求不得覆蓋較新的草稿、狀態或儲存提示。切換節點、分頁或文件前先完成目前 revision，刪除則先取消並等待舊寫入，避免刪除後的競態與假失敗。
 - 節點刪除引用檢查與 `.scene-node-trash/` 可復原區。
 - 專案引用檢查。
-- 依 `GOTO / REPLACE / Next Node` 產生唯讀有向關聯圖；GOTO 為實線、REPLACE 為同色虛線。若 `Parent → A` 是 GOTO 且 `A → B` 是 REPLACE，前端另推導半透明實線 `Parent → B` 管理邊，但不寫入 Parent Schema。圖可搜尋、以滾輪／觸控板雙指縮放、平移並切換節點。
+- 依 `GOTO / REPLACE / Next Node` 產生唯讀有向關聯圖；GOTO 為實線、REPLACE 為同色虛線。若 `Parent → A` 是 GOTO 且 `A → B` 是 REPLACE，前端另推導半透明實線 `Parent → B` 管理邊，但不寫入 Parent Schema。Global Event 邊以 Contextual Transition 呈現，不視為 Global Node 實際進入 Stack。圖可搜尋、以滾輪／觸控板雙指縮放、平移並切換節點。
 - 編輯器快捷鍵與自訂設定。
 - 編輯器設定透過 `/api/editor-settings` 寫入專案根目錄 `.scene-node-editor/settings.json`，不可退回只依賴隨機連接埠來源的 `localStorage`。
 - 安裝到空白 Ren'Py 專案及原地更新。

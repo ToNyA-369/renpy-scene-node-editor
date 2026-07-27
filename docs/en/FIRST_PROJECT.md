@@ -31,6 +31,8 @@ Open Nodes:
 
 The rest of the Node page is a derived summary of Events, Options, Content, and flow references; it adds no Schema fields. Establish backgrounds, music, and Screens later with native Ren'Py inside an On Enter Event's Content.
 
+The node list also has a fixed Global Node for cross-node systems such as day rollover or global keyboard input. It never enters the Stack and has no Options. This first flow does not need to modify it.
+
 ## 4. Create a player Option
 
 Open Options and add a Text Box:

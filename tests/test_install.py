@@ -52,6 +52,13 @@ class InstallerTest(unittest.TestCase):
                 json.loads(project_config.read_text(encoding="utf-8")),
                 {"Version": 1, "Root Node": "root"},
             )
+            self.assertEqual(
+                json.loads((game_root / "GLOBALNODE" / "Node.json").read_text(encoding="utf-8")),
+                {"ID": "__global__", "Name": "GLOBAL"},
+            )
+            self.assertTrue((game_root / "GLOBALNODE" / "EVENTPOOL").is_dir())
+            self.assertTrue((game_root / "GLOBALNODE" / "CONTENT").is_dir())
+            self.assertFalse((game_root / "GLOBALNODE" / "Options.json").exists())
             memories_file = game_root / "DATA" / "Memories.json"
             self.assertEqual(
                 json.loads(memories_file.read_text(encoding="utf-8")),
@@ -174,6 +181,9 @@ class InstallerTest(unittest.TestCase):
                 self.assertEqual(len(project_data["nodes"]), 1)
                 self.assertEqual(project_data["nodes"][0]["id"], "root")
                 self.assertTrue(project_data["nodes"][0]["isRoot"])
+                self.assertEqual(project_data["globalNode"]["id"], "__global__")
+                self.assertEqual(project_data["globalNode"]["path"], "@global")
+                self.assertTrue(project_data["globalNode"]["isGlobal"])
                 self.assertEqual(project_data["graph"], {"edges": []})
                 self.assertNotIn("screenNames", project_data)
                 self.assertEqual(project_data["issues"], [])

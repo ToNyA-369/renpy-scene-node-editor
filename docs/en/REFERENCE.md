@@ -16,6 +16,10 @@ This document defines the current public-alpha data and Runtime contracts. For n
       SceneProject.json
       Stats.json
       Memories.json
+    GLOBALNODE/
+      Node.json
+      EVENTPOOL/<event_id>.json
+      CONTENT/<file>.rpy
     SCENENODE/
       <node_path>/
         Node.json
@@ -45,6 +49,18 @@ This document defines the current public-alpha data and Runtime contracts. For n
 
 - `ID`: stable technical ID.
 - `Name`: editable display name.
+
+## Global Node
+
+`GLOBALNODE/Node.json` has the fixed identity:
+
+```json
+{ "ID": "__global__", "Name": "GLOBAL" }
+```
+
+Name is editable; ID is not. The Global Node is absent from `scene_catalog["nodes"]`, never enters `scene_stack`, and cannot be Root or Next Node. It has no `Options.json`; the Editor and schema reject `Action:<option_id>` on Global Events.
+
+Global Event prepare retains both `owner_node_id = "__global__"` and `node_id = <current Stack top>`. Once uses `once:global:<event_id>`. Effects and Content belong to the Global Event, while a non-lifecycle End up resolves against the current real Stack.
 
 ## Options.json
 
@@ -249,13 +265,13 @@ Event Effects handle only Stats and Memories. Backgrounds, music, sound effects,
 }
 ```
 
-`memory` is required. The Runtime records Once Events as `once:<event_id>`.
+`memory` is required. Ordinary Once Events use `once:<event_id>`; Global Once Events use `once:global:<event_id>`.
 
 ## Event selection
 
 `Auto:Node`, Option, Keyboard, and Mouse use the single-selection flow:
 
-1. Collect Events in the current Node with the same Trigger.
+1. Merge same-Trigger Events from the current Node and Global Node.
 2. Exclude failed Conditions and completed Once Events.
 3. Find the minimum Priority.
 4. Choose one Event by Weight only within that Priority.
@@ -264,13 +280,15 @@ Event Effects handle only Stats and Memories. Backgrounds, music, sound effects,
 7. Select a single or weighted GOTO / REPLACE Next Node during prepare, then validate it after Content returns and before any On Exit.
 8. Resolve End up.
 
-`Auto:Enter` and `Auto:Exit` use the lifecycle batch flow:
+`Auto:Enter` and `Auto:Exit` use the lifecycle batch flow and merge Events from the current Node and Global Node:
 
 1. Evaluate all Conditions and Once markers against one state snapshot before any Effects run.
 2. Sort every matching Event by ascending Priority, then Event ID.
 3. Apply each Event's Effects and call its Content in order.
 
 Lifecycle Events do not use Weight and do not change the Scene Stack.
+
+Global On Node participates on the Runner's next interaction iteration. If a local Event changes state and then uses GOTO, the destination On Enter runs before Global On Node is checked. A Global Event is not a synchronous hook inserted between the main Event's Content and End up.
 
 ## Scene Stack
 

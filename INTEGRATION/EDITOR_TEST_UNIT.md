@@ -3,6 +3,7 @@
 這是一個只能建立在全新空白 Ren'Py 專案中的可拋棄測試場景。它不只測試外部 Screen，也涵蓋 Editor 與 Runtime 的主要契約：
 
 - 8 個 Scene Nodes 與多分支關聯圖
+- 1 個不可刪除、沒有 Options 的 Global Node
 - Content 文件／label 階層選擇與權重 Content
 - Content 原生顯示的 Screen／HUD 與資料化 Options Renderer
 - TEXTBOX、PICTURE、HITBOX 三種 Option Element
@@ -15,10 +16,11 @@
 - 由 Content 使用原生 Ren'Py 背景、音樂、淡入與淡出
 - Options Preview Background、Picture、Hover Sound 與 Click Sound
 - REDO、GOTO、REPLACE、EXIT 與多層 Node stack
+- Global On Node、Global Keyboard 與 Context End up
 - 權重 Next Node
 - 自訂快捷鍵持久化與 Content 刪除後儲存流程
 
-產生器若發現 `.scene-node-editor/`、`DATA/`、`SCENENODE/` 或其他測試資料，就會停止，不會覆寫正式專案。
+產生器若發現 `.scene-node-editor/`、`DATA/`、`GLOBALNODE/`、`SCENENODE/` 或其他測試資料，就會停止，不會覆寫正式專案。
 
 ## 建立方式
 
@@ -38,11 +40,11 @@ python3 tools/create_editor_test_unit.py "/完整路徑/SceneEditorTest" --launc
 
 1. 按「檢查專案」，預期為 `0 個錯誤、0 個提醒`。
 2. 「狀態」應有初始值 20 的「測試點數」、初始值 0 的「操作次數」，以及 `Memory`、`測試階段記憶` 兩個 Memory Banks。
-3. 節點抽屜應有 `root`、`options_lab`、`branch_lab`、`outcome_success`、`outcome_fallback`、`replace_parent`、`replace_child_a`、`replace_child_b` 共 8 個節點。
+3. 節點抽屜頂端應固定顯示「全局系統」Global Node，下面有 `root`、`options_lab`、`branch_lab`、`outcome_success`、`outcome_fallback`、`replace_parent`、`replace_child_a`、`replace_child_b` 共 8 個實際節點。Global Node 不可刪除、不可設為 ROOT；選取後「選項」功能區必須停用，Event Trigger 也不能選 Option。
 4. 在 `root` 的 Event 編輯 Content。下拉選單第一層應顯示「00 節點生命週期演出」「01 獎勵與權重內容」與「02 條件與流程內容」等創作者名稱，而不是生成文件 ID；停留或展開後才看到各自的 label。父選單與 label 子選單之間應有清楚間隔；游標橫越間隔時子選單不可消失。選定 label 後，欄位只顯示 label 的顯示名稱。
 5. Node 表單應只有 Name 與 ID，不應出現 Background 或 Screen；下方顯示 Events、Options、Content Labels、Flow Links 數量，以及 Incoming／Outgoing 與三個生命週期階段摘要。相同目標與流程類型的多個 Events 應合併為一個連接標籤並顯示倍數。開啟 `root_enter_background`、`root_on_node_once`、`root_exit_cleanup` 三個 Events，Auto 時機應分別顯示 On Enter、On Node、On Exit。On Enter／On Exit 只顯示 Priority 與 Once，不應出現 Weight、End up、Next Node 或額外提示文字；Conditions、Effects 與 Content 仍存在。
 6. 巡覽節點、Event、Options 與狀態中的下拉選單；它們應使用一致且固定寬度的自訂選單。圖片或音訊至少展開四層目錄，所有層級都必須可見且保持同一展開方向，不可因欄位寬度反覆左右跳動。聚焦選單後，`↑`／`↓` 應巡覽同層項目、`→` 應進入子選單、`←` 應回到父層、Enter 應選取、Esc 應關閉。
-7. 開啟「關聯圖」。應看到 `root → options_lab → branch_lab → 結果節點` 與 `root → replace_parent → replace_child_a → replace_child_b`。REPLACE 邊與 GOTO 同色但使用虛線；另應從 `replace_parent` 到 `replace_child_b` 顯示較透明的實線管理邊。REPLACE tooltip 應顯示 Event 名稱、Option Trigger 與 `REPLACE`，管理邊 tooltip 應指出來源 Child A。
+7. 開啟「關聯圖」。應看到 Global Node、`root → options_lab → branch_lab → 結果節點` 與 `root → replace_parent → replace_child_a → replace_child_b`。REPLACE 邊與 GOTO 同色但使用虛線；另應從 `replace_parent` 到 `replace_child_b` 顯示較透明的實線管理邊。Global GOTO／REPLACE（若測試時新增）應以 Contextual Transition 樣式呈現。REPLACE tooltip 應顯示 Event 名稱、Option Trigger 與 `REPLACE`，管理邊 tooltip 應指出來源 Child A。
 8. 游標放在圖面空白處，用 MacBook 觸控板兩指上下滑動：圖應以游標位置連續縮放；反方向滑動應反向縮放。拖曳空白處應平移且不可反白圖面。搜尋位於左下角，右下角只有圓形重新置中圖示按鈕，不應顯示操作提示文字。
 9. 在設定中修改一組快捷鍵，關閉 Editor 的 Terminal 視窗，重新雙擊啟動器；設定應仍保留。
 10. 要驗證 Content 刪除流程，請在任一節點新增一個「未被 Event 引用」的臨時 Content，輸入後不必等待自動儲存便直接刪除。預期舊寫入會被安全取消，不會跳出「儲存失敗」，刪除後也能立即切換工作區並繼續編輯。不要刪除產生器建立且已被 Event 引用的 labels。
@@ -58,6 +60,12 @@ python3 tools/create_editor_test_unit.py "/完整路徑/SceneEditorTest" --launc
 由 Ren'Py Launcher 啟動遊戲，右上角應顯示外部 HUD、目前節點、點數、操作次數與 Memory 狀態。
 
 遊戲一開始應依序看到兩段 On Enter 回饋：Priority 1 的 Content 先用 `scene ... with dissolve` 顯示測試背景，Priority 2 的 Content 再用 `play music ... fadein 1.0` 播放音樂。接著只出現一次 On Node 說明，之後才顯示 Options。這證明 On Enter 會執行全部符合 Events，而 On Node 仍一次選出一個 Event。
+
+### Global Node
+
+1. 在任意實際節點按 `G`，應觸發 Global Keyboard Event、增加 7 點，且仍停留在原本節點。
+2. 每累積三次一般操作，下一輪 On Node 應顯示「Global Node」檢查訊息、將操作次數減 3，並在 `test_session` 註冊 `global_checkpoint`。
+3. Global Event 執行後使用 REDO，應回到觸發當下的實際節點，不得把 `__global__` 放入 Stack。
 
 ### DATA Options 入口與 Event 選擇
 

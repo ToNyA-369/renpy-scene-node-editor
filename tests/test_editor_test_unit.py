@@ -36,6 +36,11 @@ class EditorTestUnitTest(unittest.TestCase):
             self.assertEqual(result["nodes"], list(create_editor_test_unit.TEST_NODES))
             self.assertTrue(result["launcher"].exists())
             self.assertFalse((game_root / "SCENESCREEN").exists())
+            self.assertEqual(
+                json.loads((game_root / "GLOBALNODE" / "Node.json").read_text(encoding="utf-8")),
+                {"ID": "__global__", "Name": "全局系統"},
+            )
+            self.assertFalse((game_root / "GLOBALNODE" / "Options.json").exists())
             self.assertTrue((game_root / create_editor_test_unit.TEST_IMAGE_FILE).is_file())
             self.assertTrue((game_root / create_editor_test_unit.TEST_MANIFEST_FILE).is_file())
 
@@ -112,6 +117,27 @@ class EditorTestUnitTest(unittest.TestCase):
             )
             self.assertEqual(keyboard_event["Trigger"], "Keyboard:K_k")
             self.assertEqual(mouse_event["Trigger"], "Mouse:Right")
+
+            global_checkpoint = json.loads(
+                (
+                    game_root
+                    / "GLOBALNODE"
+                    / "EVENTPOOL"
+                    / "global_action_checkpoint.json"
+                ).read_text(encoding="utf-8")
+            )
+            global_keyboard = json.loads(
+                (
+                    game_root
+                    / "GLOBALNODE"
+                    / "EVENTPOOL"
+                    / "global_keyboard.json"
+                ).read_text(encoding="utf-8")
+            )
+            self.assertEqual(global_checkpoint["Trigger"], "Auto:Node")
+            self.assertEqual(global_checkpoint["End up"], "REDO")
+            self.assertEqual(global_keyboard["Trigger"], "Keyboard:K_g")
+            self.assertFalse(any(event["Trigger"].startswith("Action:") for event in (global_checkpoint, global_keyboard)))
 
             enter_background = json.loads(
                 (
@@ -213,6 +239,13 @@ class EditorTestUnitTest(unittest.TestCase):
             try:
                 app.PROJECT_ROOT = game_root
                 root_detail = app.read_node("root")
+                global_detail = app.read_node("@global")
+                self.assertTrue(global_detail["isGlobal"])
+                self.assertEqual(global_detail["options"], app.default_options())
+                self.assertEqual(
+                    [entry["data"]["ID"] for entry in global_detail["events"]],
+                    ["global_action_checkpoint", "global_keyboard"],
+                )
                 self.assertEqual(
                     [(item["file"], item["labels"]) for item in root_detail["contents"]],
                     [

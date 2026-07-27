@@ -57,6 +57,14 @@ Installer 會將一份精簡契約放在：
 不要把背包程式寫進 option_renderer.rpy，不要新增 Schema 欄位，除非我先確認設計。
 ```
 
+## 建立全局規則
+
+```text
+請先閱讀 AI_CONTEXT，並把換日條件設計成 Global Node 的 On Node Event。
+它要與目前節點 Events 共用 Priority／Weight 候選流程，不得建立假的 Parent，也不得讓 __global__ 進入 Stack。
+若規則必須在本地 Event End up 之前同步執行，先指出 Global On Node 的時機限制，不要假設它是 post-event hook。
+```
+
 ## AI 可以直接處理的工作
 
 - 撰寫或調整 `gui.rpy`、`screens.rpy` 與 HUD。

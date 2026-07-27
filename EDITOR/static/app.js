@@ -3,6 +3,8 @@
 const SETTINGS_KEY = "scene-node-editor.settings";
 const GRID_VISIBLE_KEY = "scene-node-editor.option-grid-visible";
 const SNAP_ENABLED_KEY = "scene-node-editor.option-snap-enabled";
+const GLOBAL_NODE_ID = "__global__";
+const GLOBAL_NODE_PATH = "@global";
 const DEFAULT_SHORTCUTS = {
   save: "mod+s",
   create: "mod+enter",
@@ -134,6 +136,7 @@ const state = {
   projectName: "",
   projectPath: "",
   rootNodeId: null,
+  globalNode: null,
   nodes: [],
   graph: { edges: [] },
   graphViewBox: null,
@@ -496,6 +499,16 @@ function eventTriggerMode(trigger) {
   if (value.startsWith("Keyboard:")) return "Keyboard";
   if (value.startsWith("Mouse:")) return "Mouse";
   return "Action";
+}
+
+function isGlobalNode() {
+  return Boolean(state.nodeDetail?.isGlobal || state.selectedNodePath === GLOBAL_NODE_PATH);
+}
+
+function eventTriggerModeChoices() {
+  return isGlobalNode()
+    ? EVENT_TRIGGER_MODES.filter((item) => item.id !== "Action")
+    : EVENT_TRIGGER_MODES;
 }
 
 function isLifecycleTrigger(trigger) {
@@ -1164,7 +1177,11 @@ function updateHeader() {
   dom.projectName.textContent = state.projectName || "Scene Node Editor";
   dom.projectSummary.textContent = `${state.nodes.length} 個節點`;
   dom.nodeTitle.textContent = node?.Name || node?.ID || "Scene Node Editor";
-  dom.nodePath.textContent = state.selectedNodePath ? `SCENENODE/${state.selectedNodePath}` : state.projectPath || "尚未選擇節點";
+  dom.nodePath.textContent = isGlobalNode()
+    ? "GLOBALNODE"
+    : state.selectedNodePath
+      ? `SCENENODE/${state.selectedNodePath}`
+      : state.projectPath || "尚未選擇節點";
   dom.eventCount.textContent = state.nodeDetail?.events?.length || 0;
   dom.issueCount.textContent = state.issues.length;
   dom.issueCount.classList.toggle("has-errors", state.issues.length > 0);
@@ -1178,15 +1195,31 @@ function updateEmptyState() {
 
 function renderNodeList() {
   const query = dom.nodeSearch.value.trim().toLocaleLowerCase();
+  const globalNode = state.globalNode;
+  const globalMatches = globalNode && (
+    !query
+    || `${globalNode.name || ""} ${globalNode.id} global globalnode 全局`.toLocaleLowerCase().includes(query)
+  );
   const nodes = state.nodes.filter((node) => {
     const haystack = `${node.name || ""} ${node.id} ${node.path}`.toLocaleLowerCase();
     return !query || haystack.includes(query);
   });
-  if (!nodes.length) {
+  if (!nodes.length && !globalMatches) {
     dom.nodeList.innerHTML = `<div class="node-list-empty">${state.nodes.length ? "沒有符合的節點" : "尚未建立 Scene Node"}</div>`;
     return;
   }
-  dom.nodeList.innerHTML = nodes.map((node) => `
+  const globalHtml = globalMatches ? `
+    <div class="global-node-slot">
+      <button class="node-item global-node-item ${globalNode.path === state.selectedNodePath ? "active" : ""}" type="button" data-node-path="${escapeHtml(globalNode.path)}">
+        <span class="node-item-copy">
+          <strong>${escapeHtml(globalNode.name || "GLOBAL")}<span class="global-node-badge">GLOBAL</span></strong>
+          <span>所有 Scene Node 的事件作用域</span>
+        </span>
+        <span class="node-event-count" title="Global Event 數量">${globalNode.eventCount}</span>
+      </button>
+    </div>
+  ` : "";
+  const nodesHtml = nodes.map((node) => `
     <button class="node-item ${node.path === state.selectedNodePath ? "active" : ""}" type="button" data-node-path="${escapeHtml(node.path)}">
       <span class="node-accent" aria-hidden="true"></span>
       <span class="node-item-copy">
@@ -1196,6 +1229,7 @@ function renderNodeList() {
       <span class="node-event-count" title="Event 數量">${node.eventCount}</span>
     </button>
   `).join("");
+  dom.nodeList.innerHTML = globalHtml + nodesHtml;
 }
 
 async function loadProject({ preserveNode = true } = {}) {
@@ -1206,6 +1240,7 @@ async function loadProject({ preserveNode = true } = {}) {
     state.projectName = data.projectName;
     state.projectPath = data.projectPath;
     state.rootNodeId = data.rootNodeId || null;
+    state.globalNode = data.globalNode || null;
     state.nodes = data.nodes || [];
     state.graph = data.graph || { edges: [] };
     state.images = data.images || [];
@@ -1215,7 +1250,9 @@ async function loadProject({ preserveNode = true } = {}) {
     state.memories = data.memories || { memory: { Name: "Memory" } };
     state.memoriesDraft = clone(state.memories);
     state.issues = data.issues || [];
-    const preferred = state.nodes.find((item) => item.path === previous)?.path || state.nodes[0]?.path || null;
+    const preferred = previous === state.globalNode?.path
+      ? previous
+      : state.nodes.find((item) => item.path === previous)?.path || state.nodes[0]?.path || state.globalNode?.path || null;
     renderNodeList();
     if (preferred) {
       await selectNode(preferred, { preserveTab: true });
@@ -1249,6 +1286,7 @@ async function selectNode(path, { preserveTab = false } = {}) {
     state.selectedContent = detail.contents[0]?.name || null;
     state.selectedContentDisplayName = detail.contents[0]?.displayName || "";
     state.contentSource = "";
+    if (detail.isGlobal && state.activeTab === "options") state.activeTab = "events";
     if (!preserveTab && !state.activeTab) state.activeTab = "node";
     renderAll();
     if (state.selectedContent) await loadContent(state.selectedContent);
@@ -1262,6 +1300,12 @@ async function selectNode(path, { preserveTab = false } = {}) {
 }
 
 function renderAll() {
+  if (isGlobalNode() && state.activeTab === "options") state.activeTab = "events";
+  const optionsTab = dom.tabbar?.querySelector('[data-tab="options"]');
+  if (optionsTab) {
+    optionsTab.disabled = isGlobalNode();
+    optionsTab.title = isGlobalNode() ? "Global Node 不支援 Options" : "";
+  }
   updateHeader();
   updateDatalists();
   renderNodeList();
@@ -1302,6 +1346,7 @@ function playWorkspaceAnimation(className) {
 }
 
 function switchTab(tab, { render = true } = {}) {
+  if (tab === "options" && isGlobalNode()) tab = "events";
   const isSwitchingTab = state.activeTab !== tab;
   state.activeTab = tab;
   document.querySelectorAll(".tab").forEach((button) => button.classList.toggle("active", button.dataset.tab === tab));
@@ -1329,13 +1374,18 @@ function renderNodePanel() {
     return;
   }
   const node = state.nodeDetail.node;
+  const isGlobal = isGlobalNode();
   const isRoot = node.ID === state.rootNodeId;
   const events = (state.nodeDetail.events || []).map((entry) => entry.data || {});
   const optionsCount = state.nodeDetail.options?.Elements?.length || 0;
   const labelCount = (state.nodeDetail.contents || []).reduce((total, content) => total + (content.labels?.length || 0), 0);
   const outgoing = (state.graph?.edges || []).filter((edge) => String(edge.source) === String(node.ID));
   const incoming = (state.graph?.edges || []).filter((edge) => String(edge.target) === String(node.ID));
-  const nodeName = (nodeId) => state.nodes.find((item) => String(item.id) === String(nodeId))?.name || nodeId;
+  const nodeName = (nodeId) => (
+    String(state.globalNode?.id) === String(nodeId)
+      ? state.globalNode.name
+      : state.nodes.find((item) => String(item.id) === String(nodeId))?.name
+  ) || nodeId;
   const groupConnections = (items, direction) => {
     const grouped = new Map();
     items.forEach((edge) => {
@@ -1364,10 +1414,10 @@ function renderNodePanel() {
       <div class="node-editor-shell">
         <div class="node-root-row">
           <div>
-            <span class="root-node-badge">${isRoot ? "ROOT" : "NODE"}</span>
-            <span>${isRoot ? "目前的遊戲起始節點" : "可設為遊戲起始節點"}</span>
+            <span class="root-node-badge ${isGlobal ? "is-global" : ""}">${isGlobal ? "GLOBAL" : isRoot ? "ROOT" : "NODE"}</span>
+            <span>${isGlobal ? "套用至所有 Scene Node 的虛擬事件作用域" : isRoot ? "目前的遊戲起始節點" : "可設為遊戲起始節點"}</span>
           </div>
-          ${isRoot ? "" : '<button class="quiet-button compact" id="setRootNodeButton" type="button">設為起始節點</button>'}
+          ${isGlobal || isRoot ? "" : '<button class="quiet-button compact" id="setRootNodeButton" type="button">設為起始節點</button>'}
         </div>
         <form id="nodeForm" class="bento-form">
           <div class="form-section node-form-section node-identity-section">
@@ -1388,13 +1438,13 @@ function renderNodePanel() {
         <section class="node-overview" aria-label="Node overview">
           <div class="node-overview-metrics">
             <article><span>Events</span><strong>${events.length}</strong></article>
-            <article><span>Options</span><strong>${optionsCount}</strong></article>
+            <article><span>Options</span><strong>${isGlobal ? "—" : optionsCount}</strong></article>
             <article><span>Content Labels</span><strong>${labelCount}</strong></article>
             <article><span>Flow Links</span><strong>${outgoingConnections.length}</strong></article>
           </div>
           <div class="node-overview-details">
             <article class="node-overview-card">
-              <header><span>FLOW</span><strong>Node Connections</strong></header>
+              <header><span>FLOW</span><strong>${isGlobal ? "Contextual Transitions" : "Node Connections"}</strong></header>
               <div class="node-flow-row">
                 <span>Incoming</span>
                 <div>${connectionChips(incomingConnections)}</div>
@@ -1415,9 +1465,9 @@ function renderNodePanel() {
           </div>
         </section>
 
-        <div class="editor-danger-zone">
+        ${isGlobal ? "" : `<div class="editor-danger-zone">
           <button class="danger-button" id="deleteNodeButton" type="button" ${isRoot ? 'disabled title="請先將其他節點設為起始節點"' : ""}>刪除節點</button>
-        </div>
+        </div>`}
       </div>
     </div>
   `;
@@ -1431,6 +1481,10 @@ function renderNodePanel() {
 
 async function setSelectedNodeAsRoot() {
   if (!state.nodeDetail || !await flushAutosave()) return;
+  if (isGlobalNode()) {
+    toast("Global Node 不可設為起始節點。", "error");
+    return;
+  }
   const nodeId = state.nodeDetail.node.ID;
   setSaveState("設定起始節點中", "saving");
   try {
@@ -1471,6 +1525,9 @@ async function persistNodeSnapshot(snapshot, task = null) {
   if (summary) {
     summary.name = snapshot.node.Name || snapshot.node.ID;
     summary.id = snapshot.node.ID;
+  } else if (snapshot.path === state.globalNode?.path) {
+    state.globalNode.name = snapshot.node.Name || GLOBAL_NODE_ID;
+    state.globalNode.id = GLOBAL_NODE_ID;
   }
   updateHeader();
   renderNodeList();
@@ -1500,6 +1557,10 @@ async function saveNode(event) {
 async function deleteNode() {
   const node = state.nodeDetail?.node;
   if (!node) return;
+  if (isGlobalNode()) {
+    toast("Global Node 不可刪除。", "error");
+    return;
+  }
   try {
     const check = await api(`/api/node/references?path=${encodeURIComponent(state.selectedNodePath)}`);
     if (check.references.length) {
@@ -1551,7 +1612,7 @@ function defaultEvent(id = generateId("event")) {
   return {
     ID: id,
     Name: "新事件",
-    Trigger: eventActionChoices()[0]?.id || "Auto:Node",
+    Trigger: isGlobalNode() ? "Auto:Node" : (eventActionChoices()[0]?.id || "Auto:Node"),
     Priority: 5,
     Weight: 1,
     Once: false,
@@ -1751,7 +1812,7 @@ function eventEditorHtml(event) {
           <div class="field event-trigger-field">
             <span>Trigger</span>
             <div class="event-trigger-control is-${triggerMode.toLocaleLowerCase()}">
-              <select name="TriggerMode" aria-label="Trigger 模式">${namedOptionTags(EVENT_TRIGGER_MODES, triggerMode)}</select>
+              <select name="TriggerMode" aria-label="Trigger 模式">${namedOptionTags(eventTriggerModeChoices(), triggerMode)}</select>
               ${triggerInput}
             </div>
           </div>
@@ -2773,6 +2834,10 @@ function renderOptionsPanel() {
     dom.optionsPanel.innerHTML = "";
     return;
   }
+  if (isGlobalNode()) {
+    dom.optionsPanel.innerHTML = '<div class="panel-page wide"><div class="success-state">Global Node 不提供 Options；全局事件不可由選項觸發。</div></div>';
+    return;
+  }
   if (!state.optionsDraft) state.optionsDraft = clone(state.nodeDetail.options || defaultOptionsDraft());
   const canvas = state.optionsDraft.Canvas || {};
   const isFormMode = state.optionWorkspaceMode === "form";
@@ -3719,14 +3784,15 @@ function graphRelationships(nodes) {
     const source = String(edge.source || "");
     const target = String(edge.target || "");
     const endUp = edge.endUp === "REPLACE" ? "REPLACE" : "GOTO";
+    const scope = edge.scope === "global" ? "global" : "node";
     if (!nodeIds.has(source) || !nodeIds.has(target)) continue;
     const key = `${source}\u0000${target}\u0000${endUp}`;
-    if (!grouped.has(key)) grouped.set(key, { source, target, endUp, events: [] });
+    if (!grouped.has(key)) grouped.set(key, { source, target, endUp, scope, events: [] });
     grouped.get(key).events.push(edge);
   }
   const directRelationships = [...grouped.values()];
   const gotoParents = new Map();
-  directRelationships.filter((relationship) => relationship.endUp === "GOTO").forEach((relationship) => {
+  directRelationships.filter((relationship) => relationship.endUp === "GOTO" && relationship.scope !== "global").forEach((relationship) => {
     if (!gotoParents.has(relationship.target)) gotoParents.set(relationship.target, new Set());
     gotoParents.get(relationship.target).add(relationship.source);
   });
@@ -3738,6 +3804,7 @@ function graphRelationships(nodes) {
           source: parent,
           target: relationship.target,
           endUp: "MANAGEMENT",
+          scope: "node",
           events: [],
         });
       }
@@ -3960,11 +4027,11 @@ function bindGraphPanel() {
 }
 
 function renderGraphPanel() {
-  const nodes = state.nodes || [];
+  const nodes = [state.globalNode, ...(state.nodes || [])].filter(Boolean);
   const relationships = graphRelationships(nodes);
   const signature = JSON.stringify({
     nodes: nodes.map((node) => [node.id, node.path, node.name]),
-    edges: relationships.map((edge) => [edge.source, edge.target, edge.endUp, edge.events.length]),
+    edges: relationships.map((edge) => [edge.source, edge.target, edge.endUp, edge.scope, edge.events.length]),
   });
   const layout = buildGraphLayout(nodes, relationships);
   if (signature !== state.graphLayoutSignature) {
@@ -3982,11 +4049,11 @@ function renderGraphPanel() {
     if (!source || !target) return "";
     const descriptions = relationship.events.map((event) => relationship.endUp === "MANAGEMENT"
       ? `${nodeNames.get(String(event.replacedNode)) || event.replacedNode} · ${event.eventName} · ${eventTriggerDisplayName(event.trigger)} · REPLACE 管理關係`
-      : `${event.eventName} · ${eventTriggerDisplayName(event.trigger)} · ${relationship.endUp}${event.weight === 1 ? "" : ` · Weight ${event.weight}`}`);
+      : `${event.eventName} · ${eventTriggerDisplayName(event.trigger)} · ${relationship.scope === "global" ? "GLOBAL CONTEXT · " : ""}${relationship.endUp}${event.weight === 1 ? "" : ` · Weight ${event.weight}`}`);
     const selected = relationship.source === String(state.nodeDetail?.node?.ID || "") || relationship.target === String(state.nodeDetail?.node?.ID || "");
     const marker = relationship.endUp === "MANAGEMENT" ? "Management" : "Goto";
     return `
-      <g class="graph-edge is-${relationship.endUp.toLocaleLowerCase()} ${selected ? "is-related" : ""}" data-end-up="${relationship.endUp}">
+      <g class="graph-edge is-${relationship.endUp.toLocaleLowerCase()} ${relationship.scope === "global" ? "is-global" : ""} ${selected ? "is-related" : ""}" data-end-up="${relationship.endUp}" data-scope="${relationship.scope}">
         <path d="${graphEdgePath(source, target, layout, index, relationship.endUp)}" marker-end="url(#graphArrow${marker})"><title>${escapeHtml(descriptions.join("\n"))}</title></path>
         ${relationship.events.length > 1 ? `<text x="${(source.x + target.x + layout.nodeWidth) / 2}" y="${(source.y + target.y + layout.nodeHeight) / 2 - 8}">×${relationship.events.length}</text>` : ""}
       </g>
@@ -3995,19 +4062,21 @@ function renderGraphPanel() {
   const nodesHtml = nodes.map((node) => {
     const position = layout.positions.get(String(node.id));
     const selected = node.path === state.selectedNodePath;
+    const global = Boolean(node.isGlobal);
     const root = String(node.id) === String(state.rootNodeId || "");
     const name = String(node.name || node.id);
     const shortName = name.length > 20 ? `${name.slice(0, 19)}…` : name;
     const shortId = String(node.id).length > 24 ? `${String(node.id).slice(0, 23)}…` : String(node.id);
     const searchText = `${name} ${node.id} ${node.path}`.toLocaleLowerCase();
     return `
-      <g class="graph-node ${selected ? "is-selected" : ""} ${root ? "is-root" : ""}" transform="translate(${position.x} ${position.y})" role="button" tabindex="0" data-node-path="${escapeHtml(node.path)}" data-search-text="${escapeHtml(searchText)}" aria-label="開啟節點 ${escapeHtml(name)}">
+      <g class="graph-node ${selected ? "is-selected" : ""} ${root ? "is-root" : ""} ${global ? "is-global" : ""}" transform="translate(${position.x} ${position.y})" role="button" tabindex="0" data-node-path="${escapeHtml(node.path)}" data-search-text="${escapeHtml(searchText)}" aria-label="開啟節點 ${escapeHtml(name)}">
         <rect width="${layout.nodeWidth}" height="${layout.nodeHeight}" rx="17"></rect>
         <circle cx="22" cy="24" r="6"></circle>
         <text class="graph-node-name" x="38" y="29">${escapeHtml(shortName)}</text>
         <text class="graph-node-id" x="22" y="53">${escapeHtml(shortId)}</text>
         ${root ? `<text class="graph-root-label" x="${layout.nodeWidth - 12}" y="17" text-anchor="end">ROOT</text>` : ""}
-        <title>${escapeHtml(name)}\n${escapeHtml(node.path)}</title>
+        ${global ? `<text class="graph-global-label" x="${layout.nodeWidth - 12}" y="17" text-anchor="end">GLOBAL</text>` : ""}
+        <title>${escapeHtml(name)}\n${global ? "GLOBALNODE" : escapeHtml(node.path)}</title>
       </g>
     `;
   }).join("");
@@ -4072,6 +4141,7 @@ async function refreshAfterSave() {
   const selectedPath = state.selectedNodePath;
   const project = await api("/api/project");
   state.rootNodeId = project.rootNodeId || null;
+  state.globalNode = project.globalNode || null;
   state.nodes = project.nodes || [];
   state.graph = project.graph || { edges: [] };
   state.images = project.images || [];
@@ -4081,7 +4151,7 @@ async function refreshAfterSave() {
   state.memories = project.memories || { memory: { Name: "Memory" } };
   state.memoriesDraft = clone(state.memories);
   state.issues = project.issues || [];
-  if (selectedPath && state.nodes.some((node) => node.path === selectedPath)) {
+  if (selectedPath && (selectedPath === state.globalNode?.path || state.nodes.some((node) => node.path === selectedPath))) {
     state.nodeDetail = await api(`/api/node?path=${encodeURIComponent(selectedPath)}`);
     state.optionsDraft = clone(state.nodeDetail.options || defaultOptionsDraft());
     if (!state.optionsDraft.Elements.some((element) => element.ID === state.selectedOptionElementId)) {
@@ -4285,9 +4355,10 @@ function saveActiveEditor() {
 }
 
 function cycleActiveTab(direction) {
-  const currentIndex = TAB_ORDER.indexOf(state.activeTab);
-  const nextIndex = (currentIndex + direction + TAB_ORDER.length) % TAB_ORDER.length;
-  requestTabSwitch(TAB_ORDER[nextIndex]);
+  const tabs = isGlobalNode() ? TAB_ORDER.filter((tab) => tab !== "options") : TAB_ORDER;
+  const currentIndex = tabs.indexOf(state.activeTab);
+  const nextIndex = (currentIndex + direction + tabs.length) % tabs.length;
+  requestTabSwitch(tabs[nextIndex]);
 }
 
 function toggleActiveLeftPanel() {

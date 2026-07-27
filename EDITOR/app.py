@@ -16,6 +16,8 @@ from urllib.parse import parse_qs, unquote, urlparse
 
 from project_bootstrap import (
     DEFAULT_MEMORY_ID,
+    GLOBAL_NODE_DIRECTORY,
+    GLOBAL_NODE_ID,
     MEMORIES_RELATIVE,
     PROJECT_CONFIG_RELATIVE,
     initialize_scene_project,
@@ -32,6 +34,7 @@ NODE_DIR = "SCENENODE"
 EVENT_DIR = "EVENTPOOL"
 CONTENT_DIR = "CONTENT"
 OPTIONS_FILE = "Options.json"
+GLOBAL_NODE_PATH = "@global"
 EDITOR_SETTINGS_FILE = "settings.json"
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".avif"}
 AUDIO_EXTENSIONS = {".opus", ".ogg", ".mp3", ".mp2", ".flac", ".wav"}
@@ -121,6 +124,18 @@ def clean_node_path(value):
 
 def node_path(relative):
     return PROJECT_ROOT / NODE_DIR / Path(clean_node_path(relative))
+
+
+def is_global_node_path(relative):
+    return clean_node_path(relative) == GLOBAL_NODE_PATH
+
+
+def global_node_path():
+    return PROJECT_ROOT / GLOBAL_NODE_DIRECTORY
+
+
+def authoring_directory(relative):
+    return global_node_path() if is_global_node_path(relative) else node_path(relative)
 
 
 def stats_path():
@@ -461,6 +476,30 @@ def node_summary(directory):
     }
 
 
+def global_node_summary():
+    directory = global_node_path()
+    node_file = directory / "Node.json"
+    parse_error = None
+    try:
+        data = read_json(node_file, {}) or {}
+    except ApiError as exc:
+        data = {}
+        parse_error = exc.message
+    events = list((directory / EVENT_DIR).glob("*.json")) if (directory / EVENT_DIR).exists() else []
+    contents = list((directory / CONTENT_DIR).glob("*.rpy")) if (directory / CONTENT_DIR).exists() else []
+    return {
+        "path": GLOBAL_NODE_PATH,
+        "id": data.get("ID", GLOBAL_NODE_ID),
+        "name": data.get("Name", "GLOBAL"),
+        "eventCount": len(events),
+        "contentCount": len(contents),
+        "optionCount": 0,
+        "parseError": parse_error,
+        "isGlobal": True,
+        "isRoot": False,
+    }
+
+
 def scan_nodes():
     root = PROJECT_ROOT / NODE_DIR
     nodes = [node_summary(path.parent) for path in root.rglob("Node.json")]
@@ -475,8 +514,8 @@ def scan_nodes():
 
 def project_graph():
     edges = []
-    for node in scan_nodes():
-        event_root = node_path(node["path"]) / EVENT_DIR
+    for node in [global_node_summary()] + scan_nodes():
+        event_root = authoring_directory(node["path"]) / EVENT_DIR
         if not event_root.exists():
             continue
         for path in sorted(event_root.glob("*.json"), key=lambda value: value.name.casefold()):
@@ -506,6 +545,7 @@ def project_graph():
                     "trigger": str(event.get("Trigger") or ""),
                     "endUp": end_up,
                     "weight": weight,
+                    "scope": "global" if node.get("isGlobal") else "node",
                 })
     return {
         "edges": sorted(
@@ -535,10 +575,11 @@ def scan_content_files(root):
 
 
 def read_node(relative):
-    directory = node_path(relative)
+    global_scope = is_global_node_path(relative)
+    directory = authoring_directory(relative)
     node_file = directory / "Node.json"
     if not node_file.exists():
-        raise ApiError(HTTPStatus.NOT_FOUND, "找不到指定的 Scene Node。")
+        raise ApiError(HTTPStatus.NOT_FOUND, "找不到指定的 Global Node。" if global_scope else "找不到指定的 Scene Node。")
 
     events = []
     event_root = directory / EVENT_DIR
@@ -547,13 +588,14 @@ def read_node(relative):
             event = read_json(path, {}) or {}
             events.append({"file": path.name, "data": event})
 
-    options = validate_options(read_json(directory / OPTIONS_FILE, default_options()))
+    options = default_options() if global_scope else validate_options(read_json(directory / OPTIONS_FILE, default_options()))
     return {
         "path": clean_node_path(relative),
         "node": read_json(node_file, {}) or {},
         "events": events,
         "options": options,
         "contents": scan_content_files(directory / CONTENT_DIR),
+        "isGlobal": global_scope,
     }
 
 
@@ -657,11 +699,13 @@ def validate_event_trigger(value):
     return f"{source}:{payload}"
 
 
-def validate_event(event):
+def validate_event(event, global_scope=False):
     if not isinstance(event, dict):
         raise ApiError(HTTPStatus.BAD_REQUEST, "Event 必須是 JSON object。")
     event_id = clean_file_name(event.get("ID") or generate_id("event"), ".json")
     trigger = validate_event_trigger(event.get("Trigger"))
+    if global_scope and trigger.startswith("Action:"):
+        raise ApiError(HTTPStatus.BAD_REQUEST, "Global Event 不可使用 Option Trigger。")
     is_lifecycle = trigger in LIFECYCLE_TRIGGERS
 
     priority = event.get("Priority", 5)
@@ -739,8 +783,15 @@ def validate_project():
 
     nodes = scan_nodes()
     node_ids = {item["id"] for item in nodes}
+    global_summary = global_node_summary()
     labels = all_rpy_symbols()
     seen_node_ids = set()
+    if (global_node_path() / OPTIONS_FILE).exists():
+        issues.append({
+            "level": "warning",
+            "location": f"{GLOBAL_NODE_DIRECTORY}/{OPTIONS_FILE}",
+            "message": "Global Node 不支援 Options；這個檔案不會被 Runtime 使用。",
+        })
 
     if scene_project_path().exists():
         try:
@@ -761,12 +812,25 @@ def validate_project():
                     "message": "Root Node 尚未連接到 scene_runtime_start()。",
                 })
 
-    for summary in nodes:
+    for summary in [global_summary] + nodes:
+        global_scope = bool(summary.get("isGlobal"))
         node_id = summary["id"]
-        location = f"SCENENODE/{summary['path']}"
+        location = GLOBAL_NODE_DIRECTORY if global_scope else f"SCENENODE/{summary['path']}"
         if summary.get("parseError"):
             issues.append({"level": "error", "location": location, "message": summary["parseError"]})
             continue
+        if global_scope and node_id != GLOBAL_NODE_ID:
+            issues.append({
+                "level": "error",
+                "location": location,
+                "message": f"Global Node ID 必須固定為 {GLOBAL_NODE_ID}。",
+            })
+        if not global_scope and node_id == GLOBAL_NODE_ID:
+            issues.append({
+                "level": "error",
+                "location": location,
+                "message": f"Scene Node 不可使用保留 ID：{GLOBAL_NODE_ID}。",
+            })
         if node_id in seen_node_ids:
             issues.append({"level": "error", "location": location, "message": f"Node ID {node_id} 重複。"})
         seen_node_ids.add(node_id)
@@ -792,7 +856,7 @@ def validate_project():
         for entry in detail["events"]:
             event_location = f"{location}/{EVENT_DIR}/{entry['file']}"
             try:
-                event = validate_event(entry["data"])
+                event = validate_event(entry["data"], global_scope=global_scope)
             except ApiError as exc:
                 issues.append({"level": "error", "location": event_location, "message": exc.message})
                 continue
@@ -828,6 +892,8 @@ def validate_project():
 def create_node(payload):
     node_id = clean_file_name(payload.get("id") or generate_id("node"), "")
     relative = clean_node_path(payload.get("path") or node_id)
+    if node_id == GLOBAL_NODE_ID or relative == GLOBAL_NODE_PATH:
+        raise ApiError(HTTPStatus.CONFLICT, "這個 ID 或路徑保留給 Global Node。")
     directory = node_path(relative)
     if directory.exists() and any(directory.iterdir()):
         raise ApiError(HTTPStatus.CONFLICT, "這個 Scene Node 路徑已經存在。")
@@ -846,16 +912,19 @@ def create_node(payload):
 
 def save_node(payload):
     relative = clean_node_path(payload.get("path"))
-    directory = node_path(relative)
+    global_scope = is_global_node_path(relative)
+    directory = authoring_directory(relative)
     if not (directory / "Node.json").exists():
-        raise ApiError(HTTPStatus.NOT_FOUND, "找不到指定的 Scene Node。")
+        raise ApiError(HTTPStatus.NOT_FOUND, "找不到指定的 Global Node。" if global_scope else "找不到指定的 Scene Node。")
     node = payload.get("node") or {}
-    node_id = clean_file_name(node.get("ID"), "")
+    node_id = GLOBAL_NODE_ID if global_scope else clean_file_name(node.get("ID"), "")
+    if not global_scope and node_id == GLOBAL_NODE_ID:
+        raise ApiError(HTTPStatus.CONFLICT, f"{GLOBAL_NODE_ID} 是 Global Node 的保留 ID。")
     write_json(directory / "Node.json", {
         "ID": node_id,
         "Name": str(node.get("Name") or node_id),
     })
-    return node_summary(directory)
+    return global_node_summary() if global_scope else node_summary(directory)
 
 
 def save_root_node(payload):
@@ -870,10 +939,11 @@ def save_root_node(payload):
 
 
 def save_event(payload):
-    directory = node_path(payload.get("node"))
+    global_scope = is_global_node_path(payload.get("node"))
+    directory = authoring_directory(payload.get("node"))
     if not (directory / "Node.json").exists():
-        raise ApiError(HTTPStatus.NOT_FOUND, "找不到指定的 Scene Node。")
-    event = validate_event(payload.get("event"))
+        raise ApiError(HTTPStatus.NOT_FOUND, "找不到指定的 Global Node。" if global_scope else "找不到指定的 Scene Node。")
+    event = validate_event(payload.get("event"), global_scope=global_scope)
     event_root = directory / EVENT_DIR
     event_root.mkdir(exist_ok=True)
     original = payload.get("originalId")
@@ -923,9 +993,11 @@ def save_content_file(root, payload):
 
 def node_references(relative):
     target = read_node(relative)
+    if target.get("isGlobal"):
+        return {"nodeId": GLOBAL_NODE_ID, "references": []}
     target_id = target["node"].get("ID")
     references = []
-    for summary in scan_nodes():
+    for summary in [global_node_summary()] + scan_nodes():
         if summary["path"] == clean_node_path(relative):
             continue
         try:
@@ -947,6 +1019,8 @@ def node_references(relative):
 
 
 def delete_node(relative):
+    if is_global_node_path(relative):
+        raise ApiError(HTTPStatus.CONFLICT, "Global Node 是固定的全局作用域，不可刪除。")
     references = node_references(relative)["references"]
     if references:
         raise ApiError(HTTPStatus.CONFLICT, f"仍有 {len(references)} 個 Event 指向這個節點。")
@@ -1004,6 +1078,7 @@ class EditorHandler(BaseHTTPRequestHandler):
                     "rootNodeId": str(project.get("Root Node") or "").strip() or None,
                     "stats": read_json(stats_path(), {}) or {},
                     "memories": read_json(memories_path(), {}) or {},
+                    "globalNode": global_node_summary(),
                     "nodes": scan_nodes(),
                     "graph": project_graph(),
                     "images": scan_image_assets(),
@@ -1021,7 +1096,7 @@ class EditorHandler(BaseHTTPRequestHandler):
                 self.send_json(node_references(self.query_value("path")))
                 return
             if parsed.path == "/api/content":
-                directory = node_path(self.query_value("node")) / CONTENT_DIR
+                directory = authoring_directory(self.query_value("node")) / CONTENT_DIR
                 name = clean_file_name(self.query_value("name"), ".rpy")
                 path = directory / f"{name}.rpy"
                 if not path.exists():
@@ -1054,9 +1129,9 @@ class EditorHandler(BaseHTTPRequestHandler):
                 self.send_json(save_event(payload))
                 return
             if parsed.path == "/api/content":
-                directory = node_path(payload.get("node"))
+                directory = authoring_directory(payload.get("node"))
                 if not (directory / "Node.json").exists():
-                    raise ApiError(HTTPStatus.NOT_FOUND, "找不到指定的 Scene Node。")
+                    raise ApiError(HTTPStatus.NOT_FOUND, "找不到指定的 authoring scope。")
                 self.send_json(save_content_file(directory / CONTENT_DIR, payload))
                 return
             raise ApiError(HTTPStatus.NOT_FOUND, "找不到 API。")
@@ -1093,6 +1168,8 @@ class EditorHandler(BaseHTTPRequestHandler):
                 self.send_json(save_root_node(payload))
                 return
             if parsed.path == "/api/options":
+                if is_global_node_path(payload.get("node")):
+                    raise ApiError(HTTPStatus.CONFLICT, "Global Node 不支援 Options。")
                 directory = node_path(payload.get("node"))
                 if not (directory / "Node.json").exists():
                     raise ApiError(HTTPStatus.NOT_FOUND, "找不到指定的 Scene Node。")
@@ -1113,14 +1190,14 @@ class EditorHandler(BaseHTTPRequestHandler):
         try:
             parsed = urlparse(self.path)
             if parsed.path == "/api/events":
-                directory = node_path(self.query_value("node")) / EVENT_DIR
+                directory = authoring_directory(self.query_value("node")) / EVENT_DIR
                 event_id = clean_file_name(self.query_value("id"), ".json")
                 target = directory / f"{event_id}.json"
             elif parsed.path == "/api/nodes":
                 self.send_json(delete_node(self.query_value("path")))
                 return
             elif parsed.path == "/api/content":
-                directory = node_path(self.query_value("node")) / CONTENT_DIR
+                directory = authoring_directory(self.query_value("node")) / CONTENT_DIR
                 name = clean_file_name(self.query_value("name"), ".rpy")
                 target = directory / f"{name}.rpy"
             else:

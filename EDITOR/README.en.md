@@ -35,6 +35,8 @@ For a complete walkthrough, read [Your First Playable Flow](https://github.com/T
 - An Option emits a Trigger. Its Event decides conditions, state changes, and routing.
 - Content stores a Ren'Py `label` name, not an `.rpy` filename.
 - `REDO` reruns the current node, `GOTO` pushes a destination, `REPLACE` atomically swaps the stack top, and `EXIT` returns to the parent.
+- The node list has a fixed, undeletable Global Node. Its Events participate from every real node; the Global Node has no Options and offers no Option Trigger.
+- A Global Event's End up acts on the current real node. The Global Node never enters the Stack and is not available as ROOT or Next Node.
 - Every visible Option is interactive and ends with the current interaction. The Runtime creates it again for a later round.
 - Define screens and HUDs in `screens.rpy` or another `.rpy`, then control them from Content with native Ren'Py `show screen`, `hide screen`, or `call screen`.
 - On Enter and On Exit run every matching Event ordered by Priority and Event ID. On Node preserves the former Auto single-selection behavior.
@@ -68,7 +70,7 @@ game/FRAMEWORK/runtime.rpy
 game/FRAMEWORK/option_renderer.rpy
 ```
 
-Do not place custom logic in those files. You can safely maintain your own `gui.rpy`, `screens.rpy`, other `.rpy` files, assets, and the Editor-created `DATA/` and `SCENENODE/` content. Updates do not overwrite that creator-owned data.
+Do not place custom logic in those files. You can safely maintain your own `gui.rpy`, `screens.rpy`, other `.rpy` files, assets, and the Editor-created `DATA/`, `GLOBALNODE/`, and `SCENENODE/` content. Updates do not overwrite that creator-owned data.
 
 When using AI assistance, ask it to read `.scene-node-editor/AI_CONTEXT.md` first. Prompt examples are available in the [AI-Assisted Workflow](https://github.com/ToNyA-369/renpy-scene-node-editor/blob/main/docs/en/AI_WORKFLOW.md).
 
@@ -77,7 +79,7 @@ When using AI assistance, ask it to read `.scene-node-editor/AI_CONTEXT.md` firs
 - The game does not enter a Scene Node: confirm that `label start` calls `scene_runtime_start()`.
 - Content is absent from the menu: confirm the `.rpy` is under `game/` and contains a valid `label`.
 - A Screen is missing: confirm that Content uses native Ren'Py `show screen` or `call screen`, then check the Screen name.
-- A Trigger does nothing: confirm the current node has an Event with the same Trigger and keep an unconditional fallback Event when practical.
+- A Trigger does nothing: confirm the current node or Global Node has an Event with the same Trigger and keep an unconditional fallback Event when practical.
 - A node was deleted accidentally: look for recoverable data in `.scene-node-trash/` at the project root.
 
 Report issues or find the latest release: <https://github.com/ToNyA-369/renpy-scene-node-editor>

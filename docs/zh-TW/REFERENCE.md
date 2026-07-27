@@ -16,6 +16,10 @@
       SceneProject.json
       Stats.json
       Memories.json
+    GLOBALNODE/
+      Node.json
+      EVENTPOOL/<event_id>.json
+      CONTENT/<file>.rpy
     SCENENODE/
       <node_path>/
         Node.json
@@ -48,6 +52,18 @@
 
 - `ID`：穩定技術 ID。
 - `Name`：可修改的顯示名稱。
+
+## Global Node
+
+`GLOBALNODE/Node.json` 固定使用：
+
+```json
+{ "ID": "__global__", "Name": "GLOBAL" }
+```
+
+Name 可修改，ID 不可修改。Global Node 不屬於 `scene_catalog["nodes"]`，不進入 `scene_stack`，不能成為 Root 或 Next Node。它沒有 `Options.json`；Editor 與 Schema 拒絕 Global Event 的 `Action:<option_id>` Trigger。
+
+Global Event prepare 同時保存 `owner_node_id = "__global__"` 與 `node_id = <目前 Stack 頂端>`。Once 使用 `once:global:<event_id>`；Effects 與 Content 屬於 Global Event，而非生命週期 Event 的 End up 會依目前實際 Stack 執行。
 
 ## Options.json
 
@@ -266,13 +282,13 @@ Event Effects 只處理 Stat 與 Memory。背景、音樂、音效、轉場與�
 }
 ```
 
-`memory` 是必要預設 Bank。Runtime 將 Once Event 記錄為 `once:<event_id>`。
+`memory` 是必要預設 Bank。一般 Once Event 記錄為 `once:<event_id>`；Global Once Event 記錄為 `once:global:<event_id>`。
 
 ## Event 決策
 
 `Auto:Node`、Option、Keyboard 與 Mouse 使用單一選擇流程：
 
-1. 取得目前 Node 中 Trigger 相同的 Events。
+1. 合併目前 Node 與 Global Node 中 Trigger 相同的 Events。
 2. 排除 Conditions 失敗及已完成的 Once Events。
 3. 找出最小 Priority。
 4. 只在該 Priority 中依 Weight 選出一個 Event。
@@ -281,13 +297,15 @@ Event Effects 只處理 Stat 與 Memory。背景、音樂、音效、轉場與�
 7. 在 prepare 階段選定 GOTO／REPLACE 的單一或權重 Next Node；Content 返回後、任何 On Exit 之前確認目標存在。
 8. 執行 End up。
 
-`Auto:Enter`／`Auto:Exit` 使用批次生命週期流程：
+`Auto:Enter`／`Auto:Exit` 使用批次生命週期流程，並合併目前 Node 與 Global Node 的 Events：
 
 1. 在任何 Effects 執行前，以同一份狀態快照檢查所有 Conditions 與 Once。
 2. 將所有符合的 Events 依 Priority 由小到大、再依 Event ID 排序。
 3. 依序套用每個 Event 的 Effects 並呼叫 Content。
 
 生命週期 Event 不做 Weight 抽選，也不改變 Scene Stack。
+
+Global On Node 在 Runner 下一次互動循環才參與選擇。若前一個本地 Event 改變狀態後使用 GOTO，目的地 On Enter 會先執行，接著才檢查 Global On Node；Global Event 不是插入主 Event Content 與 End up 之間的同步 hook。
 
 ## Scene Stack
 

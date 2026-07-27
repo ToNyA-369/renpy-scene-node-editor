@@ -5,6 +5,9 @@ init -100 python:
     SCENE_STATS_FILE = "DATA/Stats.json"
     SCENE_MEMORIES_FILE = "DATA/Memories.json"
     SCENE_DEFAULT_MEMORY = "memory"
+    SCENE_GLOBAL_NODE_ID = "__global__"
+    SCENE_GLOBAL_NODE_FILE = "GLOBALNODE/Node.json"
+    SCENE_GLOBAL_EVENT_ROOT = "GLOBALNODE/EVENTPOOL/"
     SCENE_NODE_ROOT = "SCENENODE/"
     SCENE_NODE_FILE = "/Node.json"
     SCENE_OPTIONS_FILE = "/Options.json"
@@ -34,6 +37,13 @@ init -100 python:
         }
         nodes = {}
         node_directories = {}
+        global_node = (
+            scene_read_json(SCENE_GLOBAL_NODE_FILE)
+            if SCENE_GLOBAL_NODE_FILE in files
+            else {"ID": SCENE_GLOBAL_NODE_ID, "Name": "GLOBAL"}
+        )
+        if str(global_node.get("ID") or "").strip() != SCENE_GLOBAL_NODE_ID:
+            raise Exception("Global Node ID must be {}.".format(SCENE_GLOBAL_NODE_ID))
 
         for path in sorted(files):
             if not path.startswith(SCENE_NODE_ROOT) or not path.endswith(SCENE_NODE_FILE):
@@ -48,7 +58,11 @@ init -100 python:
             node_directories[path[:-len(SCENE_NODE_FILE)]] = node_id
 
         events = dict((node_id, []) for node_id in nodes)
+        global_events = []
         for path in sorted(files):
+            if path.startswith(SCENE_GLOBAL_EVENT_ROOT) and path.endswith(".json"):
+                global_events.append(scene_read_json(path))
+                continue
             if not path.startswith(SCENE_NODE_ROOT) or SCENE_EVENT_MARKER not in path or not path.endswith(".json"):
                 continue
             directory = path.split(SCENE_EVENT_MARKER, 1)[0]
@@ -70,6 +84,8 @@ init -100 python:
             "memories": memories,
             "nodes": nodes,
             "events": events,
+            "global_node": global_node,
+            "global_events": global_events,
             "options": options,
         }
 
@@ -226,14 +242,22 @@ init -100 python:
         return all(scene_condition_matches(item) for item in (conditions or []))
 
 
-    def scene_event_once_memory(event):
-        return "once:{}".format(event.get("ID"))
+    def scene_event_once_memory(event, owner_node_id=None):
+        event_id = event.get("ID")
+        if owner_node_id == SCENE_GLOBAL_NODE_ID:
+            return "once:global:{}".format(event_id)
+        return "once:{}".format(event_id)
 
 
-    def scene_event_matches(event, trigger):
+    def scene_event_matches(event, trigger, owner_node_id=None):
         if event.get("Trigger") != trigger:
             return False
-        if event.get("Once") and scene_memory_has(SCENE_DEFAULT_MEMORY, scene_event_once_memory(event)):
+        if owner_node_id == SCENE_GLOBAL_NODE_ID and str(event.get("Trigger") or "").startswith("Action:"):
+            return False
+        if event.get("Once") and scene_memory_has(
+            SCENE_DEFAULT_MEMORY,
+            scene_event_once_memory(event, owner_node_id),
+        ):
             return False
         return all(scene_condition_matches(item) for item in event.get("Conditions", []))
 
@@ -272,11 +296,13 @@ init -100 python:
 
 
     def scene_select_event(node_id, trigger):
-        matches = [
-            event
-            for event in scene_catalog["events"].get(node_id, [])
-            if scene_event_matches(event, trigger)
-        ]
+        matches = []
+        for event in scene_catalog["events"].get(node_id, []):
+            if scene_event_matches(event, trigger, node_id):
+                matches.append(event)
+        for event in scene_catalog.get("global_events", []):
+            if scene_event_matches(event, trigger, SCENE_GLOBAL_NODE_ID):
+                matches.append(event)
         if not matches:
             return None
 
@@ -289,22 +315,33 @@ init -100 python:
 
 
     def scene_lifecycle_events(node_id, trigger):
-        matches = [
-            event
-            for event in scene_catalog["events"].get(node_id, [])
-            if scene_event_matches(event, trigger)
-        ]
-        matches.sort(key=lambda event: (
-            int(event.get("Priority", 5)),
-            str(event.get("ID") or ""),
+        matches = []
+        for owner_node_id, events in (
+            (node_id, scene_catalog["events"].get(node_id, [])),
+            (SCENE_GLOBAL_NODE_ID, scene_catalog.get("global_events", [])),
+        ):
+            for event in events:
+                if scene_event_matches(event, trigger, owner_node_id):
+                    matches.append((owner_node_id, event))
+        matches.sort(key=lambda item: (
+            int(item[1].get("Priority", 5)),
+            str(item[1].get("ID") or ""),
+            str(item[0]),
         ))
-        return [scene_prepare_event(node_id, event) for event in matches]
+        return [
+            scene_prepare_event(node_id, event, owner_node_id=owner_node_id)
+            for owner_node_id, event in matches
+        ]
 
 
     def scene_input_bindings(node_id):
         bindings = []
         seen = set()
-        for event in scene_catalog["events"].get(node_id, []):
+        available = (
+            list(scene_catalog["events"].get(node_id, []))
+            + list(scene_catalog.get("global_events", []))
+        )
+        for event in available:
             trigger = str(event.get("Trigger") or "").strip()
             keysym = None
             if trigger.startswith("Keyboard:"):
@@ -318,9 +355,16 @@ init -100 python:
         return bindings
 
 
-    def scene_prepare_event(node_id, event):
+    def scene_prepare_event(node_id, event, owner_node_id=None):
+        if owner_node_id is None:
+            owner_node_id = (
+                SCENE_GLOBAL_NODE_ID
+                if any(event is item for item in scene_catalog.get("global_events", []))
+                else node_id
+            )
         return {
             "node_id": node_id,
+            "owner_node_id": owner_node_id,
             "event": event,
             "content": scene_weighted_value(event.get("Content")),
             "end_up": event.get("End up", "REDO"),
@@ -399,7 +443,10 @@ init -100 python:
     def scene_apply_prepared(prepared):
         event = prepared["event"]
         if event.get("Once"):
-            scene_memory_add(SCENE_DEFAULT_MEMORY, scene_event_once_memory(event))
+            scene_memory_add(
+                SCENE_DEFAULT_MEMORY,
+                scene_event_once_memory(event, prepared.get("owner_node_id")),
+            )
         for effect in event.get("Effects", []):
             scene_apply_effect(prepared["node_id"], effect)
 

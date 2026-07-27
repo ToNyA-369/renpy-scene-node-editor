@@ -26,6 +26,9 @@ Editor-managed project data; prefer changing it through the Editor:
 game/DATA/SceneProject.json
 game/DATA/Stats.json
 game/DATA/Memories.json
+game/GLOBALNODE/Node.json
+game/GLOBALNODE/EVENTPOOL/*.json
+game/GLOBALNODE/CONTENT/*.rpy
 game/SCENENODE/**/Node.json
 game/SCENENODE/**/Options.json
 game/SCENENODE/**/EVENTPOOL/*.json
@@ -42,7 +45,7 @@ game/audio/**
 other creator assets and custom systems
 ```
 
-Content files under `game/SCENENODE/**/CONTENT/` are native Ren'Py, but their label IDs are referenced by Events. Preserve those IDs unless all references are intentionally updated.
+Content files under `game/GLOBALNODE/CONTENT/` and `game/SCENENODE/**/CONTENT/` are native Ren'Py, but their label IDs are referenced by Events. Preserve those IDs unless all references are intentionally updated.
 
 ## Invariants
 
@@ -51,20 +54,21 @@ Content files under `game/SCENENODE/**/CONTENT/` are native Ren'Py, but their la
 3. Other Trigger formats are `Auto:Enter`, `Auto:Node`, `Auto:Exit`, `Keyboard:<Ren'Py keysym>`, and `Mouse:<Left|Middle|Right|WheelUp|WheelDown>`.
 4. An Option returns a Trigger. It does not directly choose an Event, run Effects, call Content, or change the Scene Stack.
 5. On Node and player-input Events own Conditions, Priority, Weight, Once, Effects, Content, and End up. On Enter / On Exit lifecycle Events omit Weight, End up, and Next Node.
-6. Event Content stores a Ren'Py label name, not an `.rpy` filename.
-7. Event Effects are limited to Stats and Memories and run before Content. Backgrounds, audio, transitions, and other presentation use native Ren'Py in Content, which should normally `return` to the Runner.
-8. On Enter / On Exit evaluate Conditions as a snapshot and run every match ordered by Priority then Event ID. On Node retains the old Auto minimum-Priority / Weight selection.
-9. `REDO` repeats the current Node, `GOTO` pushes a destination Node, `REPLACE` atomically swaps the Stack top, and `EXIT` pops back to the parent. REPLACE requires an actual parent in the current Stack: `[parent, current] -> [parent, target]`. It runs current On Exit and target On Enter without resuming any parent lifecycle, On Node, or Options. EXIT at the first Stack level ends the Runner. GOTO does not exit the parent, and returning from a child does not re-enter the parent.
-10. Node has no Background or Screen field. Backgrounds, audio, transitions, Screens, and HUDs are creator-owned presentation controlled from Content with native Ren'Py.
-11. Do not rename stable Node, Event, Stat, Memory Bank, Element, Item, or Content IDs casually.
-12. Do not introduce new Schema fields or change public Runtime semantics without explicit creator approval.
-13. Do not overwrite creator-owned `gui.rpy`, `screens.rpy`, or game data during framework updates.
+6. The fixed `__global__` Global Node is an authoring scope, not a Stack Node. It has no Options, cannot use `Action:` Triggers, and cannot be Root or Next Node. Its Events merge with the current real Node; End up operates on that real Stack-top context.
+7. Event Content stores a Ren'Py label name, not an `.rpy` filename.
+8. Event Effects are limited to Stats and Memories and run before Content. Backgrounds, audio, transitions, and other presentation use native Ren'Py in Content, which should normally `return` to the Runner.
+9. On Enter / On Exit evaluate Conditions as a snapshot and run every local and Global match ordered by Priority then Event ID. On Node merges local and Global Events before minimum-Priority / Weight selection.
+10. `REDO` repeats the current Node, `GOTO` pushes a destination Node, `REPLACE` atomically swaps the Stack top, and `EXIT` pops back to the parent. REPLACE requires an actual parent in the current Stack: `[parent, current] -> [parent, target]`. It runs current On Exit and target On Enter without resuming any parent lifecycle, On Node, or Options. EXIT at the first Stack level ends the Runner. GOTO does not exit the parent, and returning from a child does not re-enter the parent.
+11. Node has no Background or Screen field. Backgrounds, audio, transitions, Screens, and HUDs are creator-owned presentation controlled from Content with native Ren'Py.
+12. Do not rename stable Node, Event, Stat, Memory Bank, Element, Item, or Content IDs casually.
+13. Do not introduce new Schema fields or change public Runtime semantics without explicit creator approval.
+14. Do not overwrite creator-owned `gui.rpy`, `screens.rpy`, or game data during framework updates.
 
 ## State
 
 Stats are numeric values with Init / Min / Max. Event Conditions compare them and Effects change them.
 
-Memory Banks contain string tags. The required `memory` bank also records Once Events as `once:<event_id>`. Custom banks do not reset automatically.
+Memory Banks contain string tags. The required `memory` bank records ordinary Once Events as `once:<event_id>` and Global Once Events as `once:global:<event_id>`. Custom banks do not reset automatically.
 
 Public creator-facing helpers:
 

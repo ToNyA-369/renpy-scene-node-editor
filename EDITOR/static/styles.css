@@ -2856,6 +2856,12 @@ body.sidebar-open .sidebar-scrim {
   overflow-y: auto;
 }
 
+.global-node-slot {
+  margin-bottom: 12px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--line);
+}
+
 .node-list-empty {
   color: var(--faint);
 }
@@ -2877,6 +2883,27 @@ body.sidebar-open .sidebar-scrim {
   color: var(--ink);
   background: var(--accent-soft);
   border-color: var(--accent);
+}
+
+.global-node-item {
+  background: color-mix(in srgb, var(--accent-soft) 42%, var(--surface));
+  border-style: dashed;
+}
+
+.global-node-badge {
+  display: inline-flex;
+  min-height: 19px;
+  margin-left: 8px;
+  padding: 1px 6px;
+  align-items: center;
+  color: var(--accent);
+  background: var(--surface);
+  border: 1px solid rgba(92, 114, 101, 0.45);
+  border-radius: 999px;
+  font-size: 8px;
+  font-weight: 760;
+  letter-spacing: 0.1em;
+  vertical-align: 2px;
 }
 
 .node-accent {
@@ -4034,6 +4061,10 @@ textarea:hover {
   padding-inline: 6px;
   font-size: 8px;
   vertical-align: 2px;
+}
+
+.root-node-badge.is-global {
+  border-style: dashed;
 }
 
 .danger-button:disabled {
@@ -5284,6 +5315,15 @@ textarea:hover {
   stroke-width: 1.8;
 }
 
+.graph-edge.is-global path {
+  stroke-dasharray: 2 5;
+  opacity: 0.72;
+}
+
+.graph-edge.is-global.is-replace path {
+  stroke-dasharray: 8 4 2 4;
+}
+
 .graph-edge.is-related path {
   stroke: var(--accent);
   stroke-width: 2.8;
@@ -5354,6 +5394,15 @@ textarea:hover {
   fill: var(--accent);
 }
 
+.graph-node.is-global rect {
+  fill: color-mix(in srgb, var(--accent-soft) 45%, var(--surface));
+  stroke-dasharray: 5 4;
+}
+
+.graph-node.is-global circle {
+  fill: var(--accent);
+}
+
 .graph-node.is-dimmed {
   opacity: 0.2;
 }
@@ -5375,6 +5424,24 @@ textarea:hover {
   font-size: 9px;
   font-weight: 800;
   letter-spacing: 0.08em;
+}
+
+.graph-global-label {
+  fill: var(--accent);
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+}
+
+.tab:disabled {
+  color: var(--faint);
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.tab:disabled:hover {
+  color: var(--faint);
+  background: transparent;
 }
 
 @media (max-width: 760px) {
