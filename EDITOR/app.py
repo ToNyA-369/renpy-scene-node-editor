@@ -48,6 +48,14 @@ KEYBOARD_KEYSYM_RE = re.compile(
 MOUSE_TRIGGER_VALUES = {"Left", "Middle", "Right", "WheelUp", "WheelDown"}
 AUTO_TRIGGER_PHASES = {"Enter", "Node", "Exit"}
 LIFECYCLE_TRIGGERS = {"Auto:Enter", "Auto:Exit"}
+CONDITION_OPERATORS = {
+    "stat": (">", ">=", "<", "<=", "==", "!="),
+    "memory": ("has", "not_has"),
+}
+EFFECT_OPERATORS = {
+    "stat": ("set", "+", "-", "*", "/"),
+    "memory": ("add", "remove", "clear"),
+}
 
 
 class ApiError(Exception):
@@ -219,7 +227,7 @@ def validate_condition(condition, field="Condition"):
     if condition_type == "stat":
         result["id"] = clean_file_name(result.get("id"), "")
         operation = str(result.get("op") or ">=")
-        if operation not in (">", ">=", "<", "<=", "==", "!="):
+        if operation not in CONDITION_OPERATORS["stat"]:
             raise ApiError(HTTPStatus.BAD_REQUEST, f"{field} 的 Stat 判斷不合法。")
         result["op"] = operation
         result["value"] = number_setting(result.get("value", 0), 0, f"{field} 的值")
@@ -233,7 +241,7 @@ def validate_condition(condition, field="Condition"):
             raise ApiError(HTTPStatus.BAD_REQUEST, f"{field} 的記憶標籤不可為空。")
         result["id"] = tag_id
         operation = str(result.get("op") or "has")
-        if operation not in ("has", "not_has"):
+        if operation not in CONDITION_OPERATORS["memory"]:
             raise ApiError(HTTPStatus.BAD_REQUEST, f"{field} 的記憶判斷不合法。")
         result["op"] = operation
         result.pop("value", None)
@@ -253,7 +261,7 @@ def validate_effect(effect, field="Effect"):
     if effect_type == "stat":
         result["id"] = clean_file_name(result.get("id"), "")
         operation = str(result.get("op") or "+")
-        if operation not in ("set", "+", "-", "*", "/"):
+        if operation not in EFFECT_OPERATORS["stat"]:
             raise ApiError(HTTPStatus.BAD_REQUEST, f"{field} 的 Stat 操作不合法。")
         result["op"] = operation
         result["value"] = number_setting(result.get("value", 0), 0, f"{field} 的值")
@@ -263,7 +271,7 @@ def validate_effect(effect, field="Effect"):
     if effect_type == "memory":
         result["bank"] = clean_file_name(result.get("bank") or DEFAULT_MEMORY_ID, "")
         operation = str(result.get("op") or "add")
-        if operation not in ("add", "remove", "clear"):
+        if operation not in EFFECT_OPERATORS["memory"]:
             raise ApiError(HTTPStatus.BAD_REQUEST, f"{field} 的記憶操作不合法。")
         result["op"] = operation
         if operation == "clear":

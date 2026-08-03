@@ -13,6 +13,7 @@ js/core/api_client.js           API requests and error classification
 js/core/autosave_coordinator.js autosave ordering
 js/core/editor_settings.js      tabs, shortcuts, settings versions and migrations
 js/core/event_contract.js       Editor Trigger and End up contract
+js/core/state_rule_contract.js  Editor Condition and Effect contract
 js/ui/choice_picker.js           shared hierarchical select interaction
 js/workspaces/graph_model.js     graph relationships, layout and paths
 app.js                           state composition, rendering and module coordination
@@ -41,11 +42,29 @@ A new module must have one describable responsibility, receive dependencies expl
 
 ### Condition or Effect
 
-Schema validation, Editor form, Runtime behavior, diagnostics, Reference, and tests must land together. If a behavior cannot be expressed as stable data, first consider native Content rather than expanding Schema.
+1. Register the type, operations, and default Editor data shape in `state_rule_contract.js`.
+2. Keep the `CONDITION_OPERATORS` / `EFFECT_OPERATORS` registries and validation branches in `EDITOR/app.py` aligned.
+3. Implement the Runtime predicate or execution branch.
+4. Update the form, diagnostics, bilingual Reference, and comprehensive fixtures.
+5. Extend `test_contract_alignment.py` so the frontend registry, Editor Schema, and Runtime accept the same operations.
+
+If a behavior cannot be expressed as stable data, first consider native Content rather than expanding Schema.
 
 ### Workspace UI
 
 Put shared interaction under `js/ui/`, pure workspace data transformations under `js/workspaces/`, and leave only state wiring plus render/bind calls in `app.js`. File extraction and visual redesign should be separate changes so regressions remain attributable.
+
+## Browser smoke tests
+
+After installing the test dependency and Chromium, run:
+
+```sh
+npm ci
+npx playwright install chromium
+python3 tools/verify.py --browser
+```
+
+The suite creates only system-temporary projects through `tools/create_editor_test_unit.py`; it must never target a real game or creator data under `INTEGRATION/TestGame`. The fixed coverage currently includes Editor startup, the nested Content picker, autosave plus reload persistence, graph GOTO / REPLACE / management edges, and browser Console errors. CI runs this suite in a separate Chromium job.
 
 ## CSS
 
@@ -61,4 +80,4 @@ Move CSS without changing selectors, declarations, or load order first. Then ver
 python3 tools/verify.py
 ```
 
-The verifier discovers all production JavaScript and `tests/js/*.test.js` automatically. Browser interaction and Runtime behavior still require the scoped manual or Ren'Py verification described in `CONTRIBUTING.md`.
+The verifier discovers all production JavaScript and `tests/js/*.test.js` automatically. Use `--browser` for critical Editor interactions; new interaction surfaces beyond the smoke suite still require focused practical verification.

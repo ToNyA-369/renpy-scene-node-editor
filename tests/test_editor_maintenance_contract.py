@@ -22,6 +22,7 @@ class EditorMaintenanceContractTests(unittest.TestCase):
             "/js/core/api_client.js",
             "/js/core/editor_settings.js",
             "/js/core/event_contract.js",
+            "/js/core/state_rule_contract.js",
             "/js/core/autosave_coordinator.js",
             "/js/ui/choice_picker.js",
             "/js/workspaces/graph_model.js",
@@ -35,6 +36,8 @@ class EditorMaintenanceContractTests(unittest.TestCase):
             "function normalizeEditorSettings(",
             "function graphRelationships(",
             "function populateSelectMenu(",
+            "function defaultStatCondition(",
+            "function defaultStatEffect(",
         ):
             with self.subTest(implementation=implementation):
                 self.assertNotIn(implementation, APP_JS)

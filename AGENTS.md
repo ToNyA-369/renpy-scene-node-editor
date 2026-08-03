@@ -19,6 +19,7 @@ EDITOR/static/js/core/api_client.js          HTTP serialization and error classe
 EDITOR/static/js/core/autosave_coordinator.js autosave ordering, retry, flush, cancellation
 EDITOR/static/js/core/editor_settings.js     settings version, tabs, shortcuts, migrations
 EDITOR/static/js/core/event_contract.js      Trigger and End up UI contract
+EDITOR/static/js/core/state_rule_contract.js Condition and Effect UI contract
 EDITOR/static/js/ui/choice_picker.js          shared hierarchical select interaction
 EDITOR/static/js/workspaces/graph_model.js    graph relationships, layout, edge paths
 EDITOR/static/app.js                          state composition, rendering, API orchestration

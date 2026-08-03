@@ -13,6 +13,7 @@ js/core/api_client.js           API 請求與錯誤分類
 js/core/autosave_coordinator.js 自動儲存時序
 js/core/editor_settings.js      分頁、快捷鍵、設定版本與遷移
 js/core/event_contract.js       Trigger／End up 的 Editor 契約
+js/core/state_rule_contract.js  Condition／Effect 的 Editor 契約
 js/ui/choice_picker.js           共用階層下拉選單
 js/workspaces/graph_model.js     關聯圖關係、布局與路徑
 app.js                           狀態組裝、畫面渲染與跨模組協調
@@ -47,11 +48,29 @@ app.js                           狀態組裝、畫面渲染與跨模組協調
 
 ### 新增 Condition／Effect
 
-必須同時存在：資料驗證、Editor 表單、Runtime 行為、錯誤訊息、Reference 與測試。若無法穩定資料化，應先評估是否交還原生 Content，而不是先擴張 Schema。
+1. 在 `state_rule_contract.js` 登錄類型、操作與 Editor 預設資料形狀。
+2. 同步 `EDITOR/app.py` 的 `CONDITION_OPERATORS`／`EFFECT_OPERATORS` 與驗證分支。
+3. 在 Runtime 實作判斷或執行分支。
+4. 更新表單、錯誤訊息、雙語 Reference 與綜合測試資料。
+5. 擴充 `test_contract_alignment.py`，確認前端 registry、Editor Schema 與 Runtime 都接受同一組操作。
+
+若無法穩定資料化，應先評估是否交還原生 Content，而不是先擴張 Schema。
 
 ### 新增或重做工作區
 
 工作區只讀寫既有契約時，可以獨立改善 UI。共用互動放在 `js/ui/`；純資料轉換放在 `js/workspaces/`；`app.js` 只保留狀態連接與 render/bind 呼叫。拆分和視覺重設應分成不同提交，方便定位回歸。
+
+## 瀏覽器 smoke tests
+
+安裝測試依賴與 Chromium 後執行：
+
+```sh
+npm ci
+npx playwright install chromium
+python3 tools/verify.py --browser
+```
+
+測試只使用 `tools/create_editor_test_unit.py` 建立的系統暫存專案，不得指向正式遊戲或 `INTEGRATION/TestGame` 的創作者資料。目前固定覆蓋 Editor 載入、Content 父子選單、自動儲存與重新載入、關聯圖 GOTO／REPLACE／管理邊，以及瀏覽器 Console 錯誤。CI 在獨立的 Chromium job 執行這套測試。
 
 ## CSS 規則
 
@@ -67,4 +86,4 @@ app.js                           狀態組裝、畫面渲染與跨模組協調
 python3 tools/verify.py
 ```
 
-統一驗證會自動發現所有 production JavaScript 與 `tests/js/*.test.js`，因此新增模組後不需再手動修改 CI 指令。瀏覽器互動或 Runtime 行為仍要依變更範圍做實際驗證。
+統一驗證會自動發現所有 production JavaScript 與 `tests/js/*.test.js`，因此新增模組後不需再手動修改 CI 指令。涉及主要 Editor 操作時使用 `--browser`；超出 smoke suite 的新互動仍要依變更範圍做實際驗證。

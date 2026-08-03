@@ -36,7 +36,15 @@ python3 tools/verify.py
 
 This single command checks Python and JavaScript syntax, runs the isolated autosave race tests and the complete Python unit suite, and checks both working-tree and staged whitespace. Pull requests run the same suite on Linux and macOS through GitHub Actions.
 
-UI changes also require browser interaction testing. Verify the affected workspace, autosave, reload behavior, keyboard interaction, and browser console.
+Critical Editor interactions have an automated Chromium smoke suite:
+
+```sh
+npm ci
+npx playwright install chromium
+python3 tools/verify.py --browser
+```
+
+UI changes also require focused browser interaction testing beyond the existing smoke coverage. Verify the affected workspace, autosave, reload behavior, keyboard interaction, and browser console.
 
 For a broad Editor and Runtime exercise, create a new disposable Ren'Py project and follow [the integration test unit](INTEGRATION/EDITOR_TEST_UNIT.md):
 

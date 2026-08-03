@@ -8,6 +8,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 RUNTIME = ROOT / "INTEGRATION" / "TestGame" / "FRAMEWORK" / "runtime.rpy"
 EVENT_CONTRACT = "./EDITOR/static/js/core/event_contract.js"
+STATE_RULE_CONTRACT = "./EDITOR/static/js/core/state_rule_contract.js"
 sys.path.insert(0, str(ROOT / "EDITOR"))
 
 import app  # noqa: E402
@@ -16,6 +17,21 @@ import app  # noqa: E402
 def frontend_contract(expression):
     command = (
         f"const contract = require('{EVENT_CONTRACT}');"
+        f"process.stdout.write(JSON.stringify({expression}));"
+    )
+    completed = subprocess.run(
+        ["node", "-e", command],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return json.loads(completed.stdout)
+
+
+def frontend_state_rule_contract(expression):
+    command = (
+        f"const contract = require('{STATE_RULE_CONTRACT}');"
         f"process.stdout.write(JSON.stringify({expression}));"
     )
     completed = subprocess.run(
@@ -78,6 +94,38 @@ class CrossLayerContractAlignmentTest(unittest.TestCase):
             with self.subTest(mode=mode):
                 trigger = examples[mode]
                 self.assertEqual(app.validate_event(event_document(trigger))["Trigger"], trigger)
+
+    def test_condition_registry_matches_editor_schema_and_runtime(self):
+        registry = frontend_state_rule_contract("contract.CONDITION_OPERATORS")
+        runtime_source = RUNTIME.read_text(encoding="utf-8")
+        self.assertEqual({key: list(value) for key, value in app.CONDITION_OPERATORS.items()}, registry)
+
+        samples = {
+            "stat": {"type": "stat", "id": "money", "value": 1},
+            "memory": {"type": "memory", "bank": "memory", "id": "seen"},
+        }
+        for rule_type, operations in registry.items():
+            for operation in operations:
+                with self.subTest(rule_type=rule_type, operation=operation):
+                    rule = {**samples[rule_type], "op": operation}
+                    self.assertEqual(app.validate_condition(rule)["op"], operation)
+                    self.assertIn(f'operation == "{operation}"', runtime_source)
+
+    def test_effect_registry_matches_editor_schema_and_runtime(self):
+        registry = frontend_state_rule_contract("contract.EFFECT_OPERATORS")
+        runtime_source = RUNTIME.read_text(encoding="utf-8")
+        self.assertEqual({key: list(value) for key, value in app.EFFECT_OPERATORS.items()}, registry)
+
+        samples = {
+            "stat": {"type": "stat", "id": "money", "value": 1},
+            "memory": {"type": "memory", "bank": "memory", "id": "seen"},
+        }
+        for rule_type, operations in registry.items():
+            for operation in operations:
+                with self.subTest(rule_type=rule_type, operation=operation):
+                    rule = {**samples[rule_type], "op": operation}
+                    self.assertEqual(app.validate_effect(rule)["op"], operation)
+                    self.assertIn(f'operation == "{operation}"', runtime_source)
 
 
 if __name__ == "__main__":

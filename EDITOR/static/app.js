@@ -27,6 +27,15 @@ const {
   keyboardKeysymFromEvent,
   keyboardTriggerKeysym,
 } = SceneEventContract;
+const {
+  RULE_TYPES,
+  conditionOperators,
+  defaultCondition,
+  defaultEffect,
+  effectOperators,
+  effectUsesId,
+  normalizeRuleType,
+} = SceneStateRuleContract;
 function readEditorSettings() {
   try {
     return normalizeEditorSettings(JSON.parse(localStorage.getItem(SETTINGS_KEY) || "{}"));
@@ -290,24 +299,12 @@ function memoryChoices() {
   return Object.entries(state.memories).map(([id, values]) => ({ id, name: values.Name || id }));
 }
 
-function defaultMemoryCondition() {
-  const bank = memoryChoices()[0]?.id || "memory";
-  return { type: "memory", bank, id: "新標籤", op: "has" };
-}
-
-function defaultMemoryEffect() {
-  const bank = memoryChoices()[0]?.id || "memory";
-  return { type: "memory", bank, id: "新標籤", op: "add" };
-}
-
-function defaultStatCondition() {
-  const id = statChoices()[0]?.id;
-  return id ? { type: "stat", id, op: ">=", value: 0 } : null;
-}
-
-function defaultStatEffect() {
-  const id = statChoices()[0]?.id;
-  return id ? { type: "stat", id, op: "+", value: 0 } : null;
+function newStateRule(kind, type) {
+  const settings = {
+    statId: statChoices()[0]?.id,
+    memoryBank: memoryChoices()[0]?.id || "memory",
+  };
+  return kind === "condition" ? defaultCondition(type, settings) : defaultEffect(type, settings);
 }
 
 function warnMissingStat(kind) {
@@ -1022,18 +1019,18 @@ function renderEventsPanel({ preserveView = false } = {}) {
 function conditionRowsHtml(conditions) {
   if (!conditions.length) return `<div class="row-empty">沒有條件，這個 Event 會作為無條件候選。</div>`;
   return conditions.map((condition, index) => {
-    const type = condition.type === "tag" ? "memory" : (condition.type || "stat");
+    const type = normalizeRuleType(condition.type);
     const isMemory = type === "memory";
     return `
       <div class="repeat-row condition-row" data-index="${index}" data-condition-type="${escapeHtml(type)}">
-        <label class="field"><span class="visually-hidden">類型</span><select name="conditionType" aria-label="條件類型">${optionTags(["stat", "memory"], type, (value) => value === "memory" ? "memory" : value)}</select></label>
+        <label class="field"><span class="visually-hidden">類型</span><select name="conditionType" aria-label="條件類型">${optionTags(RULE_TYPES, type)}</select></label>
         ${isMemory ? `
           <label class="field"><span class="visually-hidden">記憶庫</span><select name="conditionBank" aria-label="記憶庫">${namedOptionTags(memoryChoices(), condition.bank || "memory")}</select></label>
           <label class="field"><span class="visually-hidden">記憶標籤</span><input name="conditionId" aria-label="記憶標籤" value="${escapeHtml(condition.id || "")}" placeholder="標籤"></label>
-          <label class="field"><span class="visually-hidden">判斷</span><select name="conditionOp" aria-label="判斷">${optionTags(["has", "not_has"], condition.op)}</select></label>
+          <label class="field"><span class="visually-hidden">判斷</span><select name="conditionOp" aria-label="判斷">${optionTags(conditionOperators(type), condition.op)}</select></label>
         ` : `
           <label class="field"><span class="visually-hidden">Stat</span><select name="conditionId" aria-label="Stat">${namedOptionTags(statChoices(), condition.id)}</select></label>
-          <label class="field"><span class="visually-hidden">判斷</span><select name="conditionOp" aria-label="判斷">${optionTags([">", ">=", "<", "<=", "==", "!="], condition.op)}</select></label>
+          <label class="field"><span class="visually-hidden">判斷</span><select name="conditionOp" aria-label="判斷">${optionTags(conditionOperators(type), condition.op)}</select></label>
           <label class="field"><span class="visually-hidden">值</span><input name="conditionValue" aria-label="值" type="number" step="any" value="${escapeHtml(condition.value ?? 0)}"></label>
         `}
         <button class="row-button" type="button" data-remove-condition="${index}" title="移除條件" aria-label="移除條件">×</button>
@@ -1045,18 +1042,18 @@ function conditionRowsHtml(conditions) {
 function effectRowsHtml(effects) {
   if (!effects.length) return `<div class="row-empty">尚未設定 Effect。</div>`;
   return effects.map((effect, index) => {
-    const type = effect.type === "tag" ? "memory" : (effect.type || "stat");
+    const type = normalizeRuleType(effect.type);
     const isStat = type === "stat";
-    const opItems = isStat ? ["set", "+", "-", "*", "/"] : ["add", "remove", "clear"];
+    const opItems = effectOperators(type);
     const valueField = isStat
       ? `<label class="field"><span class="visually-hidden">值</span><input name="effectValue" aria-label="值" type="number" step="any" value="${escapeHtml(effect.value ?? 0)}"></label>`
-      : `<label class="field"><span class="visually-hidden">記憶標籤</span><input name="effectId" aria-label="記憶標籤" value="${escapeHtml(effect.id || "")}" placeholder="${effect.op === "clear" ? "清空整個記憶庫" : "標籤"}" ${effect.op === "clear" ? "disabled" : ""}></label>`;
+      : `<label class="field"><span class="visually-hidden">記憶標籤</span><input name="effectId" aria-label="記憶標籤" value="${escapeHtml(effect.id || "")}" placeholder="${effect.op === "clear" ? "清空整個記憶庫" : "標籤"}" ${effectUsesId(type, effect.op) ? "" : "disabled"}></label>`;
     const resourceField = isStat
       ? `<select name="effectId" aria-label="Stat">${namedOptionTags(statChoices(), effect.id)}</select>`
       : `<select name="effectBank" aria-label="記憶庫">${namedOptionTags(memoryChoices(), effect.bank || "memory")}</select>`;
     return `
       <div class="repeat-row effect-row" data-index="${index}" data-effect-type="${escapeHtml(type)}">
-        <label class="field"><span class="visually-hidden">類型</span><select name="effectType" aria-label="效果類型">${optionTags(["stat", "memory"], type)}</select></label>
+        <label class="field"><span class="visually-hidden">類型</span><select name="effectType" aria-label="效果類型">${optionTags(RULE_TYPES, type)}</select></label>
         <label class="field"><span class="visually-hidden">${isStat ? "Stat" : "記憶庫"}</span>${resourceField}</label>
         <label class="field"><span class="visually-hidden">操作</span><select name="effectOp" aria-label="操作">${optionTags(opItems, effect.op)}</select></label>
         ${valueField}
@@ -1335,7 +1332,7 @@ function bindEventPanel() {
   document.querySelector("#deleteEventButton")?.addEventListener("click", deleteEvent);
   document.querySelector("#addConditionButton")?.addEventListener("click", (event) => {
     event.stopPropagation();
-    const condition = defaultStatCondition() || defaultMemoryCondition();
+    const condition = newStateRule("condition", "stat") || newStateRule("condition", "memory");
     state.eventDraft = readEventForm();
     state.eventDraft.Conditions.push(condition);
     scheduleEventAutosave({ useDraft: true });
@@ -1343,7 +1340,7 @@ function bindEventPanel() {
   });
   document.querySelector("#addEffectButton")?.addEventListener("click", (event) => {
     event.stopPropagation();
-    const effect = defaultStatEffect() || defaultMemoryEffect();
+    const effect = newStateRule("effect", "stat") || newStateRule("effect", "memory");
     state.eventDraft = readEventForm();
     state.eventDraft.Effects.push(effect);
     scheduleEventAutosave({ useDraft: true });
@@ -1467,9 +1464,7 @@ function bindEventPanel() {
     } else if (event.target.name === "conditionType") {
       const row = event.target.closest(".condition-row");
       const index = Number(row.dataset.index);
-      const condition = event.target.value === "memory"
-        ? defaultMemoryCondition()
-        : defaultStatCondition();
+      const condition = newStateRule("condition", event.target.value);
       if (!condition) {
         event.target.value = row.dataset.conditionType;
         state.eventDraft = readEventForm();
@@ -1486,9 +1481,7 @@ function bindEventPanel() {
       const row = event.target.closest(".effect-row");
       const index = Number(row.dataset.index);
       const type = event.target.value;
-      const effect = type === "stat"
-        ? defaultStatEffect()
-        : defaultMemoryEffect();
+      const effect = newStateRule("effect", type);
       if (!effect) {
         event.target.value = row.dataset.effectType;
         state.eventDraft = readEventForm();
