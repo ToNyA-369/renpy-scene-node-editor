@@ -5,125 +5,28 @@ const GRID_VISIBLE_KEY = "scene-node-editor.option-grid-visible";
 const SNAP_ENABLED_KEY = "scene-node-editor.option-snap-enabled";
 const GLOBAL_NODE_ID = "__global__";
 const GLOBAL_NODE_PATH = "@global";
-const DEFAULT_SHORTCUTS = {
-  save: "mod+s",
-  create: "mod+enter",
-  sidebar: "mod+\\",
-  cyclePrevious: "mod+shift+left",
-  cycleNext: "mod+shift+right",
-  leftPanel: "mod+[",
-  rightPanel: "mod+]",
-  tabNode: "mod+1",
-  tabEvents: "mod+2",
-  tabOptions: "mod+3",
-  tabContent: "mod+4",
-  tabStats: "mod+5",
-  tabGraph: "mod+6",
-  tabValidation: "mod+7",
-  grid: "g",
-  snap: "s",
-  sections: "mod+.",
-  settings: "mod+,",
-};
-const SHORTCUT_LABELS = {
-  save: "立即儲存",
-  create: "新增目前功能項目",
-  sidebar: "切換節點列表",
-  cyclePrevious: "上一個功能區",
-  cycleNext: "下一個功能區",
-  leftPanel: "展開或收合左側欄位",
-  rightPanel: "展開或收合右側欄位",
-  tabNode: "前往節點",
-  tabEvents: "前往事件",
-  tabOptions: "前往選項",
-  tabContent: "前往演出",
-  tabStats: "前往狀態",
-  tabGraph: "前往關聯圖",
-  tabValidation: "前往檢查",
-  grid: "顯示或隱藏格線",
-  snap: "開啟或關閉吸附",
-  sections: "展開或收合區塊",
-  settings: "開啟編輯器設定",
-};
-const TAB_SHORTCUT_ACTIONS = {
-  tabNode: "node",
-  tabEvents: "events",
-  tabOptions: "options",
-  tabContent: "content",
-  tabStats: "stats",
-  tabGraph: "graph",
-  tabValidation: "validation",
-};
-const TAB_ORDER = ["node", "events", "options", "content", "stats", "graph", "validation"];
-const EVENT_TRIGGER_MODES = [
-  { id: "Auto", name: "Auto" },
-  { id: "Action", name: "Option" },
-  { id: "Keyboard", name: "Keyboard" },
-  { id: "Mouse", name: "Mouse" },
-];
-const AUTO_TRIGGER_CHOICES = [
-  { id: "Auto:Enter", name: "On Enter" },
-  { id: "Auto:Node", name: "On Node" },
-  { id: "Auto:Exit", name: "On Exit" },
-];
-const MOUSE_TRIGGER_CHOICES = [
-  { id: "Mouse:Left", name: "左鍵" },
-  { id: "Mouse:Middle", name: "中鍵" },
-  { id: "Mouse:Right", name: "右鍵" },
-  { id: "Mouse:WheelUp", name: "滾輪向上" },
-  { id: "Mouse:WheelDown", name: "滾輪向下" },
-];
-function normalizeEditorSettings(saved = {}) {
-  const fallback = { version: 8, autosave: true, autosaveDelay: 700, gridSize: 24, shortcuts: { ...DEFAULT_SHORTCUTS } };
-  try {
-    if (!saved || typeof saved !== "object" || Array.isArray(saved)) return fallback;
-    const savedShortcuts = { ...(saved.shortcuts || {}) };
-    const savedVersion = numberValue(saved.version, 1);
-    if (savedVersion < 2) {
-      if (savedShortcuts.optionElements === "mod+1") savedShortcuts.optionElements = "alt+1";
-      if (savedShortcuts.optionInspector === "mod+2") savedShortcuts.optionInspector = "alt+2";
-    }
-    if (savedVersion < 3 && savedShortcuts.sidebar === "mod+b") {
-      savedShortcuts.sidebar = DEFAULT_SHORTCUTS.sidebar;
-    }
-    if (savedVersion < 4) {
-      if (savedShortcuts.sidebar === "mod+|") savedShortcuts.sidebar = DEFAULT_SHORTCUTS.sidebar;
-      if (savedShortcuts.cyclePrevious === "mod+alt+left") savedShortcuts.cyclePrevious = DEFAULT_SHORTCUTS.cyclePrevious;
-      if (savedShortcuts.cycleNext === "mod+alt+right") savedShortcuts.cycleNext = DEFAULT_SHORTCUTS.cycleNext;
-    }
-    if (savedVersion < 5) {
-      delete savedShortcuts.tabScreens;
-      if (savedShortcuts.tabStats === "mod+6") savedShortcuts.tabStats = DEFAULT_SHORTCUTS.tabStats;
-      if (savedShortcuts.tabValidation === "mod+7") savedShortcuts.tabValidation = DEFAULT_SHORTCUTS.tabValidation;
-    }
-    if (savedVersion < 6 && savedShortcuts.tabValidation === "mod+6") {
-      savedShortcuts.tabValidation = DEFAULT_SHORTCUTS.tabValidation;
-    }
-    if (savedVersion < 7) {
-      delete savedShortcuts.optionElements;
-      delete savedShortcuts.optionInspector;
-    }
-    if (savedVersion < 8) {
-      delete savedShortcuts.optionFormMode;
-      delete savedShortcuts.optionCanvasMode;
-    }
-    const shortcuts = { ...DEFAULT_SHORTCUTS, ...savedShortcuts };
-    [...Object.keys(TAB_SHORTCUT_ACTIONS), "create"].forEach((action) => {
-      const conflictsWithSaved = Object.entries(savedShortcuts).some(([savedAction, value]) => savedAction !== action && value === shortcuts[action]);
-      if (!Object.hasOwn(savedShortcuts, action) && conflictsWithSaved) shortcuts[action] = "";
-    });
-    return {
-      version: 8,
-      autosave: saved.autosave !== false,
-      autosaveDelay: Math.max(200, numberValue(saved.autosaveDelay, fallback.autosaveDelay)),
-      gridSize: Math.max(4, Math.min(160, numberValue(saved.gridSize, fallback.gridSize))),
-      shortcuts,
-    };
-  } catch (_error) {
-    return fallback;
-  }
-}
-
+const {
+  DEFAULT_SHORTCUTS,
+  SHORTCUT_LABELS,
+  TAB_ORDER,
+  TAB_SHORTCUT_ACTIONS,
+  normalizeEditorSettings,
+} = SceneEditorSettings;
+const {
+  AUTO_TRIGGER_CHOICES,
+  END_UP_CHOICES,
+  EVENT_TRIGGER_MODES,
+  MOUSE_TRIGGER_CHOICES,
+  actionTriggerName,
+  actionTriggerValue,
+  endUpUsesNextNode,
+  eventTriggerDisplayName,
+  eventTriggerMode,
+  isLifecycleTrigger,
+  keyboardKeysymDisplay,
+  keyboardKeysymFromEvent,
+  keyboardTriggerKeysym,
+} = SceneEventContract;
 function readEditorSettings() {
   try {
     return normalizeEditorSettings(JSON.parse(localStorage.getItem(SETTINGS_KEY) || "{}"));
@@ -170,13 +73,6 @@ const state = {
   editorSettings: readEditorSettings(),
 };
 
-let autosaveTimer = null;
-let pendingAutosave = null;
-let failedAutosave = null;
-let autosaveRetryTimer = null;
-let autosaveQueuedCount = 0;
-let autosaveInFlight = Promise.resolve(true);
-let autosaveRevision = 0;
 let editorSettingsSave = Promise.resolve(true);
 let editorSettingsSaveFailureNotified = false;
 let workspaceAnimationTimer = null;
@@ -249,6 +145,15 @@ function setSaveState(message, kind = "", detail = "") {
   dom.saveState.title = detail;
 }
 
+const autosaveCoordinator = SceneAutosave.createAutosaveCoordinator({
+  isEnabled: () => state.editorSettings.autosave,
+  getDelay: () => state.editorSettings.autosaveDelay,
+  setTimer: (callback, delay) => window.setTimeout(callback, delay),
+  clearTimer: (timer) => window.clearTimeout(timer),
+  onState: setSaveState,
+  onFailure: (label, error) => toast(`${label}：${error.message}`, "error"),
+});
+
 function writeEditorSettings({ notifyFailure = true } = {}) {
   const snapshot = clone(state.editorSettings);
   localStorage.setItem(SETTINGS_KEY, JSON.stringify(snapshot));
@@ -280,112 +185,24 @@ async function loadEditorSettings() {
   localStorage.setItem(SETTINGS_KEY, JSON.stringify(state.editorSettings));
 }
 
-function discardPendingAutosave() {
-  autosaveRevision += 1;
-  if (autosaveTimer) window.clearTimeout(autosaveTimer);
-  if (autosaveRetryTimer) window.clearTimeout(autosaveRetryTimer);
-  autosaveTimer = null;
-  autosaveRetryTimer = null;
-  pendingAutosave = null;
-  failedAutosave = null;
-}
-
 async function cancelAutosaveAndWait() {
-  discardPendingAutosave();
-  await autosaveInFlight;
-  discardPendingAutosave();
+  await autosaveCoordinator.cancelAndWait();
 }
 
 function scheduleAutosave(label, persist) {
-  pendingAutosave = { label, persist, revision: ++autosaveRevision };
-  failedAutosave = null;
-  if (autosaveTimer) window.clearTimeout(autosaveTimer);
-  if (autosaveRetryTimer) window.clearTimeout(autosaveRetryTimer);
-  autosaveRetryTimer = null;
-  setSaveState(state.editorSettings.autosave ? "等待自動儲存" : "尚未儲存", "saving");
-  if (!state.editorSettings.autosave) return;
-  autosaveTimer = window.setTimeout(runPendingAutosave, state.editorSettings.autosaveDelay);
+  return autosaveCoordinator.schedule(label, persist);
 }
 
 function isCurrentAutosaveTask(task) {
-  return Boolean(task && task.revision === autosaveRevision);
+  return autosaveCoordinator.isCurrent(task);
 }
 
 function retryFailedAutosave() {
-  if (!state.editorSettings.autosave || pendingAutosave || !failedAutosave?.retryable) return;
-  const task = failedAutosave;
-  failedAutosave = null;
-  pendingAutosave = task;
-  setSaveState("重新連線中", "saving");
-  runPendingAutosave();
-}
-
-function scheduleAutosaveRetry() {
-  if (autosaveRetryTimer) window.clearTimeout(autosaveRetryTimer);
-  autosaveRetryTimer = window.setTimeout(() => {
-    autosaveRetryTimer = null;
-    retryFailedAutosave();
-  }, 3000);
-}
-
-async function runPendingAutosave() {
-  if (!pendingAutosave || !state.editorSettings.autosave) return true;
-  if (autosaveTimer) window.clearTimeout(autosaveTimer);
-  autosaveTimer = null;
-  const task = pendingAutosave;
-  pendingAutosave = null;
-  setSaveState("自動儲存中", "saving");
-  autosaveQueuedCount += 1;
-  autosaveInFlight = autosaveInFlight.then(async () => {
-    try {
-      await task.persist(task);
-      return true;
-    } catch (error) {
-      if (!isCurrentAutosaveTask(task)) return true;
-      const connectionLost = error.code === "NETWORK_ERROR";
-      task.retryable = connectionLost;
-      if (!pendingAutosave) failedAutosave = task;
-      setSaveState(connectionLost ? "連線中斷・重試中" : "自動儲存失敗", "error", error.message);
-      if (!task.failureNotified) {
-        toast(`${task.label}：${error.message}`, "error");
-        task.failureNotified = true;
-      }
-      if (connectionLost && !pendingAutosave) scheduleAutosaveRetry();
-      return false;
-    } finally {
-      autosaveQueuedCount = Math.max(0, autosaveQueuedCount - 1);
-    }
-  });
-  const succeeded = await autosaveInFlight;
-  if (!isCurrentAutosaveTask(task)) {
-    if (pendingAutosave && state.editorSettings.autosave && !autosaveTimer) {
-      autosaveTimer = window.setTimeout(runPendingAutosave, state.editorSettings.autosaveDelay);
-    }
-    return true;
-  }
-  if (pendingAutosave && state.editorSettings.autosave) {
-    if (autosaveTimer) window.clearTimeout(autosaveTimer);
-    autosaveTimer = window.setTimeout(runPendingAutosave, state.editorSettings.autosaveDelay);
-    setSaveState("等待自動儲存", "saving");
-  } else if (succeeded) {
-    setSaveState("已自動儲存");
-  }
-  return succeeded;
+  return autosaveCoordinator.retry();
 }
 
 async function flushAutosave() {
-  if (!state.editorSettings.autosave) return true;
-  if (!pendingAutosave && failedAutosave?.retryable) {
-    if (autosaveRetryTimer) window.clearTimeout(autosaveRetryTimer);
-    autosaveRetryTimer = null;
-    pendingAutosave = failedAutosave;
-    failedAutosave = null;
-  }
-  if (!pendingAutosave && failedAutosave) return false;
-  while (pendingAutosave) {
-    if (!await runPendingAutosave()) return false;
-  }
-  return Boolean(await autosaveInFlight) && !failedAutosave;
+  return autosaveCoordinator.flush();
 }
 
 function toast(message, kind = "") {
@@ -396,35 +213,7 @@ function toast(message, kind = "") {
   window.setTimeout(() => item.remove(), 3200);
 }
 
-async function api(path, options = {}) {
-  const request = { ...options };
-  request.headers = { "Content-Type": "application/json", ...(options.headers || {}) };
-  if (request.body && typeof request.body !== "string") {
-    request.body = JSON.stringify(request.body);
-  }
-  let response;
-  try {
-    response = await fetch(path, request);
-  } catch (cause) {
-    const error = new Error("無法連線到編輯器伺服器。請保持此頁開啟並重新啟動編輯器。");
-    error.code = "NETWORK_ERROR";
-    error.cause = cause;
-    throw error;
-  }
-  let data = {};
-  try {
-    data = await response.json();
-  } catch (_error) {
-    data = {};
-  }
-  if (!response.ok) {
-    const error = new Error(data.error || `請求失敗 (${response.status})`);
-    error.code = "HTTP_ERROR";
-    error.status = response.status;
-    throw error;
-  }
-  return data;
-}
+const api = SceneEditorApi.createApiClient();
 
 function optionTags(items, current, label = (item) => item, value = (item) => item) {
   return items.map((item) => {
@@ -483,24 +272,6 @@ function canvasBackgroundOptionTags(current = "") {
   return imageOptionTags(current, [{ id: "", name: "None" }]);
 }
 
-function actionTriggerName(trigger) {
-  const value = String(trigger || "").trim();
-  return value.startsWith("Action:") ? value.slice("Action:".length).trim() : value;
-}
-
-function actionTriggerValue(name) {
-  const value = actionTriggerName(name);
-  return value ? `Action:${value}` : "";
-}
-
-function eventTriggerMode(trigger) {
-  const value = String(trigger || "").trim();
-  if (value.startsWith("Auto:")) return "Auto";
-  if (value.startsWith("Keyboard:")) return "Keyboard";
-  if (value.startsWith("Mouse:")) return "Mouse";
-  return "Action";
-}
-
 function isGlobalNode() {
   return Boolean(state.nodeDetail?.isGlobal || state.selectedNodePath === GLOBAL_NODE_PATH);
 }
@@ -509,134 +280,6 @@ function eventTriggerModeChoices() {
   return isGlobalNode()
     ? EVENT_TRIGGER_MODES.filter((item) => item.id !== "Action")
     : EVENT_TRIGGER_MODES;
-}
-
-function isLifecycleTrigger(trigger) {
-  return trigger === "Auto:Enter" || trigger === "Auto:Exit";
-}
-
-function endUpUsesNextNode(endUp) {
-  return endUp === "GOTO" || endUp === "REPLACE";
-}
-
-function keyboardTriggerKeysym(trigger) {
-  const value = String(trigger || "").trim();
-  return value.startsWith("Keyboard:") ? value.slice("Keyboard:".length).trim() : "";
-}
-
-function keyboardKeysymFromEvent(event) {
-  const namedKeys = {
-    Space: "K_SPACE",
-    Enter: "K_RETURN",
-    Escape: "K_ESCAPE",
-    Tab: "K_TAB",
-    Backspace: "K_BACKSPACE",
-    Delete: "K_DELETE",
-    Insert: "K_INSERT",
-    Home: "K_HOME",
-    End: "K_END",
-    PageUp: "K_PAGEUP",
-    PageDown: "K_PAGEDOWN",
-    ArrowLeft: "K_LEFT",
-    ArrowRight: "K_RIGHT",
-    ArrowUp: "K_UP",
-    ArrowDown: "K_DOWN",
-    Minus: "K_MINUS",
-    Equal: "K_EQUALS",
-    BracketLeft: "K_LEFTBRACKET",
-    BracketRight: "K_RIGHTBRACKET",
-    Backslash: "K_BACKSLASH",
-    Semicolon: "K_SEMICOLON",
-    Quote: "K_QUOTE",
-    Backquote: "K_BACKQUOTE",
-    Comma: "K_COMMA",
-    Period: "K_PERIOD",
-    Slash: "K_SLASH",
-    NumpadEnter: "K_KP_ENTER",
-    NumpadAdd: "K_KP_PLUS",
-    NumpadSubtract: "K_KP_MINUS",
-    NumpadMultiply: "K_KP_MULTIPLY",
-    NumpadDivide: "K_KP_DIVIDE",
-    NumpadDecimal: "K_KP_PERIOD",
-  };
-  let key = namedKeys[event.code] || "";
-  const letter = event.code.match(/^Key([A-Z])$/)?.[1];
-  const digit = event.code.match(/^Digit([0-9])$/)?.[1];
-  const numpad = event.code.match(/^Numpad([0-9])$/)?.[1];
-  const functionKey = event.code.match(/^F([1-9]|1[0-2])$/)?.[1];
-  if (letter) key = `K_${letter.toLocaleLowerCase()}`;
-  else if (digit) key = `K_${digit}`;
-  else if (numpad) key = `K_KP${numpad}`;
-  else if (functionKey) key = `K_F${functionKey}`;
-  if (!key) return "";
-
-  const prefixes = [];
-  if (event.metaKey) prefixes.push("meta");
-  if (event.ctrlKey) prefixes.push("ctrl");
-  if (event.altKey) prefixes.push("alt");
-  if (event.shiftKey) prefixes.push("shift");
-  return [...prefixes, key].join("_");
-}
-
-function keyboardKeysymDisplay(keysym) {
-  const isMac = /Mac|iPhone|iPad/.test(navigator.platform);
-  const modifierLabels = {
-    meta: isMac ? "⌘" : "Meta",
-    ctrl: "Ctrl",
-    osctrl: isMac ? "⌥" : "Ctrl",
-    alt: isMac ? "⌥" : "Alt",
-    shift: isMac ? "⇧" : "Shift",
-    noshift: "No Shift",
-    anymod: "Any Modifier",
-    repeat: "Repeat",
-    anyrepeat: "Any Repeat",
-    keydown: "Key Down",
-    keyup: "Key Up",
-    caps: "Caps",
-    nocaps: "No Caps",
-    num: "Num",
-    nonum: "No Num",
-  };
-  const labels = [];
-  let remaining = String(keysym || "");
-  while (remaining.includes("_")) {
-    const modifier = Object.keys(modifierLabels).find((item) => remaining.startsWith(`${item}_`));
-    if (!modifier) break;
-    labels.push(modifierLabels[modifier]);
-    remaining = remaining.slice(modifier.length + 1);
-  }
-  const keyLabels = {
-    K_SPACE: "Space",
-    K_RETURN: "Enter",
-    K_ESCAPE: "Esc",
-    K_TAB: "Tab",
-    K_BACKSPACE: "Backspace",
-    K_DELETE: "Delete",
-    K_INSERT: "Insert",
-    K_HOME: "Home",
-    K_END: "End",
-    K_PAGEUP: "Page Up",
-    K_PAGEDOWN: "Page Down",
-    K_LEFT: "←",
-    K_RIGHT: "→",
-    K_UP: "↑",
-    K_DOWN: "↓",
-  };
-  let keyLabel = keyLabels[remaining];
-  if (!keyLabel && /^K_[a-z]$/.test(remaining)) keyLabel = remaining.slice(2).toLocaleUpperCase();
-  if (!keyLabel && /^K_[0-9]$/.test(remaining)) keyLabel = remaining.slice(2);
-  if (!keyLabel && /^K_F(?:[1-9]|1[0-2])$/.test(remaining)) keyLabel = remaining.slice(2);
-  if (!keyLabel) keyLabel = remaining.replace(/^K_/, "").replaceAll("_", " ");
-  if (keyLabel) labels.push(keyLabel);
-  return labels.join(isMac ? "" : " + ") || "按下鍵盤按鍵";
-}
-
-function eventTriggerDisplayName(trigger) {
-  const mode = eventTriggerMode(trigger);
-  if (mode === "Action") return actionTriggerName(trigger);
-  if (mode === "Keyboard") return keyboardKeysymDisplay(keyboardTriggerKeysym(trigger));
-  if (mode === "Mouse") return MOUSE_TRIGGER_CHOICES.find((item) => item.id === trigger)?.name || trigger;
-  return AUTO_TRIGGER_CHOICES.find((item) => item.id === trigger)?.name || trigger;
 }
 
 function statChoices() {
@@ -699,372 +342,37 @@ function contentLabelFile(label) {
   return (state.nodeDetail?.contents || []).find((file) => (file.labels || []).includes(label)) || null;
 }
 
-function selectedOptionLabel(select) {
-  return select.selectedOptions?.[0]?.textContent?.trim()
-    || select.options?.[select.selectedIndex]?.textContent?.trim()
-    || "尚未選擇";
-}
-
-const SUBMENU_GAP = 14;
-const SUBMENU_CLOSE_DELAY = 180;
-const SELECT_MENU_WIDTH = 240;
-const submenuCloseTimers = new WeakMap();
-
-function clearSubmenuClose(branch) {
-  const timer = submenuCloseTimers.get(branch);
-  if (timer) window.clearTimeout(timer);
-  submenuCloseTimers.delete(branch);
-}
-
-function closeSubmenuTree(branch) {
-  if (!branch) return;
-  [branch, ...branch.querySelectorAll(".select-choice-branch, .content-file-branch")].forEach((item) => {
-    clearSubmenuClose(item);
-    item.classList.remove("submenu-open");
-    item.querySelector(":scope > [aria-haspopup='menu']")?.setAttribute("aria-expanded", "false");
-  });
-}
-
-function setSubmenuOpen(branch, opening, position) {
-  if (!branch) return;
-  clearSubmenuClose(branch);
-  if (!opening) {
-    closeSubmenuTree(branch);
-    return;
-  }
-  if (opening) {
-    [...branch.parentElement.children].forEach((sibling) => {
-      if (sibling === branch || !sibling.classList?.contains(branch.classList[0])) return;
-      closeSubmenuTree(sibling);
-    });
-  }
-  branch.classList.add("submenu-open");
-  branch.querySelector(":scope > [aria-haspopup='menu']")?.setAttribute("aria-expanded", "true");
-  position(branch);
-}
-
-function scheduleSubmenuClose(branch) {
-  clearSubmenuClose(branch);
-  submenuCloseTimers.set(branch, window.setTimeout(() => {
-    setSubmenuOpen(branch, false, () => {});
-  }, SUBMENU_CLOSE_DELAY));
-}
-
-function directMenuItems(menu, folderSelector, choiceSelector) {
-  if (!menu) return [];
-  return [...menu.children].map((child) => {
-    if (child.matches?.(choiceSelector)) return child;
-    return child.querySelector?.(`:scope > ${folderSelector}`) || null;
-  }).filter((item) => item && !item.disabled && item.offsetParent !== null);
-}
-
-function focusRelativeMenuItem(active, key, folderSelector, choiceSelector) {
-  const menu = active.closest(".select-choice-menu, .select-choice-submenu, .content-choice-menu, .content-label-submenu");
-  const items = directMenuItems(menu, folderSelector, choiceSelector);
-  const current = items.indexOf(active);
-  if (current < 0 || !items.length) return false;
-  const next = key === "Home" ? 0
-    : key === "End" ? items.length - 1
-      : (current + (key === "ArrowDown" ? 1 : -1) + items.length) % items.length;
-  items[next]?.focus();
-  return true;
-}
+const selectChoicePicker = SceneChoicePicker.createChoicePicker({
+  escapeHtml,
+  generateId,
+  beforeOpen: () => closeContentPickers(),
+});
+const {
+  menuWidth: SELECT_MENU_WIDTH,
+  submenuGap: SUBMENU_GAP,
+} = SceneChoicePicker.LAYOUT;
+const {
+  clearSubmenuClose,
+  directMenuItems,
+  focusRelativeMenuItem,
+  scheduleSubmenuClose,
+  setSubmenuOpen,
+} = selectChoicePicker.hierarchy;
 
 function closeSelectPickers(except = null) {
-  document.querySelectorAll(".select-choice-picker.open").forEach((picker) => {
-    if (picker === except) return;
-    picker.classList.remove("open");
-    picker.querySelector("[data-select-picker-toggle]")?.setAttribute("aria-expanded", "false");
-    picker.querySelectorAll(".select-choice-branch").forEach((branch) => {
-      clearSubmenuClose(branch);
-      branch.classList.remove("submenu-open");
-      branch.querySelector(":scope > [data-select-folder-toggle]")?.setAttribute("aria-expanded", "false");
-    });
-  });
-}
-
-function populateSelectMenu(select, picker) {
-  const menu = picker.querySelector(".select-choice-menu");
-  if (!menu) return;
-  menu.replaceChildren();
-  const appendOption = (option, parent = menu) => {
-    if (option.hidden) return;
-    const choice = document.createElement("button");
-    choice.type = "button";
-    choice.className = "select-choice-option";
-    choice.dataset.selectValue = option.value;
-    choice.textContent = option.textContent;
-    choice.disabled = option.disabled;
-    choice.setAttribute("role", "option");
-    choice.setAttribute("aria-selected", String(option.selected));
-    parent.append(choice);
-  };
-  const flatOptions = [...select.options];
-  if (flatOptions.some((option) => option.dataset.pickerPath)) {
-    const root = { folders: new Map(), options: [] };
-    flatOptions.filter((option) => !option.dataset.pickerPath).forEach((option) => appendOption(option));
-    flatOptions.filter((option) => option.dataset.pickerPath).forEach((option) => {
-      const parts = option.dataset.pickerPath.split("/").filter(Boolean);
-      let branch = root;
-      parts.slice(0, -1).forEach((part) => {
-        if (!branch.folders.has(part)) branch.folders.set(part, { folders: new Map(), options: [] });
-        branch = branch.folders.get(part);
-      });
-      branch.options.push(option);
-    });
-    const appendBranch = (name, branch, parent) => {
-      const wrapper = document.createElement("div");
-      wrapper.className = "select-choice-branch";
-      const folder = document.createElement("button");
-      folder.type = "button";
-      folder.className = "select-choice-folder";
-      folder.dataset.selectFolderToggle = "";
-      folder.setAttribute("aria-haspopup", "menu");
-      folder.setAttribute("aria-expanded", "false");
-      folder.innerHTML = `<span>${escapeHtml(name)}</span><i aria-hidden="true">›</i>`;
-      const submenu = document.createElement("div");
-      submenu.className = "select-choice-submenu";
-      submenu.setAttribute("role", "menu");
-      submenu.setAttribute("aria-label", name);
-      branch.folders.forEach((child, childName) => appendBranch(childName, child, submenu));
-      branch.options.forEach((option) => appendOption(option, submenu));
-      wrapper.append(folder, submenu);
-      parent.append(wrapper);
-    };
-    root.folders.forEach((branch, name) => appendBranch(name, branch, menu));
-    root.options.forEach((option) => appendOption(option));
-    return;
-  }
-  [...select.children].forEach((child) => {
-    if (child.tagName === "OPTGROUP") {
-      const heading = document.createElement("div");
-      heading.className = "select-choice-group";
-      heading.textContent = child.label;
-      menu.append(heading);
-      [...child.children].forEach(appendOption);
-    } else if (child.tagName === "OPTION") {
-      appendOption(child);
-    }
-  });
-}
-
-function positionSelectSubmenu(branch) {
-  const trigger = branch.querySelector(":scope > .select-choice-folder");
-  const submenu = branch.querySelector(":scope > .select-choice-submenu");
-  if (!trigger || !submenu) return;
-  const rect = trigger.getBoundingClientRect();
-  const rootMenu = branch.closest(".select-choice-menu");
-  if (!rootMenu) return;
-  const rootRect = rootMenu.getBoundingClientRect();
-  const edge = 12;
-  const gap = SUBMENU_GAP;
-  const width = Math.min(SELECT_MENU_WIDTH, window.innerWidth - edge * 2);
-  const height = Math.min(submenu.scrollHeight, 320);
-  let depth = 1;
-  for (let parent = branch.parentElement; parent && parent !== rootMenu; parent = parent.parentElement) {
-    if (parent.classList.contains("select-choice-submenu")) depth += 1;
-  }
-  const opensLeft = rootMenu.dataset.submenuDirection === "left";
-  const requestedLeft = opensLeft
-    ? rootRect.left - depth * (width + gap)
-    : rootRect.left + depth * (width + gap);
-  submenu.classList.toggle("opens-left", opensLeft);
-  submenu.style.width = `${width}px`;
-  submenu.style.left = `${Math.max(edge, Math.min(requestedLeft, window.innerWidth - width - edge))}px`;
-  submenu.style.top = `${Math.max(edge, Math.min(rect.top - 7, window.innerHeight - height - edge))}px`;
-  submenu.style.zIndex = String(310 + depth);
+  selectChoicePicker.close(except);
 }
 
 function syncSelectPicker(select) {
-  const picker = select.closest(".select-choice-picker");
-  if (!picker) return;
-  const trigger = picker.querySelector("[data-select-picker-toggle]");
-  const label = trigger?.querySelector("strong");
-  if (label) label.textContent = selectedOptionLabel(select);
-  if (trigger) trigger.disabled = select.disabled;
-  populateSelectMenu(select, picker);
-}
-
-function positionSelectMenu(picker) {
-  const trigger = picker.querySelector("[data-select-picker-toggle]");
-  const menu = picker.querySelector(".select-choice-menu");
-  if (!trigger || !menu) return;
-  const rect = trigger.getBoundingClientRect();
-  const edge = 12;
-  const width = Math.min(SELECT_MENU_WIDTH, window.innerWidth - edge * 2);
-  const maximumDepth = (container) => {
-    let depth = 0;
-    container.querySelectorAll(":scope > .select-choice-branch").forEach((branch) => {
-      const submenu = branch.querySelector(":scope > .select-choice-submenu");
-      if (submenu) depth = Math.max(depth, 1 + maximumDepth(submenu));
-    });
-    return depth;
-  };
-  const depth = maximumDepth(menu);
-  const pitch = width + SUBMENU_GAP;
-  const totalWidth = width + depth * pitch;
-  const naturalRightLeft = Math.max(edge, Math.min(rect.left, window.innerWidth - width - edge));
-  const naturalLeftLeft = Math.max(edge, Math.min(rect.right - width, window.innerWidth - width - edge));
-  const rightFits = naturalRightLeft + totalWidth <= window.innerWidth - edge;
-  const leftFits = naturalLeftLeft - depth * pitch >= edge;
-  const rightSpace = window.innerWidth - naturalRightLeft;
-  const leftSpace = naturalLeftLeft + width;
-  const opensLeft = !rightFits && (leftFits || leftSpace > rightSpace);
-  menu.dataset.submenuDirection = opensLeft ? "left" : "right";
-  let left = opensLeft ? naturalLeftLeft : naturalRightLeft;
-  if (totalWidth <= window.innerWidth - edge * 2) {
-    left = opensLeft
-      ? Math.max(left, edge + depth * pitch)
-      : Math.min(left, window.innerWidth - edge - totalWidth);
-  }
-  menu.style.width = `${width}px`;
-  menu.style.left = `${Math.max(edge, Math.min(left, window.innerWidth - width - edge))}px`;
-  menu.style.top = `${rect.bottom + 7}px`;
-  const height = Math.min(menu.scrollHeight, 320);
-  if (rect.bottom + 7 + height > window.innerHeight - edge && rect.top > height + edge) {
-    menu.style.top = `${rect.top - height - 7}px`;
-  }
-}
-
-function enhanceSelect(select) {
-  if (!(select instanceof HTMLSelectElement) || select.multiple || select.dataset.selectEnhanced) return;
-  select.dataset.selectEnhanced = "true";
-  const picker = document.createElement("div");
-  picker.className = "select-choice-picker";
-  const menuId = generateId("select_menu");
-  const fieldLabel = select.closest("label")?.querySelector("span")?.textContent?.trim();
-  const settingLabel = select.closest(".setting-row")?.querySelector("strong")?.textContent?.trim();
-  const label = select.getAttribute("aria-label") || select.title || settingLabel || fieldLabel || "選擇項目";
-  const trigger = document.createElement("button");
-  trigger.type = "button";
-  trigger.className = "content-choice-trigger select-choice-trigger";
-  trigger.dataset.selectPickerToggle = "";
-  trigger.setAttribute("aria-label", label);
-  trigger.setAttribute("aria-haspopup", "listbox");
-  trigger.setAttribute("aria-expanded", "false");
-  trigger.setAttribute("aria-controls", menuId);
-  trigger.innerHTML = `<span><strong></strong></span><i aria-hidden="true">⌄</i>`;
-  const menu = document.createElement("div");
-  menu.id = menuId;
-  menu.className = "select-choice-menu";
-  menu.setAttribute("role", "listbox");
-  menu.setAttribute("aria-label", label);
-
-  select.before(picker);
-  picker.append(select, trigger, menu);
-  select.classList.add("select-choice-native");
-  select.hidden = true;
-  select.tabIndex = -1;
-  select.setAttribute("aria-hidden", "true");
-  syncSelectPicker(select);
-
-  picker.addEventListener("click", (event) => {
-    const folder = event.target.closest("[data-select-folder-toggle]");
-    if (folder) {
-      const branch = folder.closest(".select-choice-branch");
-      setSubmenuOpen(branch, true, positionSelectSubmenu);
-      event.preventDefault();
-      return;
-    }
-    const choice = event.target.closest("[data-select-value]");
-    if (choice && !choice.disabled) {
-      const changed = select.value !== choice.dataset.selectValue;
-      select.value = choice.dataset.selectValue;
-      syncSelectPicker(select);
-      closeSelectPickers();
-      trigger.focus({ preventScroll: true });
-      if (changed) {
-        select.dispatchEvent(new Event("input", { bubbles: true }));
-        select.dispatchEvent(new Event("change", { bubbles: true }));
-      }
-      event.preventDefault();
-      return;
-    }
-    if (!event.target.closest("[data-select-picker-toggle]")) return;
-    const opening = !picker.classList.contains("open");
-    closeContentPickers();
-    closeSelectPickers(opening ? picker : null);
-    picker.classList.toggle("open", opening);
-    trigger.setAttribute("aria-expanded", String(opening));
-    if (opening) {
-      populateSelectMenu(select, picker);
-      positionSelectMenu(picker);
-    }
-    event.preventDefault();
-  });
-  picker.addEventListener("pointerover", (event) => {
-    let branch = event.target.closest(".select-choice-branch");
-    while (branch && picker.contains(branch)) {
-      clearSubmenuClose(branch);
-      branch = branch.parentElement?.closest(".select-choice-branch");
-    }
-    const folder = event.target.closest("[data-select-folder-toggle]");
-    if (folder) setSubmenuOpen(folder.closest(".select-choice-branch"), true, positionSelectSubmenu);
-  });
-  picker.addEventListener("pointerout", (event) => {
-    const branch = event.target.closest(".select-choice-branch");
-    if (branch && !branch.contains(event.relatedTarget)) scheduleSubmenuClose(branch);
-  });
-  picker.addEventListener("focusin", (event) => {
-    const branch = event.target.closest(".select-choice-branch");
-    if (branch) setSubmenuOpen(branch, true, positionSelectSubmenu);
-  });
-  picker.addEventListener("keydown", (event) => {
-    const folder = event.target.closest("[data-select-folder-toggle]");
-    if (folder && ["Enter", " ", "ArrowRight"].includes(event.key)) {
-      const branch = folder.closest(".select-choice-branch");
-      setSubmenuOpen(branch, true, positionSelectSubmenu);
-      directMenuItems(
-        branch.querySelector(":scope > .select-choice-submenu"),
-        "[data-select-folder-toggle]",
-        "[data-select-value]",
-      )[0]?.focus();
-      event.preventDefault();
-      return;
-    }
-    if (event.key === "ArrowLeft" && event.target.closest(".select-choice-submenu")) {
-      const branch = event.target.closest(".select-choice-submenu").parentElement;
-      setSubmenuOpen(branch, false, positionSelectSubmenu);
-      branch.querySelector(":scope > [data-select-folder-toggle]")?.focus();
-      event.preventDefault();
-      return;
-    }
-    if (event.target === trigger && ["ArrowDown", "ArrowUp"].includes(event.key)) {
-      if (!picker.classList.contains("open")) trigger.click();
-      const options = directMenuItems(menu, "[data-select-folder-toggle]", "[data-select-value]");
-      const selected = options.find((option) => option.getAttribute("aria-selected") === "true");
-      (selected || options[event.key === "ArrowDown" ? 0 : options.length - 1])?.focus();
-      event.preventDefault();
-      return;
-    }
-    const choice = event.target.closest("[data-select-value]");
-    if ((folder || choice) && ["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) {
-      focusRelativeMenuItem(event.target, event.key, "[data-select-folder-toggle]", "[data-select-value]");
-      event.preventDefault();
-    } else if (choice && ["Enter", " "].includes(event.key)) {
-      document.activeElement.click();
-      event.preventDefault();
-    } else if (event.key === "Escape") {
-      closeSelectPickers();
-      trigger.focus({ preventScroll: true });
-      event.preventDefault();
-    }
-  });
-  select.addEventListener("change", () => syncSelectPicker(select));
+  selectChoicePicker.sync(select);
 }
 
 function enhanceSelects(root = document) {
-  const selects = root.matches?.("select") ? [root] : [...(root.querySelectorAll?.("select") || [])];
-  selects.forEach(enhanceSelect);
+  selectChoicePicker.enhanceAll(root);
 }
 
 function observeSelects() {
-  const observer = new MutationObserver((records) => {
-    records.forEach((record) => record.addedNodes.forEach((node) => {
-      if (node.nodeType === Node.ELEMENT_NODE) enhanceSelects(node);
-    }));
-  });
-  observer.observe(document.body, { childList: true, subtree: true });
+  return selectChoicePicker.observe();
 }
 
 function contentPickerHtml(label, index) {
@@ -1541,8 +849,7 @@ function scheduleNodeAutosave() {
 async function saveNode(event) {
   event.preventDefault();
   const snapshot = readNodeForm(event.currentTarget);
-  discardPendingAutosave();
-  await autosaveInFlight;
+  await cancelAutosaveAndWait();
   setSaveState("儲存中", "saving");
   try {
     await persistNodeSnapshot(snapshot);
@@ -1862,7 +1169,7 @@ function eventEditorHtml(event) {
         </summary>
         <div class="collapsible-section-body">
           <div class="end-up-control">
-            <label class="field"><span class="visually-hidden">End up</span><select name="EndUp" aria-label="End up">${optionTags(["REDO", "GOTO", "REPLACE", "EXIT"], event["End up"] || "REDO")}</select></label>
+            <label class="field"><span class="visually-hidden">End up</span><select name="EndUp" aria-label="End up">${optionTags(END_UP_CHOICES, event["End up"] || "REDO")}</select></label>
           </div>
           <div id="nextNodeBlock">${endUpUsesNextNode(event["End up"]) ? choiceBlockHtml(event["Next Node"], "next") : ""}</div>
         </div>
@@ -2268,8 +1575,7 @@ async function saveEvent(event) {
   event.preventDefault();
   const draft = readEventForm();
   const snapshot = { node: state.selectedNodePath, originalId: state.eventOriginalId, event: clone(draft) };
-  discardPendingAutosave();
-  await autosaveInFlight;
+  await cancelAutosaveAndWait();
   setSaveState("儲存中", "saving");
   try {
     const saved = await persistEventSnapshot(snapshot);
@@ -3458,8 +2764,7 @@ function scheduleOptionsAutosave() {
 
 async function saveOptions() {
   const snapshot = optionsSnapshot();
-  discardPendingAutosave();
-  await autosaveInFlight;
+  await cancelAutosaveAndWait();
   setSaveState("儲存中", "saving");
   try {
     const saved = await persistOptionsSnapshot(snapshot);
@@ -3572,8 +2877,7 @@ function scheduleContentAutosave() {
 
 async function saveContent() {
   const snapshot = contentSnapshot();
-  discardPendingAutosave();
-  await autosaveInFlight;
+  await cancelAutosaveAndWait();
   setSaveState("儲存中", "saving");
   try {
     const saved = await persistContentSnapshot(snapshot);
@@ -3764,8 +3068,7 @@ function scheduleStatsAutosave() {
 async function saveStats() {
   const stats = readStatsForm();
   const memories = readMemoriesForm();
-  discardPendingAutosave();
-  await autosaveInFlight;
+  await cancelAutosaveAndWait();
   setSaveState("儲存中", "saving");
   try {
     await persistStatsSnapshot(stats, memories);
@@ -3775,131 +3078,6 @@ async function saveStats() {
     setSaveState("儲存失敗", "error");
     toast(error.message, "error");
   }
-}
-
-function graphRelationships(nodes) {
-  const nodeIds = new Set(nodes.map((node) => String(node.id)));
-  const grouped = new Map();
-  for (const edge of state.graph?.edges || []) {
-    const source = String(edge.source || "");
-    const target = String(edge.target || "");
-    const endUp = edge.endUp === "REPLACE" ? "REPLACE" : "GOTO";
-    const scope = edge.scope === "global" ? "global" : "node";
-    if (!nodeIds.has(source) || !nodeIds.has(target)) continue;
-    const key = `${source}\u0000${target}\u0000${endUp}`;
-    if (!grouped.has(key)) grouped.set(key, { source, target, endUp, scope, events: [] });
-    grouped.get(key).events.push(edge);
-  }
-  const directRelationships = [...grouped.values()];
-  const gotoParents = new Map();
-  directRelationships.filter((relationship) => relationship.endUp === "GOTO" && relationship.scope !== "global").forEach((relationship) => {
-    if (!gotoParents.has(relationship.target)) gotoParents.set(relationship.target, new Set());
-    gotoParents.get(relationship.target).add(relationship.source);
-  });
-  directRelationships.filter((relationship) => relationship.endUp === "REPLACE").forEach((relationship) => {
-    for (const parent of gotoParents.get(relationship.source) || []) {
-      const key = `${parent}\u0000${relationship.target}\u0000MANAGEMENT`;
-      if (!grouped.has(key)) {
-        grouped.set(key, {
-          source: parent,
-          target: relationship.target,
-          endUp: "MANAGEMENT",
-          scope: "node",
-          events: [],
-        });
-      }
-      relationship.events.forEach((event) => {
-        grouped.get(key).events.push({ ...event, replacedNode: relationship.source });
-      });
-    }
-  });
-  return [...grouped.values()];
-}
-
-function buildGraphLayout(nodes, relationships) {
-  const nodeWidth = 190;
-  const nodeHeight = 72;
-  const horizontalGap = 130;
-  const verticalGap = 46;
-  const nodeById = new Map(nodes.map((node) => [String(node.id), node]));
-  const adjacency = new Map(nodes.map((node) => [String(node.id), []]));
-  const indegree = new Map(nodes.map((node) => [String(node.id), 0]));
-  relationships.forEach((edge) => {
-    adjacency.get(edge.source)?.push(edge.target);
-    indegree.set(edge.target, (indegree.get(edge.target) || 0) + 1);
-  });
-
-  const levels = new Map();
-  const starts = [];
-  if (state.rootNodeId && nodeById.has(String(state.rootNodeId))) starts.push(String(state.rootNodeId));
-  [...nodes]
-    .sort((left, right) => String(left.name || left.id).localeCompare(String(right.name || right.id), "zh-Hant"))
-    .forEach((node) => {
-      const id = String(node.id);
-      if ((indegree.get(id) || 0) === 0 && !starts.includes(id)) starts.push(id);
-    });
-
-  const visitFrom = (start, baseLevel = 0) => {
-    if (!levels.has(start)) levels.set(start, baseLevel);
-    const queue = [start];
-    while (queue.length) {
-      const source = queue.shift();
-      const nextLevel = (levels.get(source) || 0) + 1;
-      for (const target of adjacency.get(source) || []) {
-        if (levels.has(target)) continue;
-        levels.set(target, nextLevel);
-        queue.push(target);
-      }
-    }
-  };
-  starts.forEach((start) => visitFrom(start));
-  nodes.forEach((node) => {
-    const id = String(node.id);
-    if (!levels.has(id)) visitFrom(id);
-  });
-
-  const grouped = new Map();
-  nodes.forEach((node) => {
-    const level = levels.get(String(node.id)) || 0;
-    if (!grouped.has(level)) grouped.set(level, []);
-    grouped.get(level).push(node);
-  });
-  grouped.forEach((items) => items.sort((left, right) => String(left.name || left.id).localeCompare(String(right.name || right.id), "zh-Hant")));
-  const maximumRows = Math.max(1, ...[...grouped.values()].map((items) => items.length));
-  const maximumLevel = Math.max(0, ...grouped.keys());
-  const positions = new Map();
-  grouped.forEach((items, level) => {
-    const offset = (maximumRows - items.length) * (nodeHeight + verticalGap) / 2;
-    items.forEach((node, index) => {
-      positions.set(String(node.id), {
-        x: 70 + level * (nodeWidth + horizontalGap),
-        y: 70 + offset + index * (nodeHeight + verticalGap),
-      });
-    });
-  });
-  return {
-    nodeWidth,
-    nodeHeight,
-    positions,
-    width: Math.max(760, 140 + (maximumLevel + 1) * nodeWidth + maximumLevel * horizontalGap),
-    height: Math.max(480, 140 + maximumRows * nodeHeight + Math.max(0, maximumRows - 1) * verticalGap),
-  };
-}
-
-function graphEdgePath(source, target, layout, index, endUp) {
-  const laneOffset = endUp === "MANAGEMENT" ? 12 : endUp === "REPLACE" ? 5 : -5;
-  const sourceCenterY = source.y + layout.nodeHeight / 2 + laneOffset;
-  const targetCenterY = target.y + layout.nodeHeight / 2 + laneOffset;
-  if (target.x > source.x) {
-    const startX = source.x + layout.nodeWidth;
-    const endX = target.x;
-    const middleX = (startX + endX) / 2;
-    return `M ${startX} ${sourceCenterY} C ${middleX} ${sourceCenterY}, ${middleX} ${targetCenterY}, ${endX} ${targetCenterY}`;
-  }
-  const lift = 58 + (index % 4) * 24;
-  const startX = source.x + layout.nodeWidth * 0.7;
-  const endX = target.x + layout.nodeWidth * 0.3;
-  return `M ${startX} ${source.y + laneOffset} C ${startX + 70} ${source.y - lift + laneOffset}, ${endX - 70} ${target.y - lift + laneOffset}, ${endX} ${target.y + laneOffset}`;
 }
 
 function graphViewBoxValue() {
@@ -4028,12 +3206,12 @@ function bindGraphPanel() {
 
 function renderGraphPanel() {
   const nodes = [state.globalNode, ...(state.nodes || [])].filter(Boolean);
-  const relationships = graphRelationships(nodes);
+  const relationships = SceneGraphModel.relationships(nodes, state.graph?.edges || []);
   const signature = JSON.stringify({
     nodes: nodes.map((node) => [node.id, node.path, node.name]),
     edges: relationships.map((edge) => [edge.source, edge.target, edge.endUp, edge.scope, edge.events.length]),
   });
-  const layout = buildGraphLayout(nodes, relationships);
+  const layout = SceneGraphModel.layout(nodes, relationships, state.rootNodeId);
   if (signature !== state.graphLayoutSignature) {
     state.graphLayoutSignature = signature;
     state.graphViewBox = { x: 0, y: 0, width: layout.width, height: layout.height };
@@ -4054,7 +3232,7 @@ function renderGraphPanel() {
     const marker = relationship.endUp === "MANAGEMENT" ? "Management" : "Goto";
     return `
       <g class="graph-edge is-${relationship.endUp.toLocaleLowerCase()} ${relationship.scope === "global" ? "is-global" : ""} ${selected ? "is-related" : ""}" data-end-up="${relationship.endUp}" data-scope="${relationship.scope}">
-        <path d="${graphEdgePath(source, target, layout, index, relationship.endUp)}" marker-end="url(#graphArrow${marker})"><title>${escapeHtml(descriptions.join("\n"))}</title></path>
+        <path d="${SceneGraphModel.edgePath(source, target, layout, index, relationship.endUp)}" marker-end="url(#graphArrow${marker})"><title>${escapeHtml(descriptions.join("\n"))}</title></path>
         ${relationship.events.length > 1 ? `<text x="${(source.x + target.x + layout.nodeWidth) / 2}" y="${(source.y + target.y + layout.nodeHeight) / 2 - 8}">×${relationship.events.length}</text>` : ""}
       </g>
     `;
@@ -4506,7 +3684,7 @@ function bindGlobalEvents() {
   dom.autosaveEnabled.addEventListener("change", async (event) => {
     state.editorSettings.autosave = event.target.checked;
     writeEditorSettings();
-    if (state.editorSettings.autosave && pendingAutosave) await runPendingAutosave();
+    await autosaveCoordinator.runPendingIfEnabled();
   });
   dom.autosaveDelay.addEventListener("change", (event) => {
     state.editorSettings.autosaveDelay = numberValue(event.target.value, 700);
@@ -4574,7 +3752,7 @@ function bindGlobalEvents() {
       body: settingsBody,
       keepalive: true,
     }).catch(() => {});
-    if (!pendingAutosave && !failedAutosave && autosaveQueuedCount === 0) return;
+    if (!autosaveCoordinator.hasUnsaved()) return;
     event.preventDefault();
     event.returnValue = "";
   });

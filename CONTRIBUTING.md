@@ -15,6 +15,8 @@ tests/                               Python unit and installer tests
 docs/                                User, reference, and AI documentation
 ```
 
+See the maintenance and extension guide in [English](docs/MAINTENANCE.en.md) or [Traditional Chinese](docs/MAINTENANCE.md) for the frontend module map and the required surfaces for new Triggers, End up modes, Conditions, Effects, and workspaces. Repository-wide agent rules live in `AGENTS.md`.
+
 `INTEGRATION/TestGame/FRAMEWORK/` is the canonical runtime source. Do not treat ignored local files under `INTEGRATION/TestGame/` as disposable repository data.
 
 ## Before changing behavior
@@ -26,14 +28,13 @@ docs/                                User, reference, and AI documentation
 
 ## Checks
 
-Run the relevant checks before submitting:
+Run the complete local verification suite before submitting:
 
 ```sh
-node --check EDITOR/static/app.js
-python3 -m py_compile EDITOR/app.py EDITOR/project_bootstrap.py tools/install.py
-git diff --check
-python3 -m unittest discover -s tests -v
+python3 tools/verify.py
 ```
+
+This single command checks Python and JavaScript syntax, runs the isolated autosave race tests and the complete Python unit suite, and checks both working-tree and staged whitespace. Pull requests run the same suite on Linux and macOS through GitHub Actions.
 
 UI changes also require browser interaction testing. Verify the affected workspace, autosave, reload behavior, keyboard interaction, and browser console.
 
