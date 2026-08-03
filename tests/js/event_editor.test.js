@@ -1,0 +1,136 @@
+"use strict";
+
+const assert = require("node:assert/strict");
+const test = require("node:test");
+
+const SceneEventEditor = require("../../EDITOR/static/js/workspaces/event_editor.js");
+const stateRuleContract = require("../../EDITOR/static/js/core/state_rule_contract.js");
+
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;");
+}
+
+function optionTags(items, current) {
+  return items.map((item) => `<option${String(item) === String(current) ? " selected" : ""}>${item}</option>`).join("");
+}
+
+function namedOptionTags(items, current) {
+  return items.map((item) => `<option value="${item.id}"${item.id === current ? " selected" : ""}>${item.name}</option>`).join("");
+}
+
+function createEditor({ stats = [{ id: "money", name: "Money" }] } = {}) {
+  return SceneEventEditor.createEventEditor({
+    contentPickerHtml: (id, index) => `<content-picker data-id="${id}" data-index="${index}"></content-picker>`,
+    escapeHtml,
+    memoryChoices: () => [{ id: "memory", name: "Memory" }, { id: "daily", name: "Daily" }],
+    namedOptionTags,
+    nodeChoices: () => [{ id: "root", name: "Root" }, { id: "branch", name: "Branch" }],
+    numberValue: (value, fallback = 0) => Number.isFinite(Number(value)) ? Number(value) : fallback,
+    optionTags,
+    stateRuleContract,
+    statChoices: () => stats,
+  });
+}
+
+function fakeRow(values) {
+  return {
+    querySelector(selector) {
+      const name = selector.match(/name="([^"]+)"/)?.[1];
+      if (!Object.hasOwn(values, name)) throw new Error(`Unexpected field: ${name}`);
+      return { value: String(values[name]) };
+    },
+  };
+}
+
+test("weighted Event choices preserve string and map representations", () => {
+  const editor = createEditor();
+  const singleForm = {
+    elements: { contentRepresentation: { value: "single" } },
+    querySelectorAll(selector) {
+      if (selector.includes("contentWeightedId")) return [{ value: "intro" }];
+      if (selector.includes("contentWeightedValue")) return [{ value: "1" }];
+      return [];
+    },
+  };
+  const weightedForm = {
+    elements: { nextRepresentation: { value: "weighted" } },
+    querySelectorAll(selector) {
+      if (selector.includes("nextWeightedId")) return [{ value: "root" }, { value: "branch" }];
+      if (selector.includes("nextWeightedValue")) return [{ value: "1" }, { value: "2.5" }];
+      return [];
+    },
+  };
+
+  assert.equal(editor.readChoice(singleForm, "content"), "intro");
+  assert.deepEqual(editor.readChoice(weightedForm, "next"), { root: 1, branch: 2.5 });
+  assert.deepEqual(SceneEventEditor.choiceEntries("intro"), [["intro", 1]]);
+  assert.deepEqual(SceneEventEditor.removeWeightedChoice({ root: 1, branch: 2 }, 0), { branch: 2 });
+  assert.deepEqual(
+    SceneEventEditor.addWeightedChoice("root", [{ id: "root" }, { id: "branch" }], "missingNode"),
+    { root: 1, branch: 1 },
+  );
+});
+
+test("Condition and Effect DOM values map to the stable Event JSON contract", () => {
+  const editor = createEditor();
+  const conditions = [
+    fakeRow({ conditionType: "stat", conditionId: "money", conditionOp: ">=", conditionValue: "12" }),
+    fakeRow({ conditionType: "memory", conditionBank: "daily", conditionId: "visited", conditionOp: "not_has" }),
+  ];
+  const effects = [
+    fakeRow({ effectType: "stat", effectId: "money", effectOp: "+", effectValue: "3" }),
+    fakeRow({ effectType: "memory", effectBank: "daily", effectOp: "clear" }),
+  ];
+  const form = {
+    querySelectorAll(selector) {
+      if (selector === ".condition-row") return conditions;
+      if (selector === ".effect-row") return effects;
+      return [];
+    },
+  };
+
+  assert.deepEqual(editor.readRules(form), {
+    conditions: [
+      { type: "stat", id: "money", op: ">=", value: 12 },
+      { type: "memory", id: "visited", op: "not_has", bank: "daily" },
+    ],
+    effects: [
+      { type: "stat", op: "+", id: "money", value: 3 },
+      { type: "memory", op: "clear", bank: "daily" },
+    ],
+  });
+});
+
+test("rule type changes use centralized defaults and fail safely without a Stat", () => {
+  const draft = { Conditions: [{ type: "memory" }], Effects: [{ type: "stat" }] };
+  const editor = createEditor();
+  assert.equal(editor.replaceRuleType(draft, "condition", 0, "stat"), true);
+  assert.deepEqual(draft.Conditions[0], { type: "stat", id: "money", op: ">=", value: 0 });
+  assert.equal(editor.replaceRuleType(draft, "effect", 0, "memory"), true);
+  assert.deepEqual(draft.Effects[0], { type: "memory", bank: "memory", id: "新標籤", op: "add" });
+
+  const noStatsEditor = createEditor({ stats: [] });
+  assert.equal(noStatsEditor.replaceRuleType(draft, "condition", 0, "stat"), false);
+});
+
+test("Event row rendering keeps current selectors and Memory clear semantics", () => {
+  const editor = createEditor();
+  const conditionHtml = editor.conditionRowsHtml([
+    { type: "memory", bank: "daily", id: "visited", op: "not_has" },
+  ]);
+  const effectHtml = editor.effectRowsHtml([
+    { type: "memory", bank: "daily", op: "clear" },
+  ]);
+  const contentHtml = editor.choiceBlockHtml("intro", "content");
+
+  assert.match(conditionHtml, /data-condition-type="memory"/);
+  assert.match(conditionHtml, /name="conditionBank"/);
+  assert.match(effectHtml, /data-effect-type="memory"/);
+  assert.match(effectHtml, /name="effectId"[^>]*disabled/);
+  assert.match(contentHtml, /name="contentRepresentation"[^>]*value="single"/);
+  assert.match(contentHtml, /<content-picker data-id="intro" data-index="0">/);
+});

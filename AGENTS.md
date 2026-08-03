@@ -27,6 +27,7 @@ EDITOR/static/js/core/editor_settings.js     settings version, tabs, shortcuts, 
 EDITOR/static/js/core/event_contract.js      Trigger and End up UI contract
 EDITOR/static/js/core/state_rule_contract.js Condition and Effect UI contract
 EDITOR/static/js/ui/choice_picker.js          shared hierarchical select interaction
+EDITOR/static/js/workspaces/event_editor.js   Event rules, choices, DOM serialization
 EDITOR/static/js/workspaces/graph_model.js    graph relationships, layout, edge paths
 EDITOR/static/app.js                          state composition, rendering, API orchestration
 ```

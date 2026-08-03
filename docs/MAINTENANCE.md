@@ -15,6 +15,7 @@ js/core/editor_settings.js      分頁、快捷鍵、設定版本與遷移
 js/core/event_contract.js       Trigger／End up 的 Editor 契約
 js/core/state_rule_contract.js  Condition／Effect 的 Editor 契約
 js/ui/choice_picker.js           共用階層下拉選單
+js/workspaces/event_editor.js    Event 規則、權重選擇與 DOM 序列化
 js/workspaces/graph_model.js     關聯圖關係、布局與路徑
 app.js                           狀態組裝、畫面渲染與跨模組協調
 ```
@@ -70,7 +71,9 @@ npx playwright install chromium
 python3 tools/verify.py --browser
 ```
 
-測試只使用 `tools/create_editor_test_unit.py` 建立的系統暫存專案，不得指向正式遊戲或 `INTEGRATION/TestGame` 的創作者資料。目前固定覆蓋 Editor 載入、Content 父子選單、自動儲存與重新載入、關聯圖 GOTO／REPLACE／管理邊，以及瀏覽器 Console 錯誤。CI 在獨立的 Chromium job 執行這套測試。
+測試只使用 `tools/create_editor_test_unit.py` 建立的系統暫存專案，不得指向正式遊戲或 `INTEGRATION/TestGame` 的創作者資料。目前固定覆蓋 Editor 載入、Content 父子選單、Event Condition／Effect 新增刪除、Stat／Memory 類型切換、Memory clear、GOTO／REPLACE 切換、自動儲存與重新載入、關聯圖 GOTO／REPLACE／管理邊，以及瀏覽器 Console 錯誤。CI 在獨立的 Chromium job 執行這套測試。
+
+Event 表單的純資料轉換由 `tests/js/event_editor.test.js` 驗證；Editor API 寫入後再讀回的穩定 JSON 形狀由 `tests/test_event_api_round_trip.py` 保存為 golden cases。調整表單時應先擴充這兩層，再視互動風險更新瀏覽器 smoke test。
 
 ## CSS 規則
 

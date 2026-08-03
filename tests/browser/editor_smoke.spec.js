@@ -43,6 +43,21 @@ async function waitForEditor(url) {
   throw new Error(`Editor did not start: ${lastError?.message || "unknown error"}\n${editorServerOutput}`);
 }
 
+async function waitForEventSave(page, action) {
+  const response = page.waitForResponse((candidate) => (
+    candidate.url().endsWith("/api/events")
+    && candidate.request().method() === "POST"
+    && candidate.ok()
+  ));
+  await action();
+  await response;
+  await expect(page.getByRole("status")).toHaveText("已自動儲存");
+}
+
+async function changeSelect(scope, name, value) {
+  await scope.locator(`select[name="${name}"]`).selectOption(value, { force: true });
+}
+
 test.beforeAll(async () => {
   projectRoot = fs.mkdtempSync(path.join(os.tmpdir(), "scene-node-browser-smoke-"));
   const gameRoot = path.join(projectRoot, "game");
@@ -103,11 +118,55 @@ test("critical editor interactions survive reload without browser errors", async
   await contentFileBranch.click();
   await expect(page.locator('[data-content-label-choice="test_branch_success"]')).toBeVisible();
 
-  await page.getByRole("textbox", { name: "Name" }).fill(SAVED_EVENT_NAME);
-  await expect(page.getByRole("status")).toHaveText("已自動儲存");
+  await page.getByRole("button", { name: "新增條件" }).click();
+  await expect(page.locator(".condition-row")).toHaveCount(1);
+  await changeSelect(page.locator(".condition-row"), "conditionType", "memory");
+  const condition = page.locator('.condition-row[data-condition-type="memory"]');
+  await expect(condition).toBeVisible();
+  await changeSelect(condition, "conditionBank", "test_session");
+  await condition.locator('input[name="conditionId"]').fill("smoke_not_seen");
+  await changeSelect(condition, "conditionOp", "not_has");
+
+  await page.getByRole("button", { name: "新增 Effect" }).click();
+  await expect(page.locator(".effect-row")).toHaveCount(2);
+  await changeSelect(page.locator('.effect-row[data-index="1"]'), "effectType", "memory");
+  const memoryEffect = page.locator('.effect-row[data-index="1"][data-effect-type="memory"]');
+  await expect(memoryEffect).toBeVisible();
+  await changeSelect(memoryEffect, "effectBank", "test_session");
+  await changeSelect(memoryEffect, "effectOp", "clear");
+  await expect(page.locator('.effect-row[data-index="1"] input[name="effectId"]')).toBeDisabled();
+
+  await changeSelect(page, "EndUp", "REPLACE");
+  await expect(page.locator('select[name="EndUp"]')).toHaveValue("REPLACE");
+  await expect(page.locator('select[name="nextWeightedId"]')).toHaveCount(1);
+
+  await waitForEventSave(page, async () => {
+    await page.getByRole("textbox", { name: "Name" }).fill(SAVED_EVENT_NAME);
+  });
   await page.reload();
   await page.getByRole("button", { name: /^事件 / }).click();
   await expect(page.getByRole("button", { name: new RegExp(`^${SAVED_EVENT_NAME} `) })).toBeVisible();
+  await page.getByRole("button", { name: new RegExp(`^${SAVED_EVENT_NAME} `) }).click();
+
+  await expect(page.locator('select[name="EndUp"]')).toHaveValue("REPLACE");
+  await expect(page.locator('.condition-row[data-condition-type="memory"] select[name="conditionBank"]')).toHaveValue("test_session");
+  await expect(page.locator('.condition-row[data-condition-type="memory"] input[name="conditionId"]')).toHaveValue("smoke_not_seen");
+  await expect(page.locator('.condition-row[data-condition-type="memory"] select[name="conditionOp"]')).toHaveValue("not_has");
+  await expect(page.locator('.effect-row[data-index="1"][data-effect-type="memory"] select[name="effectOp"]')).toHaveValue("clear");
+
+  await page.locator('[data-remove-condition="0"]').click();
+  await expect(page.locator(".condition-row")).toHaveCount(0);
+  await page.locator('[data-remove-effect="1"]').click();
+  await expect(page.locator(".effect-row")).toHaveCount(1);
+  await waitForEventSave(page, async () => {
+    await changeSelect(page, "EndUp", "GOTO");
+  });
+  await page.reload();
+  await page.getByRole("button", { name: /^事件 / }).click();
+  await page.getByRole("button", { name: new RegExp(`^${SAVED_EVENT_NAME} `) }).click();
+  await expect(page.locator(".condition-row")).toHaveCount(0);
+  await expect(page.locator(".effect-row")).toHaveCount(1);
+  await expect(page.locator('select[name="EndUp"]')).toHaveValue("GOTO");
 
   await page.getByRole("button", { name: "關聯圖" }).click();
   await expect(page.locator("#projectGraphSvg")).toBeVisible();

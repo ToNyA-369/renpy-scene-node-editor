@@ -25,6 +25,7 @@ class EditorMaintenanceContractTests(unittest.TestCase):
             "/js/core/state_rule_contract.js",
             "/js/core/autosave_coordinator.js",
             "/js/ui/choice_picker.js",
+            "/js/workspaces/event_editor.js",
             "/js/workspaces/graph_model.js",
         ):
             with self.subTest(module=module):
@@ -38,6 +39,9 @@ class EditorMaintenanceContractTests(unittest.TestCase):
             "function populateSelectMenu(",
             "function defaultStatCondition(",
             "function defaultStatEffect(",
+            "function conditionRowsHtml(",
+            "function effectRowsHtml(",
+            "function readWeighted(",
         ):
             with self.subTest(implementation=implementation):
                 self.assertNotIn(implementation, APP_JS)

@@ -15,6 +15,7 @@ js/core/editor_settings.js      tabs, shortcuts, settings versions and migration
 js/core/event_contract.js       Editor Trigger and End up contract
 js/core/state_rule_contract.js  Editor Condition and Effect contract
 js/ui/choice_picker.js           shared hierarchical select interaction
+js/workspaces/event_editor.js    Event rules, weighted choices, and DOM serialization
 js/workspaces/graph_model.js     graph relationships, layout and paths
 app.js                           state composition, rendering and module coordination
 ```
@@ -64,7 +65,9 @@ npx playwright install chromium
 python3 tools/verify.py --browser
 ```
 
-The suite creates only system-temporary projects through `tools/create_editor_test_unit.py`; it must never target a real game or creator data under `INTEGRATION/TestGame`. The fixed coverage currently includes Editor startup, the nested Content picker, autosave plus reload persistence, graph GOTO / REPLACE / management edges, and browser Console errors. CI runs this suite in a separate Chromium job.
+The suite creates only system-temporary projects through `tools/create_editor_test_unit.py`; it must never target a real game or creator data under `INTEGRATION/TestGame`. Fixed coverage includes Editor startup, the nested Content picker, Event Condition / Effect add and remove operations, Stat / Memory type switches, Memory clear, GOTO / REPLACE switches, autosave plus reload persistence, graph GOTO / REPLACE / management edges, and browser Console errors. CI runs this suite in a separate Chromium job.
+
+`tests/js/event_editor.test.js` covers pure Event form transformations. `tests/test_event_api_round_trip.py` preserves stable JSON shapes as golden cases after an Editor API write and read. Extend these two layers before changing the browser smoke suite when form behavior evolves.
 
 ## CSS
 

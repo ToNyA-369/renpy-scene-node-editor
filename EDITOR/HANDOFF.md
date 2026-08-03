@@ -1,6 +1,6 @@
 # Scene Node Editor 專案交接
 
-最後整理日期：2026-08-02
+最後整理日期：2026-08-03
 
 這份文件提供給新開啟的 Codex 對話。開始修改前，先閱讀本文件及「規格來源」列出的文件，不要重新設計已經定案的遊戲架構。
 
@@ -175,7 +175,7 @@ Options 沒有個別顯示／可用條件，也沒有 CUSTOM Screen 來源。所
 - Options 拖曳把手式表單／畫布切換，以及畫布拖曳、縮放、格線與吸附。
 - 自動儲存採遞增 revision；過期請求不得覆蓋較新的草稿、狀態或儲存提示。切換節點、分頁或文件前先完成目前 revision，刪除則先取消並等待舊寫入，避免刪除後的競態與假失敗。
 - 自動儲存排程與競態控制已抽成可獨立測試的 `autosave_coordinator.js`；Node 測試覆蓋連續編輯、切換前 flush、刪除前 cancel-and-wait、網路重試與失敗阻擋。
-- 前端已開始漸進式模組化：API Client、Editor Settings、Event Trigger／End up 契約、共用階層下拉選單及關聯圖純資料模型都有獨立模組與 Node 測試；`app.js` 保留組裝、渲染與跨模組協調。
+- 前端已開始漸進式模組化：API Client、Editor Settings、Event Trigger／End up 契約、Event 規則與權重表單、共用階層下拉選單及關聯圖純資料模型都有獨立模組與 Node 測試；`app.js` 保留組裝、渲染與跨模組協調。
 - Condition／Effect 類型、操作與預設資料形狀集中於 `state_rule_contract.js`；跨層測試會直接比較前端 registry、Editor API registry 與 Runtime 分支，新增操作不得只修改表單。
 - CSS 的設計 token 與瀏覽器基礎規則已分離至 `css/tokens.css`、`css/base.css`；其餘工作區樣式仍在 `styles.css` 漸進整理，不在搬移時改變視覺。
 - 節點刪除引用檢查與 `.scene-node-trash/` 可復原區。
@@ -279,6 +279,9 @@ EDITOR/static/js/core/state_rule_contract.js
 EDITOR/static/js/ui/choice_picker.js
   所有原生 select 的共用階層選單、任意目錄深度、鍵盤操作與定位。
 
+EDITOR/static/js/workspaces/event_editor.js
+  Event Condition／Effect 列、Content／Next Node 權重表單、DOM 回讀與規則型別切換；依賴由 app.js 建立時明確注入。
+
 EDITOR/static/js/workspaces/graph_model.js
   關聯圖 GOTO／REPLACE／管理關係、布局與 SVG edge path 的純資料邏輯。
 
@@ -320,10 +323,13 @@ tests/js/autosave_coordinator.test.js
   自動儲存、切換與刪除競態的獨立 JavaScript 回歸測試。
 
 tests/js/*.test.js
-  API、設定遷移、Event／State Rule 契約、任意深度下拉選單、關聯圖資料模型與自動儲存測試。
+  API、設定遷移、Event 表單序列化、Event／State Rule 契約、任意深度下拉選單、關聯圖資料模型與自動儲存測試。
+
+tests/test_event_api_round_trip.py
+  Editor API 保存與重新讀取 Event 的 golden JSON，涵蓋單一／權重選擇、生命週期欄位省略及 Global Event。
 
 tests/browser/editor_smoke.spec.js
-  以系統暫存綜合測試專案及 Chromium 驗證 Content 父子選單、自動儲存重新載入、關聯圖與 Console；不讀寫本機創作者測試資料。
+  以系統暫存綜合測試專案及 Chromium 驗證 Content 父子選單、Event 規則新增刪除與型別切換、GOTO／REPLACE、自動儲存重新載入、關聯圖與 Console；不讀寫本機創作者測試資料。
 
 tests/test_contract_alignment.py
   以前端 Event registry 為輸入，確認 Editor API Schema 與 Runtime 同步接受 Trigger／End up。
@@ -335,7 +341,7 @@ tools/verify.py
   在 GitHub Pull Request 與 main push 上，以 Linux、macOS 執行統一驗證。
 ```
 
-前端工作區的渲染與 Options 互動仍主要集中在 `app.js`，既有工作區 CSS 也仍集中於 `styles.css`；但共用核心、下拉選單及關聯圖模型已有可測試邊界。新功能先依 `AGENTS.md` 與 `docs/MAINTENANCE.md` 判斷擴充入口，不要把可獨立邏輯重新塞回 composition root。不同對話若同時修改 `app.js`／`styles.css` 仍容易衝突；平行工作應使用獨立 Git worktree，或明確切分不同模組。
+前端工作區的主要頁面渲染與 Options 互動仍集中在 `app.js`，既有工作區 CSS 也仍集中於 `styles.css`；但共用核心、Event 表單資料轉換、下拉選單及關聯圖模型已有可測試邊界。新功能先依 `AGENTS.md` 與 `docs/MAINTENANCE.md` 判斷擴充入口，不要把可獨立邏輯重新塞回 composition root。不同對話若同時修改 `app.js`／`styles.css` 仍容易衝突；平行工作應使用獨立 Git worktree，或明確切分不同模組。
 
 ## 9. 啟動與驗證
 
