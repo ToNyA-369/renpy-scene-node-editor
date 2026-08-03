@@ -10,6 +10,12 @@ Read `EDITOR/HANDOFF.md` and the relevant bilingual Reference/User Guide before 
 - Do not publish, push, tag, release, or run destructive Git operations without explicit authorization.
 - Preserve unrelated worktree changes. Parallel writers must use separate worktrees.
 
+## Agent coordination
+
+The primary agent is the single requirements and integration owner. It may decide autonomously whether a task benefits from sub-agents; the user does not need to authorize delegation for each request. Use sub-agents only when independent workstreams are likely to improve delivery speed, coverage, or review quality. Small fixes, tightly coupled edits, and exploratory UI iteration should normally stay with the primary agent.
+
+The primary agent remains responsible for architecture decisions, user communication, conflict resolution, integration review, complete verification, and final delivery. Sub-agents must not require the user to repeat project context. Any agents writing in parallel must use separate branches and worktrees; multiple agents must never write concurrently in the same working directory.
+
 ## Frontend module boundaries
 
 `EDITOR/static/app.js` is the composition root. New reusable behavior belongs in a focused module and receives dependencies explicitly; do not add another large unrelated block to `app.js`.
