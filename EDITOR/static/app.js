@@ -47,6 +47,7 @@ const state = {
   graphSearch: "",
   images: [],
   audio: [],
+  optionTargets: [],
   stats: {},
   statsDraft: {},
   memories: {},
@@ -294,8 +295,68 @@ function warnMissingStat(kind) {
   toast(`目前專案沒有任何 Stat。請先到「狀態」建立 Stat，再新增 Stat ${kind}。`, "error");
 }
 
+function warnMissingOptionTarget() {
+  toast("目前沒有 CONTROLLED Option。請先在「選項」把 Element 或 Item 的 Availability 設為 CONTROLLED。", "error");
+}
+
 function nodeChoices() {
   return state.nodes.map((node) => ({ id: node.id, name: node.name || node.id }));
+}
+
+function optionEffectTargetValue(target) {
+  const value = {
+    target: target.target,
+    node: target.node,
+    element: target.element,
+  };
+  if (target.target === "item") value.item = target.item;
+  return JSON.stringify(value);
+}
+
+function optionEffectTargetFromEntry(entry) {
+  const target = {
+    target: entry.target,
+    node: entry.nodeId,
+    element: entry.elementId,
+  };
+  if (entry.target === "item") target.item = entry.itemId;
+  return target;
+}
+
+function optionEffectChoices() {
+  return (state.optionTargets || [])
+    .filter((entry) => entry.availability === "CONTROLLED")
+    .map((entry) => {
+      const target = optionEffectTargetFromEntry(entry);
+      const nodeName = String(entry.nodeName || entry.nodeId).replaceAll("/", "／");
+      const elementName = String(entry.elementName || entry.elementId).replaceAll("/", "／");
+      const leaf = entry.target === "item"
+        ? String(entry.itemName || entry.itemId).replaceAll("/", "／")
+        : entry.elementType === "TEXTBOX" ? "整個選項列" : elementName;
+      const pickerPath = entry.target === "item" || entry.elementType === "TEXTBOX"
+        ? `${nodeName}/${elementName}/${leaf}`
+        : `${nodeName}/${leaf}`;
+      return { target, value: optionEffectTargetValue(target), name: leaf, pickerPath };
+    });
+}
+
+function optionEffectOptionTags(effect) {
+  const currentTarget = {
+    target: effect.target || "element",
+    node: effect.node || "",
+    element: effect.element || "",
+  };
+  if (currentTarget.target === "item") currentTarget.item = effect.item || "";
+  const current = optionEffectTargetValue(currentTarget);
+  const choices = optionEffectChoices();
+  const known = choices.some((choice) => choice.value === current);
+  const tags = choices.map((choice) => {
+    const selected = choice.value === current ? " selected" : "";
+    return `<option value="${escapeHtml(choice.value)}" data-picker-path="${escapeHtml(choice.pickerPath)}"${selected}>${escapeHtml(choice.name)}</option>`;
+  }).join("");
+  if (known || !effect.node) return tags;
+  const missingName = [effect.node, effect.element, effect.item].filter(Boolean).join(" / ");
+  return tags + `<option value="${escapeHtml(current)}" selected>${escapeHtml(missingName)}（未找到）</option>`;
 }
 
 function contentChoices() {
@@ -410,6 +471,8 @@ const eventEditor = SceneEventEditor.createEventEditor({
   namedOptionTags,
   nodeChoices,
   numberValue,
+  optionEffectChoices,
+  optionEffectOptionTags,
   optionTags,
   stateRuleContract: SceneStateRuleContract,
   statChoices,
@@ -559,6 +622,7 @@ async function loadProject({ preserveNode = true } = {}) {
     state.graph = data.graph || { edges: [] };
     state.images = data.images || [];
     state.audio = data.audio || [];
+    state.optionTargets = data.optionTargets || [];
     state.stats = data.stats || {};
     state.statsDraft = clone(state.stats);
     state.memories = data.memories || { memory: { Name: "Memory" } };
@@ -1363,7 +1427,8 @@ function bindEventPanel() {
       event.target.value = row.dataset.effectType;
       state.eventDraft = readEventForm();
       if (!replaceRuleType(state.eventDraft, "effect", index, type)) {
-        warnMissingStat("Effect");
+        if (type === "option") warnMissingOptionTarget();
+        else warnMissingStat("Effect");
         renderEventsPanel({ preserveView: true });
         scheduleEventAutosave({ useDraft: true });
         return;
@@ -1476,7 +1541,7 @@ async function deleteEvent() {
 
 function defaultOptionsDraft() {
   return {
-    Version: 1,
+    Version: 2,
     Canvas: { Width: 1920, Height: 1080, "Preview Background": "" },
     Elements: [],
   };
@@ -1488,6 +1553,7 @@ function defaultOptionItem(index = 1) {
     Name: `新選項 ${index}`,
     Text: `新選項 ${index}`,
     Trigger: `Action:新選項${index}`,
+    Availability: "ALWAYS",
     "Style Override": {},
   };
 }
@@ -1498,6 +1564,7 @@ function defaultOptionElement(type) {
     ID: generateId("option_element"),
     Name: type === "TEXTBOX" ? "選項清單" : type === "PICTURE" ? "圖片選項" : "互動區域",
     Type: type,
+    Availability: "ALWAYS",
     Layout: { X: 690 + offset, Y: 360 + offset, Width: 540, Height: type === "TEXTBOX" ? 352 : 180, "Z Order": 10 },
     Hover: { Enabled: true, Color: "#ffffff18" },
     "Hover Sound": "",
@@ -1651,7 +1718,7 @@ function optionElementListHtml() {
     <button class="subnav-item option-element-list-item ${element.ID === state.selectedOptionElementId ? "active" : ""}" type="button" data-option-element-select="${escapeHtml(element.ID)}">
       <span class="subnav-item-copy">
         <strong>${escapeHtml(element.Name || element.ID)}</strong>
-        <span>${escapeHtml(optionTypeLabel(element.Type))}${element.Type === "TEXTBOX" ? ` · ${element.Items?.length || 0} 項` : ""}</span>
+        <span>${escapeHtml(optionTypeLabel(element.Type))}${element.Type === "TEXTBOX" ? ` · ${element.Items?.length || 0} 項` : ""}${element.Availability === "CONTROLLED" ? " · Controlled" : ""}</span>
       </span>
     </button>
   `).join("");
@@ -1680,7 +1747,7 @@ function optionStageElementHtml(element) {
         <div class="option-scroll-preview ${overflowClass}" style="max-height:${metrics.contentHeight}px;overflow-y:auto;gap:${metrics.spacing}px">
           ${items.length ? items.map((item) => `
             <button class="option-text-item ${hoverClass} ${item.ID === state.selectedOptionItemId ? "selected" : ""}" type="button" data-option-item-select="${escapeHtml(item.ID)}" style="height:${metrics.itemHeight}px;--option-item-background:${safeColor(style["Item Background"])};--option-hover-color:${safeColor(hover.Color, "#ffffff18")};background:var(--option-item-background);color:${safeColor(style["Text Color"], "#ffffff")};font-size:${numberValue(style["Text Size"], 30)}px;text-align:${numberValue(style["Text Align"], 0.5) === 0 ? "left" : numberValue(style["Text Align"], 0.5) === 1 ? "right" : "center"}">
-              ${escapeHtml(item.Text || item.Name || item.ID)}
+              ${escapeHtml(item.Text || item.Name || item.ID)}${item.Availability === "CONTROLLED" ? '<span class="visually-hidden">（Controlled）</span>' : ""}
             </button>
           `).join("") : `<div class="option-empty-row" style="height:${metrics.itemHeight}px">尚未建立 Item</div>`}
         </div>
@@ -1709,7 +1776,7 @@ function optionStageElementHtml(element) {
   return `
     <div class="option-stage-element ${selected ? "selected" : ""} type-${element.Type.toLocaleLowerCase()}" data-option-stage-element="${escapeHtml(element.ID)}" style="left:${x}px;top:${y}px;width:${width}px;height:${height}px;z-index:${z}">
       ${body}
-      <span class="option-element-caption" data-option-drag-handle>${escapeHtml(element.Name || optionTypeLabel(element.Type))}</span>
+      <span class="option-element-caption" data-option-drag-handle>${escapeHtml(element.Name || optionTypeLabel(element.Type))}${element.Availability === "CONTROLLED" ? " · Controlled" : ""}</span>
       ${handles}
     </div>
   `;
@@ -1740,7 +1807,7 @@ function textBoxItemsHtml(element) {
       ${items.map((item, index) => `
         <div class="option-item-row">
           <div class="option-item-entry ${item.ID === state.selectedOptionItemId ? "active" : ""}">
-            <button type="button" data-option-item-select="${escapeHtml(item.ID)}"><strong>${escapeHtml(item.Name || item.Text || item.ID)}</strong><span>${escapeHtml(actionTriggerName(item.Trigger))}</span></button>
+            <button type="button" data-option-item-select="${escapeHtml(item.ID)}"><strong>${escapeHtml(item.Name || item.Text || item.ID)}</strong><span>${escapeHtml(actionTriggerName(item.Trigger))}${item.Availability === "CONTROLLED" ? " · Controlled" : ""}</span></button>
             <button class="option-item-delete" type="button" data-delete-option-item="${escapeHtml(item.ID)}" title="刪除選項" aria-label="刪除選項">×</button>
           </div>
           <div class="option-item-order">
@@ -1835,8 +1902,9 @@ function optionInspectorHtml() {
     const hasItemOverride = Object.keys(itemOverride).length > 0;
     if (!isCanvas) {
       primary = `
-        <div class="form-grid option-field-grid">
+        <div class="form-grid two-columns option-field-grid">
           <label class="field"><span>Name</span><input data-option-path="Name" value="${escapeHtml(element.Name || "")}"></label>
+          <label class="field"><span>Availability</span><select data-option-path="Availability">${optionTags(["ALWAYS", "CONTROLLED"], element.Availability || "ALWAYS", (value) => value === "ALWAYS" ? "Always" : "Controlled")}</select></label>
         </div>
         <div class="option-primary-block">
           <div class="form-section-header option-static-header">
@@ -1848,6 +1916,7 @@ function optionInspectorHtml() {
         ${item ? `<div class="option-primary-block selected-item-editor">
           <div class="form-grid two-columns option-field-grid">
             <label class="field"><span>Name</span><input data-option-item-path="Name" value="${escapeHtml(item.Name || "")}"></label>
+            <label class="field"><span>Availability</span><select data-option-item-path="Availability">${optionTags(["ALWAYS", "CONTROLLED"], item.Availability || "ALWAYS", (value) => value === "ALWAYS" ? "Always" : "Controlled")}</select></label>
             <label class="field"><span>Text</span><input data-option-item-path="Text" value="${escapeHtml(item.Text || "")}"></label>
             <label class="field option-wide-field"><span>Trigger</span><input data-option-item-path="Trigger" value="${escapeHtml(actionTriggerName(item.Trigger))}"></label>
           </div>
@@ -1906,7 +1975,8 @@ function optionInspectorHtml() {
       primary = `
         <div class="form-grid two-columns option-field-grid">
           <label class="field"><span>Name</span><input data-option-path="Name" value="${escapeHtml(element.Name || "")}"></label>
-          <label class="field"><span>Trigger</span><input data-option-path="Trigger" value="${escapeHtml(actionTriggerName(element.Trigger))}"></label>
+          <label class="field"><span>Availability</span><select data-option-path="Availability">${optionTags(["ALWAYS", "CONTROLLED"], element.Availability || "ALWAYS", (value) => value === "ALWAYS" ? "Always" : "Controlled")}</select></label>
+          <label class="field option-wide-field"><span>Trigger</span><input data-option-path="Trigger" value="${escapeHtml(actionTriggerName(element.Trigger))}"></label>
           <label class="field"><span>Idle 圖片</span><select data-option-path="Picture.Idle" aria-label="Idle 圖片">${imageOptionTags(picture.Idle || "", [{ id: "", name: "None" }])}</select></label>
           ${optionBooleanField("只讓不透明部分可點擊", 'data-option-path="Picture.Alpha Hit Test"', Boolean(picture["Alpha Hit Test"]))}
         </div>
@@ -1936,7 +2006,8 @@ function optionInspectorHtml() {
       primary = `
         <div class="form-grid two-columns option-field-grid">
           <label class="field"><span>Name</span><input data-option-path="Name" value="${escapeHtml(element.Name || "")}"></label>
-          <label class="field"><span>Trigger</span><input data-option-path="Trigger" value="${escapeHtml(actionTriggerName(element.Trigger))}"></label>
+          <label class="field"><span>Availability</span><select data-option-path="Availability">${optionTags(["ALWAYS", "CONTROLLED"], element.Availability || "ALWAYS", (value) => value === "ALWAYS" ? "Always" : "Controlled")}</select></label>
+          <label class="field option-wide-field"><span>Trigger</span><input data-option-path="Trigger" value="${escapeHtml(actionTriggerName(element.Trigger))}"></label>
         </div>
       `;
       sections += optionSoundSection(element);
@@ -2354,9 +2425,20 @@ function addOptionElement(type) {
   renderOptionsPanel();
 }
 
-function deleteOptionElement() {
+async function deleteOptionElement() {
   const element = selectedOptionElement();
-  if (!element || !window.confirm(`確定刪除「${element.Name}」？`)) return;
+  if (!element || !await flushAutosave()) return;
+  try {
+    const data = await api(`/api/options/references?node=${encodeURIComponent(state.selectedNodePath)}&element=${encodeURIComponent(element.ID)}`);
+    if (data.references?.length) {
+      toast(`無法刪除「${element.Name}」：仍被 ${data.references.length} 個 Event Effect 引用。`, "error");
+      return;
+    }
+  } catch (error) {
+    toast(error.message, "error");
+    return;
+  }
+  if (!window.confirm(`確定刪除「${element.Name}」？`)) return;
   const index = state.optionsDraft.Elements.findIndex((item) => item.ID === element.ID);
   state.optionsDraft.Elements.splice(index, 1);
   const next = state.optionsDraft.Elements[Math.min(index, state.optionsDraft.Elements.length - 1)] || null;
@@ -2376,10 +2458,21 @@ function addOptionItem() {
   renderOptionsPanel();
 }
 
-function deleteOptionItem(itemId = state.selectedOptionItemId) {
+async function deleteOptionItem(itemId = state.selectedOptionItemId) {
   const element = selectedOptionElement();
   const item = element?.Items?.find((entry) => entry.ID === itemId);
-  if (!element || !item || !window.confirm(`確定刪除「${item.Name}」？`)) return;
+  if (!element || !item || !await flushAutosave()) return;
+  try {
+    const data = await api(`/api/options/references?node=${encodeURIComponent(state.selectedNodePath)}&element=${encodeURIComponent(element.ID)}&item=${encodeURIComponent(item.ID)}`);
+    if (data.references?.length) {
+      toast(`無法刪除「${item.Name}」：仍被 ${data.references.length} 個 Event Effect 引用。`, "error");
+      return;
+    }
+  } catch (error) {
+    toast(error.message, "error");
+    return;
+  }
+  if (!window.confirm(`確定刪除「${item.Name}」？`)) return;
   const index = element.Items.findIndex((entry) => entry.ID === item.ID);
   element.Items.splice(index, 1);
   state.selectedOptionItemId = element.Items[Math.min(index, element.Items.length - 1)]?.ID || null;
@@ -2415,7 +2508,7 @@ function updateOptionField(control, itemField = false) {
   setNested(target, path, path === "Trigger" ? actionTriggerValue(value) : value);
   if (target.Type === "TEXTBOX") target.Layout.Height = textBoxMetrics(target).height;
   markOptionsDirty();
-  if (path === "Hover.Enabled") {
+  if (path === "Hover.Enabled" || path === "Availability") {
     renderOptionsPanel();
     return;
   }
@@ -2618,6 +2711,7 @@ function optionsSnapshot() {
 async function persistOptionsSnapshot(snapshot, task = null) {
   const saved = await api("/api/options", { method: "PUT", body: snapshot });
   if (task && !isCurrentAutosaveTask(task)) return saved;
+  if (saved.optionTargets) state.optionTargets = saved.optionTargets;
   if (state.selectedNodePath !== snapshot.node || !state.nodeDetail) return saved;
   state.nodeDetail.options = clone(saved.options || snapshot.options);
   if (saved.node) state.nodeDetail.node = saved.node;
@@ -3192,6 +3286,7 @@ async function refreshAfterSave() {
   state.graph = project.graph || { edges: [] };
   state.images = project.images || [];
   state.audio = project.audio || [];
+  state.optionTargets = project.optionTargets || [];
   state.stats = project.stats || {};
   state.statsDraft = clone(state.stats);
   state.memories = project.memories || { memory: { Name: "Memory" } };

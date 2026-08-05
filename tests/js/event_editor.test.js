@@ -23,6 +23,10 @@ function namedOptionTags(items, current) {
 }
 
 function createEditor({ stats = [{ id: "money", name: "Money" }] } = {}) {
+  const optionTargets = [{
+    target: { target: "item", node: "shop", element: "actions", item: "buy" },
+    value: JSON.stringify({ target: "item", node: "shop", element: "actions", item: "buy" }),
+  }];
   return SceneEventEditor.createEventEditor({
     contentPickerHtml: (id, index) => `<content-picker data-id="${id}" data-index="${index}"></content-picker>`,
     escapeHtml,
@@ -30,6 +34,8 @@ function createEditor({ stats = [{ id: "money", name: "Money" }] } = {}) {
     namedOptionTags,
     nodeChoices: () => [{ id: "root", name: "Root" }, { id: "branch", name: "Branch" }],
     numberValue: (value, fallback = 0) => Number.isFinite(Number(value)) ? Number(value) : fallback,
+    optionEffectChoices: () => optionTargets,
+    optionEffectOptionTags: (effect) => `<option value='${JSON.stringify({ target: effect.target, node: effect.node, element: effect.element, item: effect.item })}'>Buy</option>`,
     optionTags,
     stateRuleContract,
     statChoices: () => stats,
@@ -84,6 +90,11 @@ test("Condition and Effect DOM values map to the stable Event JSON contract", ()
   const effects = [
     fakeRow({ effectType: "stat", effectId: "money", effectOp: "+", effectValue: "3" }),
     fakeRow({ effectType: "memory", effectBank: "daily", effectOp: "clear" }),
+    fakeRow({
+      effectType: "option",
+      effectOp: "enable",
+      effectOptionTarget: JSON.stringify({ target: "item", node: "shop", element: "actions", item: "buy" }),
+    }),
   ];
   const form = {
     querySelectorAll(selector) {
@@ -101,6 +112,7 @@ test("Condition and Effect DOM values map to the stable Event JSON contract", ()
     effects: [
       { type: "stat", op: "+", id: "money", value: 3 },
       { type: "memory", op: "clear", bank: "daily" },
+      { type: "option", op: "enable", target: "item", node: "shop", element: "actions", item: "buy" },
     ],
   });
 });
@@ -112,6 +124,10 @@ test("rule type changes use centralized defaults and fail safely without a Stat"
   assert.deepEqual(draft.Conditions[0], { type: "stat", id: "money", op: ">=", value: 0 });
   assert.equal(editor.replaceRuleType(draft, "effect", 0, "memory"), true);
   assert.deepEqual(draft.Effects[0], { type: "memory", bank: "memory", id: "新標籤", op: "add" });
+  assert.equal(editor.replaceRuleType(draft, "effect", 0, "option"), true);
+  assert.deepEqual(draft.Effects[0], {
+    type: "option", op: "enable", target: "item", node: "shop", element: "actions", item: "buy",
+  });
 
   const noStatsEditor = createEditor({ stats: [] });
   assert.equal(noStatsEditor.replaceRuleType(draft, "condition", 0, "stat"), false);
@@ -124,6 +140,7 @@ test("Event row rendering keeps current selectors and Memory clear semantics", (
   ]);
   const effectHtml = editor.effectRowsHtml([
     { type: "memory", bank: "daily", op: "clear" },
+    { type: "option", op: "disable", target: "item", node: "shop", element: "actions", item: "buy" },
   ]);
   const contentHtml = editor.choiceBlockHtml("intro", "content");
 
@@ -131,6 +148,8 @@ test("Event row rendering keeps current selectors and Memory clear semantics", (
   assert.match(conditionHtml, /name="conditionBank"/);
   assert.match(effectHtml, /data-effect-type="memory"/);
   assert.match(effectHtml, /name="effectId"[^>]*disabled/);
+  assert.match(effectHtml, /data-effect-type="option"/);
+  assert.match(effectHtml, /name="effectOptionTarget"/);
   assert.match(contentHtml, /name="contentRepresentation"[^>]*value="single"/);
   assert.match(contentHtml, /<content-picker data-id="intro" data-index="0">/);
 });

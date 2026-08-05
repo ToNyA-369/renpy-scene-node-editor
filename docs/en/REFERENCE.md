@@ -66,7 +66,7 @@ Global Event prepare retains both `owner_node_id = "__global__"` and `node_id = 
 
 ```json
 {
-  "Version": 1,
+  "Version": 2,
   "Canvas": { "Width": 1920, "Height": 1080, "Preview Background": "" },
   "Elements": []
 }
@@ -81,6 +81,7 @@ Global Event prepare retains both `owner_node_id = "__global__"` and `node_id = 
   "ID": "actions",
   "Name": "Actions",
   "Type": "TEXTBOX",
+  "Availability": "ALWAYS",
   "Layout": { "X": 600, "Y": 300, "Width": 720, "Height": 400, "Z Order": 10 },
   "List": {
     "Max Visible Items": 4,
@@ -105,6 +106,7 @@ Global Event prepare retains both `owner_node_id = "__global__"` and `node_id = 
       "Name": "Continue",
       "Text": "Continue",
       "Trigger": "Action:continue",
+      "Availability": "CONTROLLED",
       "Style Override": {}
     }
   ]
@@ -113,7 +115,7 @@ Global Event prepare retains both `owner_node_id = "__global__"` and `node_id = 
 
 ### Picture
 
-Picture shares `ID`, `Name`, `Layout`, `Hover`, and sound fields, and adds:
+Picture shares `ID`, `Name`, `Availability`, `Layout`, `Hover`, and sound fields, and adds:
 
 ```json
 {
@@ -141,7 +143,9 @@ Picture shares `ID`, `Name`, `Layout`, `Hover`, and sound fields, and adds:
 }
 ```
 
-Options have no lifecycle, per-item visibility rules, or custom Screen source. Every displayed Option is actionable.
+`Availability` is either `ALWAYS` or `CONTROLLED`. `ALWAYS` is always visible. `CONTROLLED` starts hidden, appears after an Option Effect enables it, and disappears when disabled. PICTURE and HITBOX support Element-level control. TEXTBOX supports both whole-Element and individual-Item control. An Item is visible only when both it and its parent Element are available; disabling the parent retains Item state, and an empty TEXTBOX hides automatically.
+
+Options have no lifecycle, condition expressions, or custom Screen source. Every displayed Option is actionable. Version 1 data and omitted `Availability` values are read as `ALWAYS`; the next save normalizes the document to Version 2.
 
 ## Event
 
@@ -246,7 +250,21 @@ Memory:
 
 Operators: `add`, `remove`, `clear`; clear does not use `id`.
 
-Event Effects handle only Stats and Memories. Backgrounds, music, sound effects, transitions, and fades belong in Content labels using native Ren'Py syntax. Options may still select Hover Sound and Click Sound from `game/audio/`.
+Option Element:
+
+```json
+{ "type": "option", "op": "enable", "target": "element", "node": "shop", "element": "special_actions" }
+```
+
+TEXTBOX Item:
+
+```json
+{ "type": "option", "op": "disable", "target": "item", "node": "shop", "element": "shop_actions", "item": "buy_weapon" }
+```
+
+Option Effects support `enable` and `disable`. Any Scene Node or Global Event may target a `CONTROLLED` Option in any real Scene Node. Operations are idempotent. State participates in Ren'Py saves and rollback and does not reset on REDO, GOTO, REPLACE, or EXIT; a new game clears it through `scene_reset_state()`. The Editor displays creator-facing Names while JSON stores stable IDs, and it rejects deletion of a referenced Node, Element, or Item.
+
+Event Effects handle Stats, Memories, and Option Availability. Backgrounds, music, sound effects, transitions, and fades belong in Content labels using native Ren'Py syntax. Options may still select Hover Sound and Click Sound from `game/audio/`.
 
 ## Stats and Memories
 

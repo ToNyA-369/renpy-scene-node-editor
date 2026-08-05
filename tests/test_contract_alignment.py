@@ -119,6 +119,7 @@ class CrossLayerContractAlignmentTest(unittest.TestCase):
         samples = {
             "stat": {"type": "stat", "id": "money", "value": 1},
             "memory": {"type": "memory", "bank": "memory", "id": "seen"},
+            "option": {"type": "option", "target": "element", "node": "root", "element": "menu"},
         }
         for rule_type, operations in registry.items():
             for operation in operations:

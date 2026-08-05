@@ -154,6 +154,15 @@ class OptionSchemaTests(unittest.TestCase):
         self.assertIn('hover_sound element.get("Hover Sound") or None', renderer)
         self.assertNotIn('tooltip element.get("Tooltip")', renderer)
 
+    def test_renderer_filters_controlled_elements_and_textbox_items(self):
+        renderer = (
+            ROOT / "INTEGRATION" / "TestGame" / "FRAMEWORK" / "option_renderer.rpy"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("if scene_option_is_available(node_id, element):", renderer)
+        self.assertIn("$ items = scene_option_visible_items(node_id, element)", renderer)
+        self.assertIn("if items:", renderer)
+
 
 if __name__ == "__main__":
     unittest.main()

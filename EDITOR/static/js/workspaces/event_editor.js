@@ -31,12 +31,15 @@
     namedOptionTags,
     nodeChoices,
     numberValue,
+    optionEffectChoices,
+    optionEffectOptionTags,
     optionTags,
     stateRuleContract,
     statChoices,
   }) {
     const {
-      RULE_TYPES,
+      CONDITION_TYPES,
+      EFFECT_TYPES,
       conditionOperators,
       defaultCondition,
       defaultEffect,
@@ -49,6 +52,7 @@
       const settings = {
         statId: statChoices()[0]?.id,
         memoryBank: memoryChoices()[0]?.id || "memory",
+        optionTarget: optionEffectChoices()[0]?.target || null,
       };
       return kind === "condition" ? defaultCondition(type, settings) : defaultEffect(type, settings);
     }
@@ -68,7 +72,7 @@
         const isMemory = type === "memory";
         return `
           <div class="repeat-row condition-row" data-index="${index}" data-condition-type="${escapeHtml(type)}">
-            <label class="field"><span class="visually-hidden">類型</span><select name="conditionType" aria-label="條件類型">${optionTags(RULE_TYPES, type)}</select></label>
+            <label class="field"><span class="visually-hidden">類型</span><select name="conditionType" aria-label="條件類型">${optionTags(CONDITION_TYPES, type)}</select></label>
             ${isMemory ? `
               <label class="field"><span class="visually-hidden">記憶庫</span><select name="conditionBank" aria-label="記憶庫">${namedOptionTags(memoryChoices(), condition.bank || "memory")}</select></label>
               <label class="field"><span class="visually-hidden">記憶標籤</span><input name="conditionId" aria-label="記憶標籤" value="${escapeHtml(condition.id || "")}" placeholder="標籤"></label>
@@ -89,7 +93,19 @@
       return effects.map((effect, index) => {
         const type = normalizeRuleType(effect.type);
         const isStat = type === "stat";
+        const isOption = type === "option";
         const opItems = effectOperators(type);
+        if (isOption) {
+          return `
+            <div class="repeat-row effect-row option-effect-row" data-index="${index}" data-effect-type="${escapeHtml(type)}">
+              <label class="field"><span class="visually-hidden">類型</span><select name="effectType" aria-label="效果類型">${optionTags(EFFECT_TYPES, type)}</select></label>
+              <label class="field"><span class="visually-hidden">Option 目標</span><select name="effectOptionTarget" aria-label="Option 目標">${optionEffectOptionTags(effect)}</select></label>
+              <label class="field"><span class="visually-hidden">操作</span><select name="effectOp" aria-label="操作">${optionTags(opItems, effect.op)}</select></label>
+              <span class="effect-option-spacer" aria-hidden="true"></span>
+              <button class="row-button" type="button" data-remove-effect="${index}" title="移除 Effect" aria-label="移除 Effect">×</button>
+            </div>
+          `;
+        }
         const valueField = isStat
           ? `<label class="field"><span class="visually-hidden">值</span><input name="effectValue" aria-label="值" type="number" step="any" value="${escapeHtml(effect.value ?? 0)}"></label>`
           : `<label class="field"><span class="visually-hidden">記憶標籤</span><input name="effectId" aria-label="記憶標籤" value="${escapeHtml(effect.id || "")}" placeholder="${effect.op === "clear" ? "清空整個記憶庫" : "標籤"}" ${effectUsesId(type, effect.op) ? "" : "disabled"}></label>`;
@@ -98,7 +114,7 @@
           : `<select name="effectBank" aria-label="記憶庫">${namedOptionTags(memoryChoices(), effect.bank || "memory")}</select>`;
         return `
           <div class="repeat-row effect-row" data-index="${index}" data-effect-type="${escapeHtml(type)}">
-            <label class="field"><span class="visually-hidden">類型</span><select name="effectType" aria-label="效果類型">${optionTags(RULE_TYPES, type)}</select></label>
+            <label class="field"><span class="visually-hidden">類型</span><select name="effectType" aria-label="效果類型">${optionTags(EFFECT_TYPES, type)}</select></label>
             <label class="field"><span class="visually-hidden">${isStat ? "Stat" : "記憶庫"}</span>${resourceField}</label>
             <label class="field"><span class="visually-hidden">操作</span><select name="effectOp" aria-label="操作">${optionTags(opItems, effect.op)}</select></label>
             ${valueField}
@@ -177,6 +193,12 @@
         } else if (type === "memory") {
           result.bank = row.querySelector('[name="effectBank"]').value;
           if (result.op !== "clear") result.id = row.querySelector('[name="effectId"]').value.trim();
+        } else if (type === "option") {
+          const target = JSON.parse(row.querySelector('[name="effectOptionTarget"]').value);
+          result.target = target.target;
+          result.node = target.node;
+          result.element = target.element;
+          if (target.target === "item") result.item = target.item;
         }
         return result;
       });

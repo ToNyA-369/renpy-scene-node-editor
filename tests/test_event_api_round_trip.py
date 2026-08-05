@@ -47,6 +47,7 @@ class EventApiRoundTripTest(unittest.TestCase):
                 {"type": "stat", "id": "money", "op": "-", "value": 10},
                 {"type": "memory", "bank": "memory", "id": "visited", "op": "add"},
                 {"type": "memory", "bank": "memory", "op": "clear"},
+                {"type": "option", "op": "enable", "target": "item", "node": "branch_a", "element": "actions", "item": "buy"},
             ],
             "Content": {"show_purchase": 3, "show_discount": 1},
             "Weight": 2.5,

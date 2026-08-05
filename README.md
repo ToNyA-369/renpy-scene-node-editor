@@ -48,7 +48,8 @@ flowchart LR
 ```
 
 - Option 只產生 Trigger，不直接選擇 Event。
-- Event 負責 Conditions、Effects、Content 與流程結果。
+- Event 負責 Conditions、Stat／Memory／Option Availability Effects、Content 與流程結果。
+- Option 可為常駐 `Always` 或由 Effect 啟用／停用的 `Controlled`；TEXTBOX 可控制整列或個別 Item，Global Event 也能控制其他節點的 Option。
 - Content 保存的是 Ren'Py `label` 名稱，不是 `.rpy` 文件名。
 - On Enter／On Exit 可在節點邊界依序執行多個 Events；On Node 沿用原本 Auto 的單一選擇。
 - 固定且不可刪除的 Global Node 提供全局 Event 作用域；它不進入 Stack、沒有 Options，也不能使用 Option Trigger。

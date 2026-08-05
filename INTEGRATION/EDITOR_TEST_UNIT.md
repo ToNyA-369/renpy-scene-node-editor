@@ -7,6 +7,7 @@
 - Content 文件／label 階層選擇與權重 Content
 - Content 原生顯示的 Screen／HUD 與資料化 Options Renderer
 - TEXTBOX、PICTURE、HITBOX 三種 Option Element
+- Option Element／TEXTBOX Item 的 Always／Controlled Availability 與 Event enable／disable
 - Stat、Memory，以及完全由 Events 負責的條件與 fallback
 - 同 Trigger 的 Condition、Priority 與 fallback Event
 - Keyboard 與 Mouse Event Trigger
@@ -54,6 +55,7 @@ python3 tools/create_editor_test_unit.py "/完整路徑/SceneEditorTest" --launc
 14. 三種 Element 的表單都應以獨立「聲音」卡片顯示 Hover／Click Sound，音訊選單只來自 `audio/` 並依 `editor_test/sfx/ui` 等子目錄分層；選定後只顯示檔名。Picture 的 Name 與 Trigger 應左右齊平；Picture 的 Idle 圖片仍在表單選擇。Options 表單使用 `Name`、`Text` 與 `Items` 英文標籤。
 15. 三種 Element 的 Hover 效果與 Hover 顏色應位於畫布的「外觀」；Picture 啟用 Hover 後可在同處選擇 Hover 圖片。關閉 Hover 效果後相關顏色與圖片欄位應收起。畫布的「版面細節」「外觀」標題旁不應有摘要文字。
 16. 在 `replace_child_a` 開啟「REPLACE 前往 Child B」Event。End up 應顯示 `REPLACE`，Next Node 應顯示 `REPLACE Child B` 而非技術 ID。End up 下拉選單應同時提供 REDO、GOTO、REPLACE、EXIT；改為 REPLACE 時 Next Node 編輯區必須保留單一節點與權重表兩種模式。
+17. 在 `options_lab` 的 `DATA Options 綜合測試` TEXTBOX，Element 應為 `Always`，「受控子選項：取得 2 點」Item 應為 `Controlled`；另一個 `受控選項列` TEXTBOX Element 應為 `Controlled`。開啟任何 Event 的 Effects，把類型切到 `option`，目標選單應依 Node → Element → 整列／Item 顯示創作者名稱，操作可選 `enable`／`disable`。已被 Effect 引用的 Element／Item 不得刪除。
 
 ## Ren'Py Runtime 測試清單
 
@@ -82,6 +84,14 @@ python3 tools/create_editor_test_unit.py "/完整路徑/SceneEditorTest" --launc
 3. 未取得鑰匙前先按「使用測試鑰匙」，應由 fallback Event 說明無法使用；再按「取得測試鑰匙」，接著使用成功並由條件 Event 移除 Memory。兩個選項全程都會顯示且可操作。
 4. 點左下綠色 PICTURE，點數應增加 3。把游標移到右下透明 HITBOX，區域應發亮；點擊後 HUD 的 `Hitbox` 應變成 `True`。
 5. 按「返回測試入口」，應透過 EXIT 回到 `root`。
+
+### Option Availability
+
+1. 新遊戲進入 `options_lab` 時，不應看見「受控子選項：取得 2 點」或右側「受控選項列」。
+2. 按「顯示受控子選項」後，該 Item 應加入既有 `DATA Options 綜合測試` 清單；按它會增加 2 點。按「隱藏受控子選項」後它應再次消失。重複 enable／disable 不應報錯。
+3. 按「顯示受控選項列」後，右側應出現獨立 TEXTBOX；按其中項目會增加 5 點。按主清單的「隱藏受控選項列」後整列消失。
+4. 在任意節點按 `O`，Global Event 應跨節點啟用 `options_lab` 的受控選項列；之後進入 `options_lab` 即可看到它。
+5. 啟用狀態在 REDO、GOTO、REPLACE、EXIT 與 Ren'Py 存檔／讀檔後保留；開始全新遊戲時重設為隱藏。父 TEXTBOX 暫時停用後再啟用時，其先前已啟用的 Item 狀態仍應保留；沒有可見 Item 的 TEXTBOX 不應留下空框。
 
 ### 分支、權重 Next Node 與 Node stack
 

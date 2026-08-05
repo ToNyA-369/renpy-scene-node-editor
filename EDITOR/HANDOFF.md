@@ -95,7 +95,7 @@ REPLACE 是 `[父, 目前] → [父, 目標]` 的單一 Stack 操作。它先跑
 
 ### 3.5 演出責任
 
-Event Effects 僅包含 Stat 與 Memory。Node 不保存 Background；BGM、SE、背景、轉場與淡入淡出由 Content label 使用 Ren'Py 原生語法完成。Options 的 Picture、Preview Background、Hover Sound 與 Click Sound 仍由資料化 Options Renderer 管理。
+Event Effects 包含 Stat、Memory 與 Option Availability。Option Effect 只對既有 `CONTROLLED` Element／Item 執行冪等 `enable`／`disable`，不在 Runtime 建立或刪除 Schema 資料。Node 不保存 Background；BGM、SE、背景、轉場與淡入淡出由 Content label 使用 Ren'Py 原生語法完成。Options 的 Picture、Preview Background、Hover Sound 與 Click Sound 仍由資料化 Options Renderer 管理。
 
 ## 4. 創作者會編輯的內容
 
@@ -153,7 +153,9 @@ TEXTBOX 支援：
 
 Options 工作區分成兩種共用同一份草稿的模式。表單採左小右大布局，左側管理 Element，右側以獨立卡片分開內容與音效；畫布採左大右小布局，左側預覽、點選與拖曳，右側負責版面、共同 Hover 視覺及外觀。切換由單一連續進度同時驅動兩側欄框寬度與新舊內容透明度；兩個欄框本身是 `overflow: hidden` 遮罩，過場底層也有不透明遮罩覆蓋兩框中央，內容保持各自座標且不會溢出欄框。拖曳進度逐幀取最新游標位置並依完整行程計算；點擊沿用同一控制器，但使用加速後減速的 ease-in-out 補間。完成時先在遮罩後方停用 transition 並顯示正式工作區，再移除遮罩，下一幀才恢復一般 transition，避免結尾閃爍。Options 側欄寬度與 Event 側欄一致。
 
-Options 沒有個別顯示／可用條件，也沒有 CUSTOM Screen 來源。所有顯示的選項都可操作；條件、fallback 與節點分流統一由 Events 和 Scene Nodes 負責。
+Options 沒有條件運算式、不可操作狀態或 CUSTOM Screen 來源。所有顯示的選項都可操作；條件、fallback 與節點分流統一由 Events 和 Scene Nodes 負責。`Options.json` Version 2 在 Element 與 TEXTBOX Item 增加 `Availability: ALWAYS | CONTROLLED`；Version 1／缺值讀作 ALWAYS 並在下次儲存正規化。PICTURE／HITBOX 只控制 Element；TEXTBOX 可控制整列及個別 Item。Item 顯示需要父 Element 與自身都可用，父層停用保留子狀態，空 TEXTBOX 自動隱藏。
+
+Runtime 以獨立 `scene_enabled_options` 保存受控目標，不污染 Stats／Memories。狀態採 reassignment 以支援 Ren'Py save／rollback，不因 REDO、GOTO、REPLACE、EXIT 自動重設，`scene_reset_state()` 開新遊戲時清空。任何實際 Scene Node 或 Global Event 都可跨節點控制目標；Editor 的 Effect 階層選單顯示 Node／Element／Item Name，保存穩定 ID。API 專案檢查、Node 引用與 Element／Item 刪除保護都必須包含 Option Effect。
 
 ## 6. 編輯器目前狀態
 
@@ -305,7 +307,7 @@ tools/create_editor_test_unit.py
   只對全新空白專案建立可拋棄的 Editor／Runtime 綜合測試內容；安全閘門會拒絕既有 Editor 資料。
 
 INTEGRATION/EDITOR_TEST_UNIT.md
-  8 節點關聯圖、Content、Options、Event、State、原生 Screen 演出與 Runtime 流程的手動驗證步驟，包含 parent → child A → REPLACE child B → EXIT parent。
+  8 節點關聯圖、Content、Options Availability、Event、State、原生 Screen 演出與 Runtime 流程的手動驗證步驟，包含 parent → child A → REPLACE child B → EXIT parent。
 
 tests/test_install.py
   乾淨安裝、更新保護與 Editor 啟動測試。
@@ -319,6 +321,9 @@ tests/test_memory_schema.py
 tests/test_runtime_memory.py
   Runtime Memory API、舊存檔 Tag 合併與舊 Event 相容測試。
 
+tests/test_option_availability.py
+  Options Version 2 遷移、Option Effect schema／引用／刪除保護，以及 Runtime Element／Item 組合、冪等操作與錯誤訊息測試。
+
 tests/js/autosave_coordinator.test.js
   自動儲存、切換與刪除競態的獨立 JavaScript 回歸測試。
 
@@ -329,7 +334,7 @@ tests/test_event_api_round_trip.py
   Editor API 保存與重新讀取 Event 的 golden JSON，涵蓋單一／權重選擇、生命週期欄位省略及 Global Event。
 
 tests/browser/editor_smoke.spec.js
-  以系統暫存綜合測試專案及 Chromium 驗證 Content 父子選單、Event 規則新增刪除與型別切換、GOTO／REPLACE、自動儲存重新載入、關聯圖與 Console；不讀寫本機創作者測試資料。
+  以系統暫存綜合測試專案及 Chromium 驗證 Content 父子選單、Event 規則新增刪除與型別切換、Option Effect、Availability 自動儲存重新載入、GOTO／REPLACE、關聯圖與 Console；不讀寫本機創作者測試資料。
 
 tests/test_contract_alignment.py
   以前端 Event registry 為輸入，確認 Editor API Schema 與 Runtime 同步接受 Trigger／End up。

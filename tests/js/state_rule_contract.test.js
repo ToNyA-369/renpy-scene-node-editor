@@ -7,10 +7,13 @@ const contract = require("../../EDITOR/static/js/core/state_rule_contract.js");
 
 test("state rule contract publishes every Condition and Effect operation", () => {
   assert.deepEqual(contract.RULE_TYPES, ["stat", "memory"]);
+  assert.deepEqual(contract.CONDITION_TYPES, ["stat", "memory"]);
+  assert.deepEqual(contract.EFFECT_TYPES, ["stat", "memory", "option"]);
   assert.deepEqual(contract.conditionOperators("stat"), [">", ">=", "<", "<=", "==", "!="]);
   assert.deepEqual(contract.conditionOperators("memory"), ["has", "not_has"]);
   assert.deepEqual(contract.effectOperators("stat"), ["set", "+", "-", "*", "/"]);
   assert.deepEqual(contract.effectOperators("memory"), ["add", "remove", "clear"]);
+  assert.deepEqual(contract.effectOperators("option"), ["enable", "disable"]);
 });
 
 test("legacy tag rules normalize to the Memory editor contract", () => {
@@ -36,8 +39,15 @@ test("default rules preserve the current saved JSON shapes", () => {
     contract.defaultEffect("memory", { memoryBank: "daily" }),
     { type: "memory", bank: "daily", id: "新標籤", op: "add" },
   );
+  assert.deepEqual(
+    contract.defaultEffect("option", {
+      optionTarget: { target: "item", node: "shop", element: "actions", item: "buy" },
+    }),
+    { type: "option", op: "enable", target: "item", node: "shop", element: "actions", item: "buy" },
+  );
   assert.equal(contract.defaultCondition("stat"), null);
   assert.equal(contract.defaultEffect("stat"), null);
+  assert.equal(contract.defaultEffect("option"), null);
 });
 
 test("Memory clear is the only Effect form that omits an ID", () => {

@@ -57,7 +57,7 @@ An Event is the current node's reaction to a Trigger:
 - `Weight`: relative chance among matching On Node or player-input Events at the same Priority.
 - `Once`: allows one successful selection for the entire game.
 - `Conditions`: decide whether the Event is a candidate.
-- `Effects`: Stat or Memory changes applied when the Event runs.
+- `Effects`: Stat, Memory, or Option Availability changes applied when the Event runs.
 - `Content`: a Ren'Py label called after Effects, optionally weighted.
 - `End up`: REDO, GOTO, REPLACE, or EXIT after Content returns. GOTO and REPLACE accept one or weighted Next Node.
 
@@ -86,7 +86,7 @@ On Enter and On Exit first test Conditions against one state snapshot, then run 
 
 ## Options
 
-Options are the fixed data-driven player interface. Every displayed Option is actionable. Use Events or separate Scene Nodes for conditions, availability, and alternate option sets.
+Options are the fixed data-driven player interface. Every displayed Option is actionable. Keep condition evaluation and branching in Events or separate Scene Nodes.
 
 The three Element types are:
 
@@ -95,6 +95,15 @@ The three Element types are:
 - `HITBOX`: a transparent interaction region over the scene.
 
 Form mode edits Name, Text, Trigger, images, and sounds. Canvas mode edits position, size, layer, Hover, colors, and visual details.
+
+Every Element has an `Availability` mode:
+
+- `Always`: persistently visible.
+- `Controlled`: hidden at the start of a new game, shown by an Event Option Effect with `enable`, and hidden again with `disable`.
+
+TEXTBOX supports Availability on both the whole Element and each Item, so an Effect can reveal a separate list or add one Item to an existing list. An Item requires both its own and its parent Element's availability; temporarily disabling the parent does not erase enabled Item state. PICTURE and HITBOX provide Element-level control only.
+
+Add an `option` Effect to an Event, then choose “Node → Element → whole list or Item” and `enable` / `disable` from the hierarchical controls. Targets may belong to another Scene Node and Global Events may use them. The Editor saves stable IDs and protects referenced Nodes, Elements, and Items from deletion. Enabled state participates in Ren'Py saves, does not reset on stack transitions, and is cleared when a new game starts.
 
 Canvas Preview Background affects only that Options document in the editor. Leaving it empty means no preview image and never changes the game scene.
 

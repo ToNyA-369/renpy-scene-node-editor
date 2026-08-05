@@ -76,7 +76,7 @@ init -100 python:
             if options_path in files:
                 options[node_id] = scene_read_json(options_path)
             else:
-                options[node_id] = {"Version": 1, "Canvas": {}, "Elements": []}
+                options[node_id] = {"Version": 2, "Canvas": {}, "Elements": []}
 
         return {
             "project": project,
@@ -105,6 +105,7 @@ init -100 python:
         global scene_memory_legacy_migrated
         global scene_stack
         global scene_option_adjustments
+        global scene_enabled_options
 
         scene_stats = dict(
             (stat_id, settings.get("Init", 0))
@@ -114,6 +115,7 @@ init -100 python:
         scene_memory_legacy_migrated = True
         scene_stack = []
         scene_option_adjustments = {}
+        scene_enabled_options = []
 
 
     def scene_get_stat(stat_id, default=0):
@@ -421,6 +423,80 @@ init -100 python:
         scene_stats = updated
 
 
+    def scene_option_key(node_id, element_id, item_id=None):
+        return json.dumps(
+            [str(node_id or ""), str(element_id or ""), str(item_id or "")],
+            separators=(",", ":"),
+        )
+
+
+    def scene_option_target(effect):
+        node_id = str(effect.get("node") or "").strip()
+        element_id = str(effect.get("element") or "").strip()
+        target = str(effect.get("target") or "element").lower()
+        item_id = str(effect.get("item") or "").strip() if target == "item" else None
+
+        if node_id not in scene_catalog["nodes"]:
+            raise Exception("Unknown Option Effect Scene Node: {}".format(node_id))
+        if target not in ("element", "item"):
+            raise Exception("Unknown Option Effect target: {}".format(target))
+
+        element = next(
+            (
+                item
+                for item in scene_option_data(node_id).get("Elements", [])
+                if item.get("ID") == element_id
+            ),
+            None,
+        )
+        if element is None:
+            raise Exception(
+                "Unknown Option Element: {}/{}".format(node_id, element_id)
+            )
+
+        option = element
+        if target == "item":
+            if element.get("Type") != "TEXTBOX":
+                raise Exception(
+                    "Option Item target requires a TEXTBOX Element: {}/{}".format(
+                        node_id,
+                        element_id,
+                    )
+                )
+            option = next(
+                (item for item in element.get("Items", []) if item.get("ID") == item_id),
+                None,
+            )
+            if option is None:
+                raise Exception(
+                    "Unknown Option Item: {}/{}/{}".format(node_id, element_id, item_id)
+                )
+
+        if str(option.get("Availability") or "ALWAYS").upper() != "CONTROLLED":
+            raise Exception(
+                "Option Effect target is not CONTROLLED: {}".format(
+                    "/".join(value for value in (node_id, element_id, item_id) if value)
+                )
+            )
+        return scene_option_key(node_id, element_id, item_id)
+
+
+    def scene_apply_option_effect(effect):
+        global scene_enabled_options
+
+        key = scene_option_target(effect)
+        operation = str(effect.get("op") or "").lower()
+        enabled = list(scene_enabled_options or [])
+        if operation == "enable":
+            if key not in enabled:
+                enabled.append(key)
+        elif operation == "disable":
+            enabled = [item for item in enabled if item != key]
+        else:
+            raise Exception("Unknown Option operation: {}".format(operation))
+        scene_enabled_options = enabled
+
+
     def scene_apply_effect(node_id, effect):
         effect_type = str(effect.get("type") or "").lower()
         if effect_type == "stat":
@@ -436,6 +512,8 @@ init -100 python:
                 scene_memory_clear(bank_id)
             else:
                 raise Exception("Unknown Memory operation: {}".format(operation))
+        elif effect_type == "option":
+            scene_apply_option_effect(effect)
         else:
             raise Exception("Unknown Effect type: {}".format(effect_type))
 
@@ -506,8 +584,30 @@ init -100 python:
     def scene_option_data(node_id):
         return scene_catalog["options"].get(
             node_id,
-            {"Version": 1, "Canvas": {}, "Elements": []},
+            {"Version": 2, "Canvas": {}, "Elements": []},
         )
+
+
+    def scene_option_is_available(node_id, element, item=None):
+        option = item if item is not None else element
+        if str(option.get("Availability") or "ALWAYS").upper() != "CONTROLLED":
+            return True
+        key = scene_option_key(
+            node_id,
+            element.get("ID"),
+            item.get("ID") if item is not None else None,
+        )
+        return key in (scene_enabled_options or [])
+
+
+    def scene_option_visible_items(node_id, element):
+        if not scene_option_is_available(node_id, element):
+            return []
+        return [
+            item
+            for item in element.get("Items", [])
+            if scene_option_is_available(node_id, element, item)
+        ]
 
 
     def scene_option_scale(node_id):
@@ -632,6 +732,7 @@ default scene_memories = {}
 default scene_memory_legacy_migrated = False
 default scene_stack = []
 default scene_option_adjustments = {}
+default scene_enabled_options = []
 
 
 label scene_run_lifecycle(node_id, trigger):
