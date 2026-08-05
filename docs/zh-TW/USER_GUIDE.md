@@ -40,7 +40,7 @@ Node 不保存 Screen。HUD、場景外殼與其他 Screen 由創作者在 `.rpy
 節點列表頂端固定有一個不可刪除的 Global Node。它是全局 Event 與 Content 的編輯作用域，不是真實 Scene Node：
 
 - 不進入 Scene Stack，不能成為 ROOT、GOTO 或 REPLACE 的目標。
-- 沒有 Options 工作區，Global Event 不能使用 Option Trigger。
+- 沒有 Options 工作區，Global Event 不能使用 Option Trigger 或 Option Effect。
 - On Node、Keyboard、Mouse Event 會與目前實際節點的同 Trigger Events 合併，再一起比較 Conditions、Priority 與 Weight。
 - On Enter／On Exit 會在每個實際節點的對應生命週期中與本地 Events 一起依序執行。
 - Global Event 的 REDO、GOTO、REPLACE、EXIT 都作用於當時的實際 Stack 頂端節點。
@@ -103,7 +103,7 @@ Options 是固定資料化的玩家互動介面。所有顯示的選項都可操
 
 TEXTBOX 的整個 Element 與各 Item 可各自設定 Availability，因此可以用 Element 控制一整列，也可以只在既有清單中加入或移除一個 Item。Item 必須同時通過父 Element 與自身 Availability；暫時隱藏父 Element 不會清除已啟用的 Item。PICTURE 與 HITBOX 只提供 Element 層級。
 
-在 Event 的 Effects 新增 `option`，再由階層選單選擇「Node → Element → 整列或 Item」與 `enable`／`disable`。目標可以位於其他 Scene Node，Global Event 也可使用；Editor 保存的是穩定 ID，並保護仍被引用的 Node、Element 與 Item。這些啟用狀態會進入 Ren'Py 存檔，不會因節點切換自行重設，但開始新遊戲時會清空。
+在實際 Scene Node Event 的 Effects 新增 `option`，再由階層選單選擇目前節點的「Element → 整列或 Item」與 `enable`／`disable`。Event 不能控制其他 Scene Node 的 Option，Global Event 也不提供 Option Effect；Editor 保存穩定 Node／Element／Item ID，並保護仍被引用的 Element 與 Item。這些啟用狀態會進入 Ren'Py 存檔，不會因節點切換自行重設，但開始新遊戲時會清空。
 
 畫布 Preview Background 只改變該 Options 文件的 Editor 預覽；留空代表沒有預覽底圖，不影響遊戲畫面。
 
@@ -129,7 +129,7 @@ Content label 應返回 Runner。不要在一般 Content 中自行複製 Event E
 
 ### Stats
 
-Stats 是有 `Init`、`Min`、`Max` 的數值。Conditions 可比較數值，Effects 可 `set`、`+`、`-`、`*`、`/`。
+Stats 是有 `Init`、`Min`、`Max` 的數值，並以只供管理使用的 `Group` 整理；未指定群組會歸入預設的 `Normal`。Stats 外框右上角的加號會建立新群組及第一個 Stat，各群組內的加號則繼續加入該組數值。群組名稱可直接編輯，`Normal` 保持為固定預設群組。Event 的 Stat Conditions／Effects 使用「Group → Stat」兩層選單，選定後仍只顯示 Stat 名稱。群組不改變 Stat ID、Runtime 存取或存檔格式。Conditions 可比較數值，Effects 可 `set`、`+`、`-`、`*`、`/`。
 
 ### Memory Banks
 

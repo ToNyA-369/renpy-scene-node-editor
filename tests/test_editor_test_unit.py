@@ -63,6 +63,8 @@ class EditorTestUnitTest(unittest.TestCase):
             stats = json.loads((game_root / "DATA" / "Stats.json").read_text(encoding="utf-8"))
             memories = json.loads((game_root / "DATA" / "Memories.json").read_text(encoding="utf-8"))
             self.assertEqual(stats["test_points"]["Init"], 20)
+            self.assertEqual(stats["test_points"]["Group"], "測試資源")
+            self.assertEqual(stats["test_actions"]["Group"], "流程追蹤")
             self.assertEqual(set(stats), {"test_points", "test_actions"})
             self.assertEqual(set(memories), {"memory", "test_session"})
 
@@ -269,8 +271,13 @@ class EditorTestUnitTest(unittest.TestCase):
                 self.assertEqual(global_detail["options"], app.default_options())
                 self.assertEqual(
                     [entry["data"]["ID"] for entry in global_detail["events"]],
-                    ["global_action_checkpoint", "global_enable_controlled_list", "global_keyboard"],
+                    ["global_action_checkpoint", "global_keyboard"],
                 )
+                self.assertFalse(any(
+                    effect.get("type") == "option"
+                    for entry in global_detail["events"]
+                    for effect in entry["data"].get("Effects", [])
+                ))
                 self.assertEqual(
                     [(item["file"], item["labels"]) for item in root_detail["contents"]],
                     [

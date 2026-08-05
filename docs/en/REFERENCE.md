@@ -58,7 +58,7 @@ This document defines the current public-alpha data and Runtime contracts. For n
 { "ID": "__global__", "Name": "GLOBAL" }
 ```
 
-Name is editable; ID is not. The Global Node is absent from `scene_catalog["nodes"]`, never enters `scene_stack`, and cannot be Root or Next Node. It has no `Options.json`; the Editor and schema reject `Action:<option_id>` on Global Events.
+Name is editable; ID is not. The Global Node is absent from `scene_catalog["nodes"]`, never enters `scene_stack`, and cannot be Root or Next Node. It has no `Options.json`; the Editor and schema reject both `Action:<option_id>` Triggers and Option Effects on Global Events.
 
 Global Event prepare retains both `owner_node_id = "__global__"` and `node_id = <current Stack top>`. Once uses `once:global:<event_id>`. Effects and Content belong to the Global Event, while a non-lifecycle End up resolves against the current real Stack.
 
@@ -262,7 +262,7 @@ TEXTBOX Item:
 { "type": "option", "op": "disable", "target": "item", "node": "shop", "element": "shop_actions", "item": "buy_weapon" }
 ```
 
-Option Effects support `enable` and `disable`. Any Scene Node or Global Event may target a `CONTROLLED` Option in any real Scene Node. Operations are idempotent. State participates in Ren'Py saves and rollback and does not reset on REDO, GOTO, REPLACE, or EXIT; a new game clears it through `scene_reset_state()`. The Editor displays creator-facing Names while JSON stores stable IDs, and it rejects deletion of a referenced Node, Element, or Item.
+Option Effects support `enable` and `disable`. A real Scene Node Event may target only a `CONTROLLED` Option owned by that same Scene Node; cross-node and Global Event Option Effects are invalid. Operations are idempotent. State participates in Ren'Py saves and rollback and does not reset on REDO, GOTO, REPLACE, or EXIT; a new game clears it through `scene_reset_state()`. The Editor lists only the current Node's creator-facing Element and Item Names while JSON stores stable Node, Element, and Item IDs. Referenced Elements and Items cannot be deleted.
 
 Event Effects handle Stats, Memories, and Option Availability. Backgrounds, music, sound effects, transitions, and fades belong in Content labels using native Ren'Py syntax. Options may still select Hover Sound and Click Sound from `game/audio/`.
 
@@ -271,8 +271,10 @@ Event Effects handle Stats, Memories, and Option Availability. Backgrounds, musi
 `Stats.json`:
 
 ```json
-{ "money": { "Name": "Money", "Init": 0, "Min": 0, "Max": 999 } }
+{ "money": { "Name": "Money", "Group": "Resources", "Init": 0, "Min": 0, "Max": 999 } }
 ```
+
+`Group` is authoring metadata; an omitted or blank value normalizes to `Normal`. The State workspace always displays `Normal`, creates groups from the outer Stats control, and creates Stats inside each group. Event Stat Condition / Effect pickers show “Group → Stat”. JSON keys, Runtime state, saves, and `scene_get_stat("money")` still use the flat stable Stat ID; groups do not create nested state.
 
 `Memories.json`:
 

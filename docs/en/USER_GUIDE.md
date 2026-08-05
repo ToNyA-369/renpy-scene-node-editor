@@ -40,7 +40,7 @@ Nodes do not store a Screen. Define HUDs, scene shells, and other Screens in cre
 The top of the node list contains a fixed, undeletable Global Node. It is an authoring scope for global Events and Content, not a real Scene Node:
 
 - It never enters the Scene Stack and cannot be ROOT or a GOTO / REPLACE destination.
-- It has no Options workspace, and Global Events cannot use Option Triggers.
+- It has no Options workspace, and Global Events cannot use Option Triggers or Option Effects.
 - On Node, Keyboard, and Mouse Events merge with the current real node's same-Trigger Events before Conditions, Priority, and Weight selection.
 - On Enter / On Exit join every real node's matching lifecycle queue.
 - A Global Event's REDO, GOTO, REPLACE, or EXIT operates on the real Stack-top node at trigger time.
@@ -103,7 +103,7 @@ Every Element has an `Availability` mode:
 
 TEXTBOX supports Availability on both the whole Element and each Item, so an Effect can reveal a separate list or add one Item to an existing list. An Item requires both its own and its parent Element's availability; temporarily disabling the parent does not erase enabled Item state. PICTURE and HITBOX provide Element-level control only.
 
-Add an `option` Effect to an Event, then choose “Node → Element → whole list or Item” and `enable` / `disable` from the hierarchical controls. Targets may belong to another Scene Node and Global Events may use them. The Editor saves stable IDs and protects referenced Nodes, Elements, and Items from deletion. Enabled state participates in Ren'Py saves, does not reset on stack transitions, and is cleared when a new game starts.
+Add an `option` Effect to an Event on a real Scene Node, then choose “Element → whole list or Item” from that current Node and select `enable` / `disable`. An Event cannot control Options owned by another Scene Node, and Global Events do not provide Option Effects. The Editor saves stable Node, Element, and Item IDs and protects referenced Elements and Items from deletion. Enabled state participates in Ren'Py saves, does not reset on stack transitions, and is cleared when a new game starts.
 
 Canvas Preview Background affects only that Options document in the editor. Leaving it empty means no preview image and never changes the game scene.
 
@@ -129,7 +129,7 @@ A Content label should return to the Runner. Do not duplicate Event Effects or d
 
 ### Stats
 
-Stats are numbers with `Init`, `Min`, and `Max`. Conditions compare them; Effects support `set`, `+`, `-`, `*`, and `/`.
+Stats are numbers with `Init`, `Min`, and `Max`, organized by an authoring-only `Group`. A missing Group is assigned to the default `Normal` group. The plus button on the outer Stats card creates a group with its first Stat; the plus button inside each group adds another Stat to that group. Group names are directly editable, while `Normal` remains the fixed default group. Event Stat Conditions / Effects use a two-level “Group → Stat” picker and show only the Stat name after selection. Groups do not change Stat IDs, Runtime access, or save data. Conditions compare values; Effects support `set`, `+`, `-`, `*`, and `/`.
 
 ### Memory Banks
 

@@ -513,6 +513,14 @@ init -100 python:
             else:
                 raise Exception("Unknown Memory operation: {}".format(operation))
         elif effect_type == "option":
+            target_node_id = str(effect.get("node") or "").strip()
+            if target_node_id != str(node_id or "").strip():
+                raise Exception(
+                    "Option Effect must target its owning Scene Node: {} cannot target {}".format(
+                        node_id,
+                        target_node_id,
+                    )
+                )
             scene_apply_option_effect(effect)
         else:
             raise Exception("Unknown Effect type: {}".format(effect_type))
@@ -526,6 +534,11 @@ init -100 python:
                 scene_event_once_memory(event, prepared.get("owner_node_id")),
             )
         for effect in event.get("Effects", []):
+            if (
+                prepared.get("owner_node_id") == SCENE_GLOBAL_NODE_ID
+                and str(effect.get("type") or "").lower() == "option"
+            ):
+                raise Exception("Global Event cannot use an Option Effect.")
             scene_apply_effect(prepared["node_id"], effect)
 
 

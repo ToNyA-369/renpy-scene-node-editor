@@ -16,6 +16,7 @@ js/core/event_contract.js       Editor Trigger and End up contract
 js/core/state_rule_contract.js  Editor Condition and Effect contract
 js/ui/choice_picker.js           shared hierarchical select interaction
 js/workspaces/event_editor.js    Event rules, weighted choices, and DOM serialization
+js/workspaces/state_editor.js    Stat grouping and hierarchical picker data
 js/workspaces/graph_model.js     graph relationships, layout and paths
 app.js                           state composition, rendering and module coordination
 ```

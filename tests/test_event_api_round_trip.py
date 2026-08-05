@@ -47,7 +47,7 @@ class EventApiRoundTripTest(unittest.TestCase):
                 {"type": "stat", "id": "money", "op": "-", "value": 10},
                 {"type": "memory", "bank": "memory", "id": "visited", "op": "add"},
                 {"type": "memory", "bank": "memory", "op": "clear"},
-                {"type": "option", "op": "enable", "target": "item", "node": "branch_a", "element": "actions", "item": "buy"},
+                {"type": "option", "op": "enable", "target": "item", "node": "root", "element": "actions", "item": "buy"},
             ],
             "Content": {"show_purchase": 3, "show_discount": 1},
             "Weight": 2.5,
@@ -125,6 +125,28 @@ class EventApiRoundTripTest(unittest.TestCase):
         invalid = dict(golden, ID="global_option", Trigger="Action:continue")
         with self.assertRaisesRegex(app.ApiError, "Global Event 不可使用 Option Trigger"):
             app.save_event({"node": "@global", "event": invalid})
+
+        invalid_effect = dict(
+            golden,
+            ID="global_option_effect",
+            Effects=[{
+                "type": "option",
+                "op": "enable",
+                "target": "element",
+                "node": "root",
+                "element": "actions",
+            }],
+        )
+        with self.assertRaisesRegex(app.ApiError, "Global Event 不可使用 Option Effect"):
+            app.save_event({"node": "@global", "event": invalid_effect})
+
+        cross_node_effect = {
+            **invalid_effect,
+            "ID": "cross_node_option_effect",
+            "Effects": [{**invalid_effect["Effects"][0], "node": "other"}],
+        }
+        with self.assertRaisesRegex(app.ApiError, "只能控制同一個 Scene Node"):
+            app.save_event({"node": "root", "event": cross_node_effect})
 
 
 if __name__ == "__main__":

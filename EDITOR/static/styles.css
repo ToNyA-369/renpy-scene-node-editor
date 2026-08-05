@@ -4702,20 +4702,25 @@ textarea:hover {
 }
 
 /* State workspace: Stats and Memory Banks share the editor visual language. */
-.state-definitions-page {
-  display: grid;
-  align-items: start;
-  grid-template-columns: minmax(0, 1.55fr) minmax(320px, 0.85fr);
-  gap: 24px;
+#statsPanel {
+  border-radius: 0;
 }
 
-.state-definitions-page.equal-row-counts {
-  align-items: stretch;
+.panel-page.wide.state-definitions-page {
+  display: grid;
+  width: 100%;
+  max-width: none;
+  margin: 0;
+  padding: 0 0 52px;
+  align-items: start;
+  grid-template-columns: minmax(0, 1.7fr) minmax(340px, 0.8fr);
+  gap: 24px;
 }
 
 .state-definition-section {
   display: grid;
-  grid-template-rows: auto 1fr;
+  grid-template-rows: auto auto;
+  align-self: start;
   min-width: 0;
   padding: 24px;
   gap: 20px;
@@ -4769,8 +4774,82 @@ textarea:hover {
   overflow-x: auto;
 }
 
+.stat-groups {
+  display: grid;
+  align-content: start;
+  gap: 16px;
+  min-width: 0;
+}
+
+.stat-group-card {
+  min-width: 0;
+  padding: 14px;
+  background: var(--surface-soft);
+  border: 1px solid var(--line);
+  border-radius: 18px;
+}
+
+.stat-group-card .state-data-table tbody td {
+  background: var(--surface);
+}
+
+.stat-group-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  margin-bottom: 8px;
+}
+
+.stat-group-name-field {
+  min-width: 0;
+  margin: 0;
+}
+
+.stat-group-name-field input {
+  width: min(280px, 100%);
+  height: 38px;
+  padding: 0 10px;
+  color: var(--ink);
+  background: var(--surface);
+  border: 1px solid transparent;
+  border-radius: 11px;
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.stat-group-name-field input:hover:not([readonly]),
+.stat-group-name-field input:focus:not([readonly]) {
+  border-color: var(--line-strong);
+}
+
+.stat-group-name-field input[readonly] {
+  background: transparent;
+  cursor: default;
+}
+
+.stat-group-add-button {
+  flex: 0 0 112px;
+  width: 112px;
+  height: 38px;
+  min-height: 38px;
+  padding: 0;
+  color: var(--ink);
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  border-radius: 12px;
+  font-size: 19px;
+  line-height: 1;
+}
+
+.stat-group-add-button:hover {
+  color: var(--ink);
+  background: var(--surface);
+  border-color: var(--accent);
+}
+
 .state-data-table {
-  min-width: 580px;
+  min-width: 720px;
   border-collapse: separate;
   border-spacing: 0 10px;
 }
@@ -4817,7 +4896,26 @@ textarea:hover {
 
 .stats-table th:first-child,
 .stats-table td:first-child {
-  width: 34%;
+  width: 40%;
+}
+
+.stats-table {
+  width: 100%;
+  min-width: 0;
+  table-layout: fixed;
+}
+
+.stats-table input {
+  min-width: 0;
+}
+
+.stats-table th:nth-child(2),
+.stats-table td:nth-child(2),
+.stats-table th:nth-child(3),
+.stats-table td:nth-child(3),
+.stats-table th:nth-child(4),
+.stats-table td:nth-child(4) {
+  width: 17%;
 }
 
 .stats-table .action-cell,
@@ -5630,6 +5728,10 @@ body *::-webkit-scrollbar {
   border-top: 1px solid var(--line);
 }
 
+.option-textbox-items-section > .option-item-fields {
+  margin-top: 18px;
+}
+
 .option-primary-block .option-static-header {
   margin-bottom: 0;
 }
@@ -5666,10 +5768,6 @@ body *::-webkit-scrollbar {
 
 .option-editor-page .option-wide-field {
   grid-column: 1 / -1;
-}
-
-.option-sound-section .option-static-header {
-  margin-bottom: 18px;
 }
 
 .option-canvas-mode .option-canvas-column {

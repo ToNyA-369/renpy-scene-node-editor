@@ -782,6 +782,7 @@ def validate_stats(data):
             "Min": minimum,
             "Init": initial,
         }
+        result[stat_id]["Group"] = str(settings.get("Group") or "Normal").strip() or "Normal"
     return result
 
 
@@ -842,7 +843,7 @@ def validate_event_trigger(value):
     return f"{source}:{payload}"
 
 
-def validate_event(event, global_scope=False):
+def validate_event(event, global_scope=False, owner_node_id=None):
     if not isinstance(event, dict):
         raise ApiError(HTTPStatus.BAD_REQUEST, "Event 必須是 JSON object。")
     event_id = clean_file_name(event.get("ID") or generate_id("event"), ".json")
@@ -867,6 +868,20 @@ def validate_event(event, global_scope=False):
 
     content = event.get("Content")
     validate_weight_map(content, "Content")
+    validated_effects = [validate_effect(item, "Event Effect") for item in effects]
+    if global_scope and any(item.get("type") == "option" for item in validated_effects):
+        raise ApiError(HTTPStatus.BAD_REQUEST, "Global Event 不可使用 Option Effect。")
+    for effect in validated_effects:
+        if (
+            effect.get("type") == "option"
+            and owner_node_id
+            and effect.get("node") != owner_node_id
+        ):
+            raise ApiError(
+                HTTPStatus.BAD_REQUEST,
+                "Option Effect 只能控制同一個 Scene Node 的 Option。",
+            )
+
     result = {
         "ID": event_id,
         "Name": str(event.get("Name") or event_id),
@@ -874,7 +889,7 @@ def validate_event(event, global_scope=False):
         "Priority": priority,
         "Once": bool(event.get("Once", False)),
         "Conditions": [validate_condition(item, "Event Condition") for item in conditions],
-        "Effects": [validate_effect(item, "Event Effect") for item in effects],
+        "Effects": validated_effects,
         "Content": content,
     }
     if is_lifecycle:
@@ -1008,7 +1023,11 @@ def validate_project():
         for entry in detail["events"]:
             event_location = f"{location}/{EVENT_DIR}/{entry['file']}"
             try:
-                event = validate_event(entry["data"], global_scope=global_scope)
+                event = validate_event(
+                    entry["data"],
+                    global_scope=global_scope,
+                    owner_node_id=None if global_scope else node_id,
+                )
             except ApiError as exc:
                 issues.append({"level": "error", "location": event_location, "message": exc.message})
                 continue
@@ -1119,7 +1138,12 @@ def save_event(payload):
     directory = authoring_directory(payload.get("node"))
     if not (directory / "Node.json").exists():
         raise ApiError(HTTPStatus.NOT_FOUND, "找不到指定的 Global Node。" if global_scope else "找不到指定的 Scene Node。")
-    event = validate_event(payload.get("event"), global_scope=global_scope)
+    node = read_json(directory / "Node.json", {}) or {}
+    event = validate_event(
+        payload.get("event"),
+        global_scope=global_scope,
+        owner_node_id=None if global_scope else node.get("ID"),
+    )
     event_root = directory / EVENT_DIR
     event_root.mkdir(exist_ok=True)
     original = payload.get("originalId")

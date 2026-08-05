@@ -92,6 +92,7 @@ class OptionAvailabilityProjectTest(unittest.TestCase):
             "Canvas": {},
             "Elements": [textbox(availability=availability, item_availability=availability)],
         })
+        write_json(root / "SCENENODE" / "controller" / "Node.json", {"ID": "controller", "Name": "Controller"})
         event = {
             "ID": "unlock_buy",
             "Name": "Unlock Buy",
@@ -105,7 +106,7 @@ class OptionAvailabilityProjectTest(unittest.TestCase):
             "End up": "REDO",
             "Next Node": None,
         }
-        write_json(root / "GLOBALNODE" / "EVENTPOOL" / "unlock_buy.json", event)
+        write_json(root / "SCENENODE" / "shop" / "EVENTPOOL" / "unlock_buy.json", event)
         event.update({
             "ID": "buy",
             "Name": "Buy",
@@ -128,7 +129,7 @@ class OptionAvailabilityProjectTest(unittest.TestCase):
                 self.assertEqual(len(targets), 2)
                 self.assertEqual(targets[1]["itemName"], "Buy")
                 self.assertEqual(references[0]["eventId"], "unlock_buy")
-                self.assertEqual(node_references[0]["referenceType"], "option-effect")
+                self.assertEqual(node_references, [])
                 self.assertEqual(app.validate_project(), [])
                 with self.assertRaisesRegex(app.ApiError, "仍被 1 個 Event Effect 引用"):
                     app.validate_option_target_removals(
@@ -149,12 +150,23 @@ class OptionAvailabilityProjectTest(unittest.TestCase):
                 issues = app.validate_project()
                 self.assertTrue(any("必須設為 CONTROLLED" in issue["message"] for issue in issues))
 
-                event_path = project_root / "GLOBALNODE" / "EVENTPOOL" / "unlock_buy.json"
+                event_path = project_root / "SCENENODE" / "shop" / "EVENTPOOL" / "unlock_buy.json"
                 event = json.loads(event_path.read_text(encoding="utf-8"))
                 event["Effects"][0]["item"] = "missing"
                 write_json(event_path, event)
                 issues = app.validate_project()
                 self.assertTrue(any("找不到 Option Effect 目標" in issue["message"] for issue in issues))
+
+                event["Effects"][0]["item"] = "buy"
+                write_json(event_path, event)
+                write_json(project_root / "GLOBALNODE" / "EVENTPOOL" / "invalid_option_effect.json", event)
+                issues = app.validate_project()
+                self.assertTrue(any("Global Event 不可使用 Option Effect" in issue["message"] for issue in issues))
+
+                (project_root / "GLOBALNODE" / "EVENTPOOL" / "invalid_option_effect.json").unlink()
+                write_json(project_root / "SCENENODE" / "controller" / "EVENTPOOL" / "cross_node.json", event)
+                issues = app.validate_project()
+                self.assertTrue(any("只能控制同一個 Scene Node" in issue["message"] for issue in issues))
             finally:
                 app.PROJECT_ROOT = previous
 
@@ -177,31 +189,45 @@ class OptionAvailabilityRuntimeTest(unittest.TestCase):
         self.assertFalse(runtime["scene_option_is_available"]("shop", element))
         self.assertEqual(runtime["scene_option_visible_items"]("shop", element), [])
 
-        runtime["scene_apply_effect"]("root", option_effect("element"))
+        runtime["scene_apply_effect"]("shop", option_effect("element"))
         self.assertTrue(runtime["scene_option_is_available"]("shop", element))
         self.assertEqual(runtime["scene_option_visible_items"]("shop", element), [])
 
-        runtime["scene_apply_effect"]("root", option_effect())
-        runtime["scene_apply_effect"]("root", option_effect())
+        runtime["scene_apply_effect"]("shop", option_effect())
+        runtime["scene_apply_effect"]("shop", option_effect())
         self.assertEqual(runtime["scene_option_visible_items"]("shop", element), [item])
 
-        runtime["scene_apply_effect"]("root", option_effect("element", op="disable"))
+        runtime["scene_apply_effect"]("shop", option_effect("element", op="disable"))
         self.assertEqual(runtime["scene_option_visible_items"]("shop", element), [])
-        runtime["scene_apply_effect"]("root", option_effect("element"))
+        runtime["scene_apply_effect"]("shop", option_effect("element"))
         self.assertEqual(runtime["scene_option_visible_items"]("shop", element), [item])
 
     def test_disable_is_idempotent_and_invalid_targets_are_explicit(self):
         runtime = self.runtime()
-        runtime["scene_apply_effect"]("root", option_effect(op="disable"))
-        runtime["scene_apply_effect"]("root", option_effect(op="disable"))
+        runtime["scene_apply_effect"]("shop", option_effect(op="disable"))
+        runtime["scene_apply_effect"]("shop", option_effect(op="disable"))
         self.assertEqual(runtime["scene_enabled_options"], [])
 
         with self.assertRaisesRegex(Exception, "Unknown Option Item"):
-            runtime["scene_apply_effect"]("root", option_effect(item="missing"))
+            runtime["scene_apply_effect"]("shop", option_effect(item="missing"))
 
         runtime["scene_catalog"]["options"]["shop"]["Elements"][0]["Availability"] = "ALWAYS"
         with self.assertRaisesRegex(Exception, "not CONTROLLED"):
-            runtime["scene_apply_effect"]("root", option_effect("element"))
+            runtime["scene_apply_effect"]("shop", option_effect("element"))
+
+        with self.assertRaisesRegex(Exception, "must target its owning Scene Node"):
+            runtime["scene_apply_effect"]("other", option_effect("element"))
+
+    def test_prepared_global_event_rejects_option_effect(self):
+        runtime = self.runtime()
+        prepared = {
+            "owner_node_id": "__global__",
+            "node_id": "shop",
+            "event": {"Once": False, "Effects": [option_effect("element")]},
+        }
+
+        with self.assertRaisesRegex(Exception, "Global Event cannot use an Option Effect"):
+            runtime["scene_apply_prepared"](prepared)
 
 
 if __name__ == "__main__":

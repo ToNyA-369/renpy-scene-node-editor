@@ -27,6 +27,7 @@ class EditorMaintenanceContractTests(unittest.TestCase):
             "/js/ui/choice_picker.js",
             "/js/workspaces/event_editor.js",
             "/js/workspaces/graph_model.js",
+            "/js/workspaces/state_editor.js",
         ):
             with self.subTest(module=module):
                 self.assertLess(INDEX_HTML.index(f'src="{module}"'), application)

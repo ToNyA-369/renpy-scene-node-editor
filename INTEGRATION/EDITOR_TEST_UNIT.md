@@ -40,8 +40,8 @@ python3 tools/create_editor_test_unit.py "/完整路徑/SceneEditorTest" --launc
 ## Editor 測試清單
 
 1. 按「檢查專案」，預期為 `0 個錯誤、0 個提醒`。
-2. 「狀態」應有初始值 20 的「測試點數」、初始值 0 的「操作次數」，以及 `Memory`、`測試階段記憶` 兩個 Memory Banks。
-3. 節點抽屜頂端應固定顯示「全局系統」Global Node，下面有 `root`、`options_lab`、`branch_lab`、`outcome_success`、`outcome_fallback`、`replace_parent`、`replace_child_a`、`replace_child_b` 共 8 個實際節點。Global Node 不可刪除、不可設為 ROOT；選取後「選項」功能區必須停用，Event Trigger 也不能選 Option。
+2. 「狀態」應固定顯示 `Normal`，並將初始值 20 的「測試點數」放在「測試資源」群組、初始值 0 的「操作次數」放在「流程追蹤」群組，同時顯示 `Memory`、`測試階段記憶` 兩個 Memory Banks。State 外框應與 Event／Options 使用相同的完整工作區寬度；桌面版 Stat 欄位應完整顯示而不需橫向捲動。Stats 外層加號應新增群組及第一個 Stat，群組內應使用較寬的長方形加號加入同組 Stat；修改 Group 後應在重載後保留。新增 Stat 只可增高 Stats 卡片，不得同步拉高 Memory 卡片。
+3. 節點抽屜頂端應固定顯示「全局系統」Global Node，下面有 `root`、`options_lab`、`branch_lab`、`outcome_success`、`outcome_fallback`、`replace_parent`、`replace_child_a`、`replace_child_b` 共 8 個實際節點。Global Node 不可刪除、不可設為 ROOT；選取後「選項」功能區必須停用，Event Trigger 與 Effect 類型也都不能選 Option。
 4. 在 `root` 的 Event 編輯 Content。下拉選單第一層應顯示「00 節點生命週期演出」「01 獎勵與權重內容」與「02 條件與流程內容」等創作者名稱，而不是生成文件 ID；停留或展開後才看到各自的 label。父選單與 label 子選單之間應有清楚間隔；游標橫越間隔時子選單不可消失。選定 label 後，欄位只顯示 label 的顯示名稱。
 5. Node 表單應只有 Name 與 ID，不應出現 Background 或 Screen；下方顯示 Events、Options、Content Labels、Flow Links 數量，以及 Incoming／Outgoing 與三個生命週期階段摘要。相同目標與流程類型的多個 Events 應合併為一個連接標籤並顯示倍數。開啟 `root_enter_background`、`root_on_node_once`、`root_exit_cleanup` 三個 Events，Auto 時機應分別顯示 On Enter、On Node、On Exit。On Enter／On Exit 只顯示 Priority 與 Once，不應出現 Weight、End up、Next Node 或額外提示文字；Conditions、Effects 與 Content 仍存在。
 6. 巡覽節點、Event、Options 與狀態中的下拉選單；它們應使用一致且固定寬度的自訂選單。圖片或音訊至少展開四層目錄，所有層級都必須可見且保持同一展開方向，不可因欄位寬度反覆左右跳動。聚焦選單後，`↑`／`↓` 應巡覽同層項目、`→` 應進入子選單、`←` 應回到父層、Enter 應選取、Esc 應關閉。
@@ -52,10 +52,10 @@ python3 tools/create_editor_test_unit.py "/完整路徑/SceneEditorTest" --launc
 11. 把任一 Name、數字或選單欄位快速連續修改兩次，第二次完成後等待自動儲存，再切換工作區並返回。畫面與磁碟都必須保留最後一次輸入，不可被較早的儲存回應回滾。
 12. 在 `options_lab` 的 Options 工作區，確認側欄寬度與 Event 一致；中間把手只顯示三條豎線。慢速拖曳把手時，分隔線應逐像素跟隨游標，左右欄框與淡入淡出比例應連續同步；新舊內容都只能顯示在各自欄框內，兩框中央也不可透出底層工作區。單擊把手應呈現明顯的加速後減速，而非等速平移；切換結束的最後一幀不應閃白、重新淡入或跳動。`Command+.`／`Ctrl+.` 應切換表單與畫布。切至畫布後，Preview Background 應顯示測試圖片，也可從 `images/editor_test/gallery` 的階層選單改選或設為 None；選單超過可視高度時應可捲動。
 13. 在畫布直接點選 TEXTBOX、綠色 PICTURE 與 HITBOX，右側 Inspector 應跟著切換，不應再出現元件下拉選單。
-14. 三種 Element 的表單都應以獨立「聲音」卡片顯示 Hover／Click Sound，音訊選單只來自 `audio/` 並依 `editor_test/sfx/ui` 等子目錄分層；選定後只顯示檔名。Picture 的 Name 與 Trigger 應左右齊平；Picture 的 Idle 圖片仍在表單選擇。Options 表單使用 `Name`、`Text` 與 `Items` 英文標籤。
+14. 三種 Element 的表單都應以無標題的獨立卡片顯示 Hover／Click Sound，音訊選單只來自 `audio/` 並依 `editor_test/sfx/ui` 等子目錄分層；選定後只顯示檔名。TEXTBOX 的 Items 清單與下方 Item 欄位分隔線之間應留有清楚間距。Picture 的 Name 與 Trigger 應左右齊平；Picture 的 Idle 圖片仍在表單選擇。Options 表單使用 `Name`、`Text` 與 `Items` 英文標籤。
 15. 三種 Element 的 Hover 效果與 Hover 顏色應位於畫布的「外觀」；Picture 啟用 Hover 後可在同處選擇 Hover 圖片。關閉 Hover 效果後相關顏色與圖片欄位應收起。畫布的「版面細節」「外觀」標題旁不應有摘要文字。
 16. 在 `replace_child_a` 開啟「REPLACE 前往 Child B」Event。End up 應顯示 `REPLACE`，Next Node 應顯示 `REPLACE Child B` 而非技術 ID。End up 下拉選單應同時提供 REDO、GOTO、REPLACE、EXIT；改為 REPLACE 時 Next Node 編輯區必須保留單一節點與權重表兩種模式。
-17. 在 `options_lab` 的 `DATA Options 綜合測試` TEXTBOX，Element 應為 `Always`，「受控子選項：取得 2 點」Item 應為 `Controlled`；另一個 `受控選項列` TEXTBOX Element 應為 `Controlled`。開啟任何 Event 的 Effects，把類型切到 `option`，目標選單應依 Node → Element → 整列／Item 顯示創作者名稱，操作可選 `enable`／`disable`。已被 Effect 引用的 Element／Item 不得刪除。
+17. 在 `options_lab` 的 `DATA Options 綜合測試` TEXTBOX，Element 應為 `Always`，「受控子選項：取得 2 點」Item 應為 `Controlled`；另一個 `受控選項列` TEXTBOX Element 應為 `Controlled`。開啟該節點 Event 的 Effects，把類型切到 `option`，目標選單應只依目前節點的 Element → 整列／Item 顯示創作者名稱，操作可選 `enable`／`disable`；其他節點的目標不得出現。再開啟含 Stat Condition／Effect 的 Event，選單應依「測試資源／流程追蹤 → Stat」分層。已被 Effect 引用的 Element／Item 不得刪除。
 
 ## Ren'Py Runtime 測試清單
 
@@ -90,7 +90,7 @@ python3 tools/create_editor_test_unit.py "/完整路徑/SceneEditorTest" --launc
 1. 新遊戲進入 `options_lab` 時，不應看見「受控子選項：取得 2 點」或右側「受控選項列」。
 2. 按「顯示受控子選項」後，該 Item 應加入既有 `DATA Options 綜合測試` 清單；按它會增加 2 點。按「隱藏受控子選項」後它應再次消失。重複 enable／disable 不應報錯。
 3. 按「顯示受控選項列」後，右側應出現獨立 TEXTBOX；按其中項目會增加 5 點。按主清單的「隱藏受控選項列」後整列消失。
-4. 在任意節點按 `O`，Global Event 應跨節點啟用 `options_lab` 的受控選項列；之後進入 `options_lab` 即可看到它。
+4. Option Effect 只能控制所屬 Event 同一個 Scene Node 的目標；其他節點的目標不會出現在選單，手動寫入跨節點引用也應被驗證拒絕。Global Event 不提供 Option Effect。
 5. 啟用狀態在 REDO、GOTO、REPLACE、EXIT 與 Ren'Py 存檔／讀檔後保留；開始全新遊戲時重設為隱藏。父 TEXTBOX 暫時停用後再啟用時，其先前已啟用的 Item 狀態仍應保留；沒有可見 Item 的 TEXTBOX 不應留下空框。
 
 ### 分支、權重 Next Node 與 Node stack
