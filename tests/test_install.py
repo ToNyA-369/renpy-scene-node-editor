@@ -375,10 +375,17 @@ label start:
                     return json.loads(response.read().decode("utf-8"))
             except OSError:
                 time.sleep(0.1)
+        process.terminate()
+        try:
+            stdout, stderr = process.communicate(timeout=5)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            stdout, stderr = process.communicate(timeout=5)
         raise AssertionError(
-            "Editor did not become ready within 15 seconds: {} (process {} is still running)".format(
+            "Editor did not become ready within 15 seconds: {}\nstdout:\n{}\nstderr:\n{}".format(
                 url,
-                process.pid,
+                stdout,
+                stderr,
             )
         )
 
