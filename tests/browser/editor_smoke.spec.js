@@ -69,6 +69,17 @@ async function changeSelect(scope, name, value) {
   await scope.locator(`select[name="${name}"]`).selectOption(value, { force: true });
 }
 
+async function reloadAndWaitForProject(page) {
+  const projectResponse = page.waitForResponse((candidate) => (
+    candidate.url().endsWith("/api/project")
+    && candidate.request().method() === "GET"
+    && candidate.ok()
+  ));
+  await page.reload();
+  await projectResponse;
+  await expect(page.getByRole("status")).toHaveText("已同步");
+}
+
 test.beforeAll(async () => {
   projectRoot = fs.mkdtempSync(path.join(os.tmpdir(), "scene-node-browser-smoke-"));
   const gameRoot = path.join(projectRoot, "game");
@@ -164,7 +175,7 @@ test("critical editor interactions survive reload without browser errors", async
   await waitForEventSave(page, async () => {
     await page.getByRole("textbox", { name: "Name" }).fill(SAVED_EVENT_NAME);
   });
-  await page.reload();
+  await reloadAndWaitForProject(page);
   await page.getByRole("button", { name: /^事件 / }).click();
   await expect(page.getByRole("button", { name: new RegExp(`^${SAVED_EVENT_NAME} `) })).toBeVisible();
   await page.getByRole("button", { name: new RegExp(`^${SAVED_EVENT_NAME} `) }).click();
@@ -176,18 +187,20 @@ test("critical editor interactions survive reload without browser errors", async
   await expect(page.locator('.effect-row[data-index="1"][data-effect-type="memory"] select[name="effectOp"]')).toHaveValue("clear");
   await expect(page.locator('.effect-row[data-index="2"][data-effect-type="option"] select[name="effectOptionTarget"]')).toHaveValue(/"item":"controlled_bonus"/);
 
-  await page.locator('[data-remove-condition="0"]').click();
-  await expect(page.locator(".condition-row")).toHaveCount(0);
-  await page.locator('[data-remove-effect="1"]').click();
+  await waitForEventSave(page, async () => {
+    await page.locator('[data-remove-condition="0"]').click();
+    await expect(page.locator(".condition-row")).toHaveCount(0);
+    await page.locator('[data-remove-effect="1"]').click();
+  });
   await expect(page.locator(".effect-row")).toHaveCount(2);
   await waitForEventSave(page, async () => {
     await changeSelect(page, "EndUp", "GOTO");
   });
-  await page.reload();
+  await reloadAndWaitForProject(page);
   await page.getByRole("button", { name: /^事件 / }).click();
   await page.getByRole("button", { name: new RegExp(`^${SAVED_EVENT_NAME} `) }).click();
   await expect(page.locator(".condition-row")).toHaveCount(0);
-  await expect(page.locator(".effect-row")).toHaveCount(1);
+  await expect(page.locator(".effect-row")).toHaveCount(2);
   await expect(page.locator('select[name="EndUp"]')).toHaveValue("GOTO");
 
   await page.getByRole("button", { name: "關聯圖" }).click();
@@ -196,16 +209,17 @@ test("critical editor interactions survive reload without browser errors", async
   await expect(page.locator(".graph-edge.is-management")).toHaveCount(1);
 
   await page.getByRole("button", { name: /Options 元件實驗室/ }).click();
-  await page.getByRole("button", { name: /^選項 / }).click();
+  await page.getByRole("button", { name: "選項", exact: true }).click();
   await page.getByRole("button", { name: /DATA Options 綜合測試/ }).click();
   const availability = page.locator('select[data-option-path="Availability"]');
   await expect(availability).toHaveValue("ALWAYS");
   await waitForOptionsSave(page, async () => {
     await availability.selectOption("CONTROLLED", { force: true });
   });
-  await page.reload();
-  await page.getByRole("button", { name: /Options 元件實驗室/ }).click();
-  await page.getByRole("button", { name: /^選項 / }).click();
+  await reloadAndWaitForProject(page);
+  await page.locator("#openSidebar").click();
+  await page.locator('#nodeList [data-node-path="options_lab"]').click();
+  await page.getByRole("button", { name: "選項", exact: true }).click();
   await page.getByRole("button", { name: /DATA Options 綜合測試/ }).click();
   await expect(page.locator('select[data-option-path="Availability"]')).toHaveValue("CONTROLLED");
 

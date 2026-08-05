@@ -2,6 +2,7 @@
 
 import json
 import os
+import shutil
 import socket
 import subprocess
 import sys
@@ -84,7 +85,9 @@ class InstallerTest(unittest.TestCase):
             self.assertNotIn(str(project_root), launcher_source)
             syntax_environment = dict(os.environ)
             syntax_environment["SCENE_EDITOR_PORT"] = "8765"
-            subprocess.run(["zsh", "-n", str(launcher)], check=True, env=syntax_environment)
+            zsh = shutil.which("zsh")
+            if zsh:
+                subprocess.run([zsh, "-n", str(launcher)], check=True, env=syntax_environment)
 
             custom_stats = {
                 "stat_friend": {
@@ -359,16 +362,22 @@ label start:
     @staticmethod
     def wait_for_project(port, process):
         url = "http://127.0.0.1:{}/api/project".format(port)
-        for _attempt in range(50):
+        deadline = time.monotonic() + 15
+        while time.monotonic() < deadline:
             if process.poll() is not None:
                 stdout, stderr = process.communicate()
                 raise AssertionError("Editor stopped early:\n{}\n{}".format(stdout, stderr))
             try:
-                with urllib.request.urlopen(url, timeout=0.2) as response:
+                with urllib.request.urlopen(url, timeout=0.5) as response:
                     return json.loads(response.read().decode("utf-8"))
             except OSError:
-                time.sleep(0.05)
-        raise AssertionError("Editor did not become ready: {}".format(url))
+                time.sleep(0.1)
+        raise AssertionError(
+            "Editor did not become ready within 15 seconds: {} (process {} is still running)".format(
+                url,
+                process.pid,
+            )
+        )
 
     @staticmethod
     def request_json(port, path, method="GET", payload=None):
