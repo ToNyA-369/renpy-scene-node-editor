@@ -68,7 +68,7 @@ def default_global_node():
 
 def default_options():
     return {
-        "Version": 1,
+        "Version": 2,
         "Canvas": {"Width": 1920, "Height": 1080, "Preview Background": ""},
         "Elements": [],
     }

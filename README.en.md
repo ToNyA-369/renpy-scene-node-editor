@@ -48,7 +48,8 @@ flowchart LR
 ```
 
 - An Option returns a Trigger; it does not select an Event directly.
-- Events own Conditions, Effects, Content, and the flow result.
+- Events own Conditions, Stat / Memory / Option Availability Effects, Content, and the flow result.
+- Options may be persistent `Always` entries or `Controlled` by Effects; TEXTBOX supports whole-list and per-Item targets, including control from Global Events.
 - Content stores a Ren'Py `label` name, not an `.rpy` filename.
 - On Enter and On Exit may run several Events at node boundaries; On Node preserves the former Auto single selection.
 - The fixed, undeletable Global Node provides a global Event scope. It never enters the Stack, has no Options, and cannot use Option Triggers.

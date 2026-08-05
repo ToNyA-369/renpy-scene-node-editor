@@ -9,6 +9,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 FRONTEND = ROOT / "EDITOR" / "static" / "app.js"
+GRAPH_MODEL = ROOT / "EDITOR" / "static" / "js" / "workspaces" / "graph_model.js"
 STYLES = ROOT / "EDITOR" / "static" / "styles.css"
 sys.path.insert(0, str(ROOT / "EDITOR"))
 
@@ -89,10 +90,11 @@ class ReplaceContractTest(unittest.TestCase):
 
     def test_graph_derives_parent_management_edges_and_reuses_goto_color(self):
         frontend = FRONTEND.read_text(encoding="utf-8")
+        graph_model = GRAPH_MODEL.read_text(encoding="utf-8")
         styles = STYLES.read_text(encoding="utf-8")
 
-        self.assertIn('endUp: "MANAGEMENT"', frontend)
-        self.assertIn("gotoParents.get(relationship.source)", frontend)
+        self.assertIn('endUp: "MANAGEMENT"', graph_model)
+        self.assertIn("gotoParents.get(relationship.source)", graph_model)
         self.assertIn('relationship.endUp === "MANAGEMENT" ? "Management" : "Goto"', frontend)
         self.assertIn(".graph-edge.is-replace path", styles)
         self.assertIn("stroke-dasharray: 8 5", styles)

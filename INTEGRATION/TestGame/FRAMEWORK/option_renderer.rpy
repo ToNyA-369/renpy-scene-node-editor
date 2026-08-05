@@ -10,19 +10,20 @@ screen scene_option_renderer(node_id, input_bindings=None):
         yfill True
 
         for element in scene_option_data(node_id).get("Elements", []):
-            if element.get("Type") == "TEXTBOX":
-                use scene_option_textbox(node_id, element)
-            elif element.get("Type") == "PICTURE":
-                use scene_option_picture(node_id, element)
-            elif element.get("Type") == "HITBOX":
-                use scene_option_hitbox(node_id, element)
+            if scene_option_is_available(node_id, element):
+                if element.get("Type") == "TEXTBOX":
+                    use scene_option_textbox(node_id, element)
+                elif element.get("Type") == "PICTURE":
+                    use scene_option_picture(node_id, element)
+                elif element.get("Type") == "HITBOX":
+                    use scene_option_hitbox(node_id, element)
 
 
 screen scene_option_textbox(node_id, element):
     $ element_id = element.get("ID", "option_textbox")
     $ rect = scene_option_rect(node_id, element)
     $ settings = element.get("List", {})
-    $ items = element.get("Items", [])
+    $ items = scene_option_visible_items(node_id, element)
     $ maximum = max(1, int(settings.get("Max Visible Items", 4)))
     $ visible_rows = max(1, min(len(items), maximum))
     $ item_height = scene_option_pixel(node_id, settings.get("Item Height", 72), "y")
@@ -38,59 +39,60 @@ screen scene_option_textbox(node_id, element):
     $ hover_enabled = bool(hover_settings.get("Enabled", True))
     $ hover_color = hover_settings.get("Color", "#ffffff18")
 
-    frame:
-        id element_id
-        pos (rect[0], rect[1])
-        xsize rect[2]
-        ysize frame_height
-        padding (padding, padding)
-        background Solid(style.get("Background", "#0b1118"))
+    if items:
+        frame:
+            id element_id
+            pos (rect[0], rect[1])
+            xsize rect[2]
+            ysize frame_height
+            padding (padding, padding)
+            background Solid(style.get("Background", "#0b1118"))
 
-        hbox:
-            xfill True
-            yfill True
-            spacing spacing
-
-            viewport:
-                id "{}_viewport".format(element_id)
+            hbox:
                 xfill True
                 yfill True
-                mousewheel True
-                draggable True
-                yadjustment adjustment
+                spacing spacing
 
-                vbox:
+                viewport:
+                    id "{}_viewport".format(element_id)
                     xfill True
-                    spacing spacing
-
-                    for item in items:
-                        $ item_background = scene_option_item_style(element, item, "Item Background", "#20302a")
-                        $ item_hover_background = scene_option_composite_color(item_background, hover_color) if hover_enabled else item_background
-                        button:
-                            id item.get("ID", "option_item")
-                            xfill True
-                            ysize item_height
-                            action Return(item.get("Trigger"))
-                            background Solid(item_background)
-                            hover_background Solid(item_hover_background)
-                            hover_sound element.get("Hover Sound") or None
-                            activate_sound element.get("Click Sound") or None
-
-                            fixed:
-                                text item.get("Text") or item.get("Name") or item.get("ID"):
-                                    xfill True
-                                    yalign 0.5
-                                    xalign float(scene_option_item_style(element, item, "Text Align", 0.5))
-                                    text_align float(scene_option_item_style(element, item, "Text Align", 0.5))
-                                    size scene_option_pixel(node_id, scene_option_item_style(element, item, "Text Size", 30))
-                                    color scene_option_item_style(element, item, "Text Color", "#ffffff")
-                                    hover_color scene_option_item_style(element, item, "Text Color", "#ffffff")
-
-            if show_scrollbar:
-                vbar:
-                    xsize scrollbar_width
                     yfill True
-                    value YScrollValue("{}_viewport".format(element_id))
+                    mousewheel True
+                    draggable True
+                    yadjustment adjustment
+
+                    vbox:
+                        xfill True
+                        spacing spacing
+
+                        for item in items:
+                            $ item_background = scene_option_item_style(element, item, "Item Background", "#20302a")
+                            $ item_hover_background = scene_option_composite_color(item_background, hover_color) if hover_enabled else item_background
+                            button:
+                                id item.get("ID", "option_item")
+                                xfill True
+                                ysize item_height
+                                action Return(item.get("Trigger"))
+                                background Solid(item_background)
+                                hover_background Solid(item_hover_background)
+                                hover_sound element.get("Hover Sound") or None
+                                activate_sound element.get("Click Sound") or None
+
+                                fixed:
+                                    text item.get("Text") or item.get("Name") or item.get("ID"):
+                                        xfill True
+                                        yalign 0.5
+                                        xalign float(scene_option_item_style(element, item, "Text Align", 0.5))
+                                        text_align float(scene_option_item_style(element, item, "Text Align", 0.5))
+                                        size scene_option_pixel(node_id, scene_option_item_style(element, item, "Text Size", 30))
+                                        color scene_option_item_style(element, item, "Text Color", "#ffffff")
+                                        hover_color scene_option_item_style(element, item, "Text Color", "#ffffff")
+
+                if show_scrollbar:
+                    vbar:
+                        xsize scrollbar_width
+                        yfill True
+                        value YScrollValue("{}_viewport".format(element_id))
 
 
 screen scene_option_picture(node_id, element):

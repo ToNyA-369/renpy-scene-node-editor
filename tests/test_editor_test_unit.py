@@ -197,16 +197,23 @@ class EditorTestUnitTest(unittest.TestCase):
             options = json.loads(
                 (game_root / "SCENENODE" / "options_lab" / "Options.json").read_text(encoding="utf-8")
             )
-            self.assertEqual([element["Type"] for element in options["Elements"]], ["TEXTBOX", "PICTURE", "HITBOX"])
+            self.assertEqual(options["Version"], 2)
+            self.assertEqual(
+                [element["Type"] for element in options["Elements"]],
+                ["TEXTBOX", "TEXTBOX", "PICTURE", "HITBOX"],
+            )
             textbox = options["Elements"][0]
             self.assertEqual(textbox["List"]["Max Visible Items"], 4)
-            self.assertEqual(len(textbox["Items"]), 6)
+            self.assertEqual(len(textbox["Items"]), 11)
+            self.assertEqual(textbox["Availability"], "ALWAYS")
+            self.assertEqual(textbox["Items"][8]["Availability"], "CONTROLLED")
+            self.assertEqual(options["Elements"][1]["Availability"], "CONTROLLED")
             self.assertTrue(textbox["List"]["Show Scrollbar"])
             self.assertTrue(textbox["Hover"]["Enabled"])
             self.assertIn("Hover Sound", textbox)
             self.assertEqual(options["Canvas"]["Preview Background"], create_editor_test_unit.TEST_IMAGE_FILE)
-            self.assertEqual(options["Elements"][1]["Hover Sound"], "audio/editor_test/sfx/layer_low.wav")
-            self.assertEqual(options["Elements"][1]["Click Sound"], "audio/editor_test/sfx/ui/layer_high.wav")
+            self.assertEqual(options["Elements"][2]["Hover Sound"], "audio/editor_test/sfx/layer_low.wav")
+            self.assertEqual(options["Elements"][2]["Click Sound"], "audio/editor_test/sfx/ui/layer_high.wav")
             self.assertNotIn("Mousewheel", textbox["List"])
             self.assertNotIn("Remember Scroll", textbox["List"])
             self.assertNotIn("Visible Conditions", textbox)
@@ -222,6 +229,24 @@ class EditorTestUnitTest(unittest.TestCase):
                 ).read_text(encoding="utf-8")
             )
             self.assertEqual(random_event["Next Node"], {"outcome_success": 1, "outcome_fallback": 1})
+
+            show_item_event = json.loads(
+                (
+                    game_root
+                    / "SCENENODE"
+                    / "options_lab"
+                    / "EVENTPOOL"
+                    / "show_controlled_item.json"
+                ).read_text(encoding="utf-8")
+            )
+            self.assertEqual(show_item_event["Effects"][0], {
+                "type": "option",
+                "op": "enable",
+                "target": "item",
+                "node": "options_lab",
+                "element": "data_actions",
+                "item": "controlled_bonus",
+            })
 
             replace_event = json.loads(
                 (
@@ -244,7 +269,7 @@ class EditorTestUnitTest(unittest.TestCase):
                 self.assertEqual(global_detail["options"], app.default_options())
                 self.assertEqual(
                     [entry["data"]["ID"] for entry in global_detail["events"]],
-                    ["global_action_checkpoint", "global_keyboard"],
+                    ["global_action_checkpoint", "global_enable_controlled_list", "global_keyboard"],
                 )
                 self.assertEqual(
                     [(item["file"], item["labels"]) for item in root_detail["contents"]],
@@ -287,7 +312,7 @@ class EditorTestUnitTest(unittest.TestCase):
                 for event_path in (game_root / "SCENENODE").rglob("EVENTPOOL/*.json"):
                     event = json.loads(event_path.read_text(encoding="utf-8"))
                     self.assertTrue(
-                        all(effect.get("type") in ("stat", "memory") for effect in event["Effects"]),
+                        all(effect.get("type") in ("stat", "memory", "option") for effect in event["Effects"]),
                         event_path,
                     )
                 edges = app.project_graph()["edges"]

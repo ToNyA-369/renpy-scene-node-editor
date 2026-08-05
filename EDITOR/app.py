@@ -48,6 +48,17 @@ KEYBOARD_KEYSYM_RE = re.compile(
 MOUSE_TRIGGER_VALUES = {"Left", "Middle", "Right", "WheelUp", "WheelDown"}
 AUTO_TRIGGER_PHASES = {"Enter", "Node", "Exit"}
 LIFECYCLE_TRIGGERS = {"Auto:Enter", "Auto:Exit"}
+CONDITION_OPERATORS = {
+    "stat": (">", ">=", "<", "<=", "==", "!="),
+    "memory": ("has", "not_has"),
+}
+EFFECT_OPERATORS = {
+    "stat": ("set", "+", "-", "*", "/"),
+    "memory": ("add", "remove", "clear"),
+    "option": ("enable", "disable"),
+}
+OPTION_AVAILABILITY_VALUES = ("ALWAYS", "CONTROLLED")
+OPTION_EFFECT_TARGETS = ("element", "item")
 
 
 class ApiError(Exception):
@@ -175,7 +186,7 @@ def configured_root_node():
 
 def default_options():
     return {
-        "Version": 1,
+        "Version": 2,
         "Canvas": {
             "Width": 1920,
             "Height": 1080,
@@ -219,7 +230,7 @@ def validate_condition(condition, field="Condition"):
     if condition_type == "stat":
         result["id"] = clean_file_name(result.get("id"), "")
         operation = str(result.get("op") or ">=")
-        if operation not in (">", ">=", "<", "<=", "==", "!="):
+        if operation not in CONDITION_OPERATORS["stat"]:
             raise ApiError(HTTPStatus.BAD_REQUEST, f"{field} 的 Stat 判斷不合法。")
         result["op"] = operation
         result["value"] = number_setting(result.get("value", 0), 0, f"{field} 的值")
@@ -233,7 +244,7 @@ def validate_condition(condition, field="Condition"):
             raise ApiError(HTTPStatus.BAD_REQUEST, f"{field} 的記憶標籤不可為空。")
         result["id"] = tag_id
         operation = str(result.get("op") or "has")
-        if operation not in ("has", "not_has"):
+        if operation not in CONDITION_OPERATORS["memory"]:
             raise ApiError(HTTPStatus.BAD_REQUEST, f"{field} 的記憶判斷不合法。")
         result["op"] = operation
         result.pop("value", None)
@@ -253,7 +264,7 @@ def validate_effect(effect, field="Effect"):
     if effect_type == "stat":
         result["id"] = clean_file_name(result.get("id"), "")
         operation = str(result.get("op") or "+")
-        if operation not in ("set", "+", "-", "*", "/"):
+        if operation not in EFFECT_OPERATORS["stat"]:
             raise ApiError(HTTPStatus.BAD_REQUEST, f"{field} 的 Stat 操作不合法。")
         result["op"] = operation
         result["value"] = number_setting(result.get("value", 0), 0, f"{field} 的值")
@@ -263,7 +274,7 @@ def validate_effect(effect, field="Effect"):
     if effect_type == "memory":
         result["bank"] = clean_file_name(result.get("bank") or DEFAULT_MEMORY_ID, "")
         operation = str(result.get("op") or "add")
-        if operation not in ("add", "remove", "clear"):
+        if operation not in EFFECT_OPERATORS["memory"]:
             raise ApiError(HTTPStatus.BAD_REQUEST, f"{field} 的記憶操作不合法。")
         result["op"] = operation
         if operation == "clear":
@@ -275,6 +286,24 @@ def validate_effect(effect, field="Effect"):
             result["id"] = tag_id
         result.pop("scope", None)
         result.pop("value", None)
+        return result
+
+    if effect_type == "option":
+        operation = str(result.get("op") or "enable").lower()
+        if operation not in EFFECT_OPERATORS["option"]:
+            raise ApiError(HTTPStatus.BAD_REQUEST, f"{field} 的 Option 操作不合法。")
+        target = str(result.get("target") or "element").lower()
+        if target not in OPTION_EFFECT_TARGETS:
+            raise ApiError(HTTPStatus.BAD_REQUEST, f"{field} 的 Option 目標層級不合法。")
+        result = {
+            "type": "option",
+            "op": operation,
+            "target": target,
+            "node": clean_file_name(result.get("node"), ""),
+            "element": clean_file_name(result.get("element"), ""),
+        }
+        if target == "item":
+            result["item"] = clean_file_name(effect.get("item"), "")
         return result
 
     raise ApiError(HTTPStatus.BAD_REQUEST, f"{field} 的類型不合法：{effect_type}。")
@@ -298,6 +327,16 @@ def validate_option_style_override(value):
     return result
 
 
+def validate_option_availability(value, field):
+    availability = str(value or "ALWAYS").upper()
+    if availability not in OPTION_AVAILABILITY_VALUES:
+        raise ApiError(
+            HTTPStatus.BAD_REQUEST,
+            f"{field} 必須是 ALWAYS 或 CONTROLLED。",
+        )
+    return availability
+
+
 def validate_option_item(item):
     if not isinstance(item, dict):
         raise ApiError(HTTPStatus.BAD_REQUEST, "Text Box Item 必須是 object。")
@@ -310,6 +349,10 @@ def validate_option_item(item):
         "Name": str(item.get("Name") or item.get("Text") or item_id),
         "Text": str(item.get("Text") or item.get("Name") or item_id),
         "Trigger": trigger,
+        "Availability": validate_option_availability(
+            item.get("Availability"),
+            f"Text Box Item {item_id} Availability",
+        ),
         "Style Override": validate_option_style_override(item.get("Style Override")),
     }
 
@@ -335,6 +378,10 @@ def validate_option_element(element):
         "ID": element_id,
         "Name": str(element.get("Name") or element_id),
         "Type": element_type,
+        "Availability": validate_option_availability(
+            element.get("Availability"),
+            f"Option Element {element_id} Availability",
+        ),
         "Layout": layout,
     }
     raw_hover = element.get("Hover") if isinstance(element.get("Hover"), dict) else {}
@@ -404,7 +451,7 @@ def validate_options(data):
     raw_canvas = data.get("Canvas") if isinstance(data.get("Canvas"), dict) else {}
     elements = data.get("Elements") if isinstance(data.get("Elements"), list) else []
     result = {
-        "Version": 1,
+        "Version": 2,
         "Canvas": {
             "Width": number_setting(raw_canvas.get("Width", 1920), 1920, "Canvas Width", minimum=320, maximum=7680, integer=True),
             "Height": number_setting(raw_canvas.get("Height", 1080), 1080, "Canvas Height", minimum=180, maximum=4320, integer=True),
@@ -426,6 +473,102 @@ def option_triggers(options):
         else:
             triggers.append(element.get("Trigger"))
     return [trigger for trigger in triggers if trigger]
+
+
+def option_target_entries(node_id, node_name, node_path_value, options):
+    targets = []
+    for element in options.get("Elements", []):
+        element_entry = {
+            "nodeId": node_id,
+            "nodeName": node_name,
+            "nodePath": node_path_value,
+            "target": "element",
+            "elementId": element["ID"],
+            "elementName": element.get("Name") or element["ID"],
+            "elementType": element.get("Type"),
+            "availability": element.get("Availability", "ALWAYS"),
+        }
+        targets.append(element_entry)
+        if element.get("Type") != "TEXTBOX":
+            continue
+        for item in element.get("Items", []):
+            targets.append({
+                **element_entry,
+                "target": "item",
+                "itemId": item["ID"],
+                "itemName": item.get("Name") or item.get("Text") or item["ID"],
+                "availability": item.get("Availability", "ALWAYS"),
+            })
+    return targets
+
+
+def scan_option_targets():
+    targets = []
+    for summary in scan_nodes():
+        try:
+            options = validate_options(
+                read_json(node_path(summary["path"]) / OPTIONS_FILE, default_options())
+            )
+        except ApiError:
+            continue
+        targets.extend(option_target_entries(
+            summary["id"],
+            summary.get("name") or summary["id"],
+            summary["path"],
+            options,
+        ))
+    return targets
+
+
+def option_effect_references(node_id, element_id=None, item_id=None):
+    references = []
+    for summary in [global_node_summary()] + scan_nodes():
+        try:
+            detail = read_node(summary["path"])
+        except ApiError:
+            continue
+        for entry in detail["events"]:
+            for index, effect in enumerate(entry.get("data", {}).get("Effects", [])):
+                if str(effect.get("type") or "").lower() != "option":
+                    continue
+                if effect.get("node") != node_id:
+                    continue
+                if element_id is not None and effect.get("element") != element_id:
+                    continue
+                if item_id is not None and (
+                    effect.get("target") != "item" or effect.get("item") != item_id
+                ):
+                    continue
+                references.append({
+                    "nodePath": summary["path"],
+                    "nodeName": summary.get("name") or summary["id"],
+                    "eventId": entry.get("data", {}).get("ID", entry["file"]),
+                    "eventName": entry.get("data", {}).get("Name")
+                    or entry.get("data", {}).get("ID", entry["file"]),
+                    "effectIndex": index,
+                })
+    return references
+
+
+def option_target_keys(options):
+    keys = set()
+    for element in options.get("Elements", []):
+        keys.add(("element", element["ID"], None))
+        for item in element.get("Items", []):
+            keys.add(("item", element["ID"], item["ID"]))
+    return keys
+
+
+def validate_option_target_removals(node_id, previous, updated):
+    removed = option_target_keys(previous) - option_target_keys(updated)
+    for target, element_id, item_id in sorted(removed):
+        references = option_effect_references(node_id, element_id, item_id if target == "item" else None)
+        if references:
+            name = item_id if target == "item" else element_id
+            raise ApiError(
+                HTTPStatus.CONFLICT,
+                f"Option {name} 仍被 {len(references)} 個 Event Effect 引用。",
+            )
 
 
 def scan_assets(directory, extensions):
@@ -783,6 +926,15 @@ def validate_project():
 
     nodes = scan_nodes()
     node_ids = {item["id"] for item in nodes}
+    option_targets = {
+        (
+            item["nodeId"],
+            item["target"],
+            item["elementId"],
+            item.get("itemId"),
+        ): item
+        for item in scan_option_targets()
+    }
     global_summary = global_node_summary()
     labels = all_rpy_symbols()
     seen_node_ids = set()
@@ -873,6 +1025,30 @@ def validate_project():
                     issues.append({"level": "warning", "location": event_location, "message": f"找不到 Stat：{effect.get('id', '')}。"})
                 if effect.get("type") == "memory" and effect.get("bank") not in memories:
                     issues.append({"level": "warning", "location": event_location, "message": f"找不到記憶庫：{effect.get('bank', '')}。"})
+                if effect.get("type") == "option":
+                    target_key = (
+                        effect.get("node"),
+                        effect.get("target"),
+                        effect.get("element"),
+                        effect.get("item") if effect.get("target") == "item" else None,
+                    )
+                    option_target = option_targets.get(target_key)
+                    if not option_target:
+                        issues.append({
+                            "level": "warning",
+                            "location": event_location,
+                            "message": "找不到 Option Effect 目標：{}。".format(
+                                "/".join(str(value or "") for value in target_key if value is not None)
+                            ),
+                        })
+                    elif option_target.get("availability") != "CONTROLLED":
+                        issues.append({
+                            "level": "warning",
+                            "location": event_location,
+                            "message": "Option Effect 目標必須設為 CONTROLLED：{}。".format(
+                                option_target.get("itemName") or option_target.get("elementName")
+                            ),
+                        })
 
             content = event["Content"]
             content_names = [content] if isinstance(content, str) else list(content or {})
@@ -1015,6 +1191,19 @@ def node_references(relative):
                     "eventId": event.get("ID", entry["file"]),
                     "eventName": event.get("Name", event.get("ID", entry["file"])),
                 })
+            for index, effect in enumerate(event.get("Effects", [])):
+                if str(effect.get("type") or "").lower() != "option":
+                    continue
+                if effect.get("node") != target_id:
+                    continue
+                references.append({
+                    "nodePath": summary["path"],
+                    "nodeName": summary.get("name") or summary["id"],
+                    "eventId": event.get("ID", entry["file"]),
+                    "eventName": event.get("Name", event.get("ID", entry["file"])),
+                    "effectIndex": index,
+                    "referenceType": "option-effect",
+                })
     return {"nodeId": target_id, "references": references}
 
 
@@ -1083,6 +1272,7 @@ class EditorHandler(BaseHTTPRequestHandler):
                     "graph": project_graph(),
                     "images": scan_image_assets(),
                     "audio": scan_audio_assets(),
+                    "optionTargets": scan_option_targets(),
                     "issues": validate_project(),
                 })
                 return
@@ -1094,6 +1284,21 @@ class EditorHandler(BaseHTTPRequestHandler):
                 return
             if parsed.path == "/api/node/references":
                 self.send_json(node_references(self.query_value("path")))
+                return
+            if parsed.path == "/api/options/references":
+                detail = read_node(self.query_value("node"))
+                if detail.get("isGlobal"):
+                    raise ApiError(HTTPStatus.CONFLICT, "Global Node 不支援 Options。")
+                node_id = detail.get("node", {}).get("ID")
+                element_id = clean_file_name(self.query_value("element"), "")
+                item_value = self.query_value("item")
+                item_id = clean_file_name(item_value, "") if item_value else None
+                self.send_json({
+                    "nodeId": node_id,
+                    "elementId": element_id,
+                    "itemId": item_id,
+                    "references": option_effect_references(node_id, element_id, item_id),
+                })
                 return
             if parsed.path == "/api/content":
                 directory = authoring_directory(self.query_value("node")) / CONTENT_DIR
@@ -1175,9 +1380,13 @@ class EditorHandler(BaseHTTPRequestHandler):
                     raise ApiError(HTTPStatus.NOT_FOUND, "找不到指定的 Scene Node。")
                 result = {"saved": True}
                 if "options" in payload:
+                    previous = validate_options(read_json(directory / OPTIONS_FILE, default_options()))
                     options = validate_options(payload.get("options"))
+                    node = read_json(directory / "Node.json", {}) or {}
+                    validate_option_target_removals(node.get("ID"), previous, options)
                     write_json(directory / OPTIONS_FILE, options)
                     result["options"] = options
+                    result["optionTargets"] = scan_option_targets()
                 self.send_json(result)
                 return
             raise ApiError(HTTPStatus.NOT_FOUND, "找不到 API。")

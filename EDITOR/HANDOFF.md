@@ -1,6 +1,6 @@
 # Scene Node Editor 專案交接
 
-最後整理日期：2026-07-22
+最後整理日期：2026-08-03
 
 這份文件提供給新開啟的 Codex 對話。開始修改前，先閱讀本文件及「規格來源」列出的文件，不要重新設計已經定案的遊戲架構。
 
@@ -95,7 +95,7 @@ REPLACE 是 `[父, 目前] → [父, 目標]` 的單一 Stack 操作。它先跑
 
 ### 3.5 演出責任
 
-Event Effects 僅包含 Stat 與 Memory。Node 不保存 Background；BGM、SE、背景、轉場與淡入淡出由 Content label 使用 Ren'Py 原生語法完成。Options 的 Picture、Preview Background、Hover Sound 與 Click Sound 仍由資料化 Options Renderer 管理。
+Event Effects 包含 Stat、Memory 與 Option Availability。Option Effect 只對既有 `CONTROLLED` Element／Item 執行冪等 `enable`／`disable`，不在 Runtime 建立或刪除 Schema 資料。Node 不保存 Background；BGM、SE、背景、轉場與淡入淡出由 Content label 使用 Ren'Py 原生語法完成。Options 的 Picture、Preview Background、Hover Sound 與 Click Sound 仍由資料化 Options Renderer 管理。
 
 ## 4. 創作者會編輯的內容
 
@@ -153,7 +153,9 @@ TEXTBOX 支援：
 
 Options 工作區分成兩種共用同一份草稿的模式。表單採左小右大布局，左側管理 Element，右側以獨立卡片分開內容與音效；畫布採左大右小布局，左側預覽、點選與拖曳，右側負責版面、共同 Hover 視覺及外觀。切換由單一連續進度同時驅動兩側欄框寬度與新舊內容透明度；兩個欄框本身是 `overflow: hidden` 遮罩，過場底層也有不透明遮罩覆蓋兩框中央，內容保持各自座標且不會溢出欄框。拖曳進度逐幀取最新游標位置並依完整行程計算；點擊沿用同一控制器，但使用加速後減速的 ease-in-out 補間。完成時先在遮罩後方停用 transition 並顯示正式工作區，再移除遮罩，下一幀才恢復一般 transition，避免結尾閃爍。Options 側欄寬度與 Event 側欄一致。
 
-Options 沒有個別顯示／可用條件，也沒有 CUSTOM Screen 來源。所有顯示的選項都可操作；條件、fallback 與節點分流統一由 Events 和 Scene Nodes 負責。
+Options 沒有條件運算式、不可操作狀態或 CUSTOM Screen 來源。所有顯示的選項都可操作；條件、fallback 與節點分流統一由 Events 和 Scene Nodes 負責。`Options.json` Version 2 在 Element 與 TEXTBOX Item 增加 `Availability: ALWAYS | CONTROLLED`；Version 1／缺值讀作 ALWAYS 並在下次儲存正規化。PICTURE／HITBOX 只控制 Element；TEXTBOX 可控制整列及個別 Item。Item 顯示需要父 Element 與自身都可用，父層停用保留子狀態，空 TEXTBOX 自動隱藏。
+
+Runtime 以獨立 `scene_enabled_options` 保存受控目標，不污染 Stats／Memories。狀態採 reassignment 以支援 Ren'Py save／rollback，不因 REDO、GOTO、REPLACE、EXIT 自動重設，`scene_reset_state()` 開新遊戲時清空。任何實際 Scene Node 或 Global Event 都可跨節點控制目標；Editor 的 Effect 階層選單顯示 Node／Element／Item Name，保存穩定 ID。API 專案檢查、Node 引用與 Element／Item 刪除保護都必須包含 Option Effect。
 
 ## 6. 編輯器目前狀態
 
@@ -174,6 +176,10 @@ Options 沒有個別顯示／可用條件，也沒有 CUSTOM Screen 來源。所
 - TEXTBOX、PICTURE、HITBOX 選項表單。
 - Options 拖曳把手式表單／畫布切換，以及畫布拖曳、縮放、格線與吸附。
 - 自動儲存採遞增 revision；過期請求不得覆蓋較新的草稿、狀態或儲存提示。切換節點、分頁或文件前先完成目前 revision，刪除則先取消並等待舊寫入，避免刪除後的競態與假失敗。
+- 自動儲存排程與競態控制已抽成可獨立測試的 `autosave_coordinator.js`；Node 測試覆蓋連續編輯、切換前 flush、刪除前 cancel-and-wait、網路重試與失敗阻擋。
+- 前端已開始漸進式模組化：API Client、Editor Settings、Event Trigger／End up 契約、Event 規則與權重表單、共用階層下拉選單及關聯圖純資料模型都有獨立模組與 Node 測試；`app.js` 保留組裝、渲染與跨模組協調。
+- Condition／Effect 類型、操作與預設資料形狀集中於 `state_rule_contract.js`；跨層測試會直接比較前端 registry、Editor API registry 與 Runtime 分支，新增操作不得只修改表單。
+- CSS 的設計 token 與瀏覽器基礎規則已分離至 `css/tokens.css`、`css/base.css`；其餘工作區樣式仍在 `styles.css` 漸進整理，不在搬移時改變視覺。
 - 節點刪除引用檢查與 `.scene-node-trash/` 可復原區。
 - 專案引用檢查。
 - 依 `GOTO / REPLACE / Next Node` 產生唯讀有向關聯圖；GOTO 為實線、REPLACE 為同色虛線。若 `Parent → A` 是 GOTO 且 `A → B` 是 REPLACE，前端另推導半透明實線 `Parent → B` 管理邊，但不寫入 Parent Schema。Global Event 邊以 Contextual Transition 呈現，不視為 Global Node 實際進入 Stack。圖可搜尋、以滾輪／觸控板雙指縮放、平移並切換節點。
@@ -255,10 +261,38 @@ EDITOR/static/index.html
   應用程式外殼、節點抽屜、七個功能區、對話框與設定結構。
 
 EDITOR/static/app.js
-  前端狀態、各工作區渲染、Content 階層選單、有向關聯圖、表單、自動儲存、快捷鍵及 Options 畫布互動。
+  前端 composition root：狀態、各工作區渲染、Content 專用選單、跨模組協調、表單接線及 Options 畫布互動。
+
+EDITOR/static/js/core/api_client.js
+  HTTP payload 序列化、NETWORK_ERROR／HTTP_ERROR 分類。
+
+EDITOR/static/js/core/autosave_coordinator.js
+  自動儲存 revision、序列化、flush、取消等待與斷線重試；同時支援瀏覽器與 Node 單元測試。
+
+EDITOR/static/js/core/editor_settings.js
+  設定版本、遷移、分頁順序、快捷鍵預設值與名稱。
+
+EDITOR/static/js/core/event_contract.js
+  Event Trigger 模式、生命週期、鍵盤顯示與 End up 的 Editor 端單一登錄點。
+
+EDITOR/static/js/core/state_rule_contract.js
+  Condition／Effect 類型、合法操作、預設資料形狀與 Memory clear 欄位需求。
+
+EDITOR/static/js/ui/choice_picker.js
+  所有原生 select 的共用階層選單、任意目錄深度、鍵盤操作與定位。
+
+EDITOR/static/js/workspaces/event_editor.js
+  Event Condition／Effect 列、Content／Next Node 權重表單、DOM 回讀與規則型別切換；依賴由 app.js 建立時明確注入。
+
+EDITOR/static/js/workspaces/graph_model.js
+  關聯圖 GOTO／REPLACE／管理關係、布局與 SVG edge path 的純資料邏輯。
 
 EDITOR/static/styles.css
-  全部版面、色彩、響應式規則與互動狀態。
+  尚待逐步拆分的既有元件、工作區版面、響應式規則與互動狀態。
+
+EDITOR/static/css/tokens.css
+EDITOR/static/css/base.css
+  共用設計 token，以及全頁 reset、字體與 focus 基礎規則。
 
 INTEGRATION/TestGame/FRAMEWORK/runtime.rpy
   State、Event 選擇、Effects 與 Scene Node stack Runtime。
@@ -273,7 +307,7 @@ tools/create_editor_test_unit.py
   只對全新空白專案建立可拋棄的 Editor／Runtime 綜合測試內容；安全閘門會拒絕既有 Editor 資料。
 
 INTEGRATION/EDITOR_TEST_UNIT.md
-  8 節點關聯圖、Content、Options、Event、State、原生 Screen 演出與 Runtime 流程的手動驗證步驟，包含 parent → child A → REPLACE child B → EXIT parent。
+  8 節點關聯圖、Content、Options Availability、Event、State、原生 Screen 演出與 Runtime 流程的手動驗證步驟，包含 parent → child A → REPLACE child B → EXIT parent。
 
 tests/test_install.py
   乾淨安裝、更新保護與 Editor 啟動測試。
@@ -286,9 +320,33 @@ tests/test_memory_schema.py
 
 tests/test_runtime_memory.py
   Runtime Memory API、舊存檔 Tag 合併與舊 Event 相容測試。
+
+tests/test_option_availability.py
+  Options Version 2 遷移、Option Effect schema／引用／刪除保護，以及 Runtime Element／Item 組合、冪等操作與錯誤訊息測試。
+
+tests/js/autosave_coordinator.test.js
+  自動儲存、切換與刪除競態的獨立 JavaScript 回歸測試。
+
+tests/js/*.test.js
+  API、設定遷移、Event 表單序列化、Event／State Rule 契約、任意深度下拉選單、關聯圖資料模型與自動儲存測試。
+
+tests/test_event_api_round_trip.py
+  Editor API 保存與重新讀取 Event 的 golden JSON，涵蓋單一／權重選擇、生命週期欄位省略及 Global Event。
+
+tests/browser/editor_smoke.spec.js
+  以系統暫存綜合測試專案及 Chromium 驗證 Content 父子選單、Event 規則新增刪除與型別切換、Option Effect、Availability 自動儲存重新載入、GOTO／REPLACE、關聯圖與 Console；不讀寫本機創作者測試資料。
+
+tests/test_contract_alignment.py
+  以前端 Event registry 為輸入，確認 Editor API Schema 與 Runtime 同步接受 Trigger／End up。
+
+tools/verify.py
+  統一執行 Python／JavaScript 語法、JavaScript／Python 測試與 Git whitespace 檢查。
+
+.github/workflows/ci.yml
+  在 GitHub Pull Request 與 main push 上，以 Linux、macOS 執行統一驗證。
 ```
 
-前端目前仍集中在單一 `app.js` 與 `styles.css`。不同對話若同時修改這兩個文件很容易衝突；平行工作應使用獨立 Git worktree，或明確切分不同檔案。
+前端工作區的主要頁面渲染與 Options 互動仍集中在 `app.js`，既有工作區 CSS 也仍集中於 `styles.css`；但共用核心、Event 表單資料轉換、下拉選單及關聯圖模型已有可測試邊界。新功能先依 `AGENTS.md` 與 `docs/MAINTENANCE.md` 判斷擴充入口，不要把可獨立邏輯重新塞回 composition root。不同對話若同時修改 `app.js`／`styles.css` 仍容易衝突；平行工作應使用獨立 Git worktree，或明確切分不同模組。
 
 ## 9. 啟動與驗證
 
@@ -310,20 +368,25 @@ http://127.0.0.1:8765/
 python3 EDITOR/app.py --project "/path/to/project/game"
 ```
 
-修改 JavaScript 後至少執行：
+提交前以單一指令執行完整本機驗證：
 
 ```sh
-node --check EDITOR/static/app.js
+python3 tools/verify.py
 ```
 
-提交前檢查：
-
-```sh
-git diff --check
-python3 -m unittest discover -s tests -v
-```
+這會自動發現並檢查所有 production JavaScript，執行全部 JavaScript／Python 單元測試，並檢查 Python 語法、工作區及 staged diff 的空白錯誤。GitHub Actions 會在 Linux 與 macOS 執行相同命令；Pull Request 另檢查相對於 base branch 的完整 diff。
 
 需要手動驗證 Editor 與 Runtime 完整工作流時，另建一個可拋棄的空白 Ren'Py 專案，再依 `INTEGRATION/EDITOR_TEST_UNIT.md` 執行產生器。不可對 `INTEGRATION/TestGame` 或正式遊戲執行這個產生器。
+
+主要 Editor smoke test 可重複執行：
+
+```sh
+npm ci
+npx playwright install chromium
+python3 tools/verify.py --browser
+```
+
+GitHub Actions 另有獨立 Chromium job。Smoke suite 不取代新 UI 的針對性手動驗證或 Ren'Py Runtime 實機測試。
 
 UI 變更必須用瀏覽器實際操作，不只檢查靜態畫面。至少確認：
 
@@ -357,8 +420,8 @@ UI 變更必須用瀏覽器實際操作，不只檢查靜態畫面。至少確�
 
 - 繼續迭代各功能區的密度、對齊與側欄操作。
 - 改善 Options 畫布的拖曳、縮放與選取手感。
-- 拆分過大的 `app.js` 與 `styles.css`，但需保持行為與資料格式不變。
-- 補足 Scene Effects 的 Runtime 能力。
+- 繼續依工作區拆分 `app.js` 與 `styles.css`；每次只移動一個可測試邊界，保持行為、視覺與資料格式不變。
+- 強化 Stat／Memory Effects 的驗證、錯誤訊息與定位能力；背景、音訊及轉場維持由原生 Content 管理。
 - 視實際遊戲需求補充時間推進 UI，並由該流程呼叫指定 Memory Bank 的 clear API。
 - 擴充專案驗證與錯誤定位。
 - 增加更多 Runtime 與 Editor 回歸測試。

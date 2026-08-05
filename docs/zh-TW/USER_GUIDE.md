@@ -57,7 +57,7 @@ Event 是目前節點對 Trigger 的反應。主要欄位：
 - `Weight`：On Node／玩家輸入中，同 Trigger、同 Priority且 Conditions 都通過時的相對機率。
 - `Once`：全遊戲只成功觸發一次。
 - `Conditions`：Event 是否能成為候選。
-- `Effects`：Event 執行時先套用的 Stat 或 Memory 改變。
+- `Effects`：Event 執行時先套用的 Stat、Memory 或 Option Availability 改變。
 - `Content`：接著呼叫的 Ren'Py label，可使用權重。
 - `End up`：Content 返回後執行 REDO、GOTO、REPLACE 或 EXIT。GOTO／REPLACE 都可使用單一或權重 Next Node。
 
@@ -86,7 +86,7 @@ On Enter／On Exit 會先以同一份狀態快照判斷 Conditions，再依 Prio
 
 ## 選項
 
-Options 是固定資料化的玩家互動介面。所有顯示的選項都可操作；個別顯示條件、可用條件與分流應使用不同 Scene Nodes 或 Events 表達。
+Options 是固定資料化的玩家互動介面。所有顯示的選項都可操作；條件判斷與分流仍由 Scene Nodes 或 Events 表達。
 
 支援三種 Element：
 
@@ -95,6 +95,15 @@ Options 是固定資料化的玩家互動介面。所有顯示的選項都可操
 - `HITBOX`：場景上的透明互動區域。
 
 表單模式負責 Name、Text、Trigger、圖片與聲音。畫布模式負責位置、尺寸、圖層、Hover、顏色與視覺細節。
+
+每個 Element 都有 `Availability`：
+
+- `Always`：常駐顯示。
+- `Controlled`：新遊戲初始隱藏，必須由 Event 的 Option Effect `enable` 才會顯示；`disable` 會再次隱藏。
+
+TEXTBOX 的整個 Element 與各 Item 可各自設定 Availability，因此可以用 Element 控制一整列，也可以只在既有清單中加入或移除一個 Item。Item 必須同時通過父 Element 與自身 Availability；暫時隱藏父 Element 不會清除已啟用的 Item。PICTURE 與 HITBOX 只提供 Element 層級。
+
+在 Event 的 Effects 新增 `option`，再由階層選單選擇「Node → Element → 整列或 Item」與 `enable`／`disable`。目標可以位於其他 Scene Node，Global Event 也可使用；Editor 保存的是穩定 ID，並保護仍被引用的 Node、Element 與 Item。這些啟用狀態會進入 Ren'Py 存檔，不會因節點切換自行重設，但開始新遊戲時會清空。
 
 畫布 Preview Background 只改變該 Options 文件的 Editor 預覽；留空代表沒有預覽底圖，不影響遊戲畫面。
 

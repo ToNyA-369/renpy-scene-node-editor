@@ -1,71 +1,3 @@
-:root {
-  --canvas: #e8e7e1;
-  --surface: #f8f7f2;
-  --surface-soft: #efeee8;
-  --surface-warm: #f4f0e7;
-  --ink: #292d2c;
-  --muted: #666d69;
-  --faint: #8b918d;
-  --line: #d8d6ce;
-  --line-strong: #c4c3bb;
-  --accent: #5e8277;
-  --accent-dark: #3f665d;
-  --accent-soft: #e0ebe6;
-  --blue: #607b89;
-  --blue-soft: #e2e9ec;
-  --amber: #9a713c;
-  --amber-soft: #f3e8d4;
-  --danger: #a6534f;
-  --danger-soft: #f3e3df;
-  --focus: #52788c;
-  --sidebar-width: 236px;
-  --topbar-height: 62px;
-  --tabbar-height: 44px;
-  --radius: 7px;
-  --shadow: 0 14px 38px rgba(41, 45, 44, 0.14);
-}
-
-* {
-  box-sizing: border-box;
-}
-
-html,
-body {
-  width: 100%;
-  height: 100%;
-  margin: 0;
-}
-
-body {
-  color: var(--ink);
-  background: var(--canvas);
-  font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans TC", sans-serif;
-  font-size: 14px;
-  letter-spacing: 0;
-  overflow: hidden;
-}
-
-button,
-input,
-select,
-textarea {
-  color: inherit;
-  font: inherit;
-  letter-spacing: 0;
-}
-
-button {
-  cursor: pointer;
-}
-
-button:focus-visible,
-input:focus-visible,
-select:focus-visible,
-textarea:focus-visible {
-  outline: 2px solid var(--focus);
-  outline-offset: 1px;
-}
-
 .app-shell {
   display: grid;
   grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
@@ -6000,6 +5932,25 @@ body *::-webkit-scrollbar {
 #effectList .repeat-row:last-child,
 .weighted-choice-table .weight-row:last-child {
   border-bottom: 0;
+}
+
+#effectList .option-effect-row {
+  grid-template-columns: 122px minmax(0, 2fr) minmax(140px, 0.8fr) 34px;
+}
+
+@media (max-width: 1180px) and (min-width: 761px) {
+  #effectList .option-effect-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) 34px;
+  }
+
+  #effectList .option-effect-row .option-effect-operation-field {
+    grid-column: 1 / 3;
+  }
+
+  #effectList .option-effect-row .row-button {
+    grid-column: 3;
+    grid-row: 1;
+  }
 }
 
 .weighted-choice-table .content-choice-trigger,

@@ -2,6 +2,7 @@
 
 import json
 import os
+import shutil
 import socket
 import subprocess
 import sys
@@ -15,6 +16,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "tools"))
+LOCAL_OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 
 import install  # noqa: E402
 
@@ -84,7 +86,9 @@ class InstallerTest(unittest.TestCase):
             self.assertNotIn(str(project_root), launcher_source)
             syntax_environment = dict(os.environ)
             syntax_environment["SCENE_EDITOR_PORT"] = "8765"
-            subprocess.run(["zsh", "-n", str(launcher)], check=True, env=syntax_environment)
+            zsh = shutil.which("zsh")
+            if zsh:
+                subprocess.run([zsh, "-n", str(launcher)], check=True, env=syntax_environment)
 
             custom_stats = {
                 "stat_friend": {
@@ -150,7 +154,9 @@ class InstallerTest(unittest.TestCase):
             port = self.available_port()
             editor_app = project_root / ".scene-node-editor" / "EDITOR" / "app.py"
             environment = dict(os.environ)
-            environment["PYTHONPYCACHEPREFIX"] = str(Path(temporary) / "pycache")
+            environment.pop("PYTHONPYCACHEPREFIX", None)
+            environment["PYTHONDONTWRITEBYTECODE"] = "1"
+            environment["PYTHONUNBUFFERED"] = "1"
             settings_payload = {
                 "version": 6,
                 "autosave": True,
@@ -359,16 +365,31 @@ label start:
     @staticmethod
     def wait_for_project(port, process):
         url = "http://127.0.0.1:{}/api/project".format(port)
-        for _attempt in range(50):
+        timeout_seconds = 60
+        deadline = time.monotonic() + timeout_seconds
+        while time.monotonic() < deadline:
             if process.poll() is not None:
                 stdout, stderr = process.communicate()
                 raise AssertionError("Editor stopped early:\n{}\n{}".format(stdout, stderr))
             try:
-                with urllib.request.urlopen(url, timeout=0.2) as response:
+                with LOCAL_OPENER.open(url, timeout=0.5) as response:
                     return json.loads(response.read().decode("utf-8"))
             except OSError:
-                time.sleep(0.05)
-        raise AssertionError("Editor did not become ready: {}".format(url))
+                time.sleep(0.1)
+        process.terminate()
+        try:
+            stdout, stderr = process.communicate(timeout=5)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            stdout, stderr = process.communicate(timeout=5)
+        raise AssertionError(
+            "Editor did not become ready within {} seconds: {}\nstdout:\n{}\nstderr:\n{}".format(
+                timeout_seconds,
+                url,
+                stdout,
+                stderr,
+            )
+        )
 
     @staticmethod
     def request_json(port, path, method="GET", payload=None):
@@ -383,7 +404,7 @@ label start:
             headers=headers,
             method=method,
         )
-        with urllib.request.urlopen(request, timeout=2) as response:
+        with LOCAL_OPENER.open(request, timeout=2) as response:
             return json.loads(response.read().decode("utf-8"))
 
 

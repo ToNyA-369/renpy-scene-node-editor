@@ -150,6 +150,19 @@ def memory_effect(bank, operation, tag=None):
     return result
 
 
+def option_effect(operation, node_id, element_id, item_id=None):
+    result = {
+        "type": "option",
+        "op": operation,
+        "target": "item" if item_id else "element",
+        "node": node_id,
+        "element": element_id,
+    }
+    if item_id:
+        result["item"] = item_id
+    return result
+
+
 def event_data(
     event_id,
     name,
@@ -183,12 +196,13 @@ def event_data(
     return result
 
 
-def option_item(item_id, text, trigger):
+def option_item(item_id, text, trigger, availability="ALWAYS"):
     return {
         "ID": item_id,
         "Name": text,
         "Text": text,
         "Trigger": trigger,
+        "Availability": availability,
         "Style Override": {},
     }
 
@@ -204,11 +218,13 @@ def textbox_element(
     height=580,
     hover_sound="",
     click_sound="",
+    availability="ALWAYS",
 ):
     return {
         "ID": element_id,
         "Name": name,
         "Type": "TEXTBOX",
+        "Availability": availability,
         "Layout": {
             "X": x,
             "Y": y,
@@ -239,7 +255,7 @@ def textbox_element(
 
 def options_document(elements=None):
     return {
-        "Version": 1,
+        "Version": 2,
         "Canvas": {
             "Width": 1920,
             "Height": 1080,
@@ -320,11 +336,38 @@ def options_lab_data():
             "返回測試入口",
             "Action:data_back",
         ),
+        option_item(
+            "show_controlled_item",
+            "顯示受控子選項",
+            "Action:show_controlled_item",
+        ),
+        option_item(
+            "hide_controlled_item",
+            "隱藏受控子選項",
+            "Action:hide_controlled_item",
+        ),
+        option_item(
+            "controlled_bonus",
+            "受控子選項：取得 2 點",
+            "Action:controlled_bonus",
+            availability="CONTROLLED",
+        ),
+        option_item(
+            "show_controlled_list",
+            "顯示受控選項列",
+            "Action:show_controlled_list",
+        ),
+        option_item(
+            "hide_controlled_list",
+            "隱藏受控選項列",
+            "Action:hide_controlled_list",
+        ),
     ]
     picture = {
         "ID": "picture_bonus",
         "Name": "Picture 點擊測試",
         "Type": "PICTURE",
+        "Availability": "ALWAYS",
         "Layout": {"X": 80, "Y": 820, "Width": 300, "Height": 130, "Z Order": 20},
         "Trigger": "Action:picture_bonus",
         "Hover": {"Enabled": True, "Color": "#ffffff24"},
@@ -344,6 +387,7 @@ def options_lab_data():
         "ID": "hitbox_mark",
         "Name": "Hitbox 點擊測試",
         "Type": "HITBOX",
+        "Availability": "ALWAYS",
         "Layout": {"X": 1540, "Y": 820, "Width": 300, "Height": 130, "Z Order": 20},
         "Trigger": "Action:hitbox_mark",
         "Hover": {"Enabled": True, "Color": "#ffffff30"},
@@ -354,7 +398,22 @@ def options_lab_data():
         "Hover Sound": "audio/editor_test/sfx/layer_low.wav",
         "Click Sound": "audio/editor_test/sfx/ui/layer_high.wav",
     }
-    result = options_document([textbox_element("data_actions", "DATA Options 綜合測試", items), picture, hitbox])
+    controlled_list = textbox_element(
+        "controlled_actions",
+        "受控選項列",
+        [option_item("controlled_list_bonus", "受控選項列：取得 5 點", "Action:controlled_list_bonus")],
+        x=1450,
+        y=250,
+        width=400,
+        height=180,
+        availability="CONTROLLED",
+    )
+    result = options_document([
+        textbox_element("data_actions", "DATA Options 綜合測試", items),
+        controlled_list,
+        picture,
+        hitbox,
+    ])
     result["Canvas"]["Preview Background"] = TEST_IMAGE_FILE
     return result
 
@@ -754,6 +813,13 @@ def create_editor_test_unit(raw_target):
                 effects=[stat_effect("test_points", "+", 7), action_count],
                 content="test_global_keyboard",
             ),
+            event_data(
+                "global_enable_controlled_list",
+                "全局啟用受控選項列",
+                "Keyboard:K_o",
+                priority=1,
+                effects=[option_effect("enable", OPTIONS_NODE, "controlled_actions")],
+            ),
         ],
         {"global_systems.rpy": global_content_source()},
     )
@@ -927,6 +993,42 @@ def create_editor_test_unit(raw_target):
             "Action:hitbox_mark",
             effects=[memory_effect("test_session", "add", "hitbox_clicked"), action_count],
             content="test_hitbox_clicked",
+        ),
+        event_data(
+            "show_controlled_item",
+            "顯示受控子選項",
+            "Action:show_controlled_item",
+            effects=[option_effect("enable", OPTIONS_NODE, "data_actions", "controlled_bonus"), action_count],
+        ),
+        event_data(
+            "hide_controlled_item",
+            "隱藏受控子選項",
+            "Action:hide_controlled_item",
+            effects=[option_effect("disable", OPTIONS_NODE, "data_actions", "controlled_bonus"), action_count],
+        ),
+        event_data(
+            "controlled_bonus",
+            "受控子選項獎勵",
+            "Action:controlled_bonus",
+            effects=[stat_effect("test_points", "+", 2), action_count],
+        ),
+        event_data(
+            "show_controlled_list",
+            "顯示受控選項列",
+            "Action:show_controlled_list",
+            effects=[option_effect("enable", OPTIONS_NODE, "controlled_actions"), action_count],
+        ),
+        event_data(
+            "hide_controlled_list",
+            "隱藏受控選項列",
+            "Action:hide_controlled_list",
+            effects=[option_effect("disable", OPTIONS_NODE, "controlled_actions"), action_count],
+        ),
+        event_data(
+            "controlled_list_bonus",
+            "受控選項列獎勵",
+            "Action:controlled_list_bonus",
+            effects=[stat_effect("test_points", "+", 5), action_count],
         ),
         event_data(
             "open_branch_lab",

@@ -69,7 +69,7 @@ Global Event prepare 同時保存 `owner_node_id = "__global__"` 與 `node_id = 
 
 ```json
 {
-  "Version": 1,
+  "Version": 2,
   "Canvas": {
     "Width": 1920,
     "Height": 1080,
@@ -88,6 +88,7 @@ Global Event prepare 同時保存 `owner_node_id = "__global__"` 與 `node_id = 
   "ID": "actions",
   "Name": "行動",
   "Type": "TEXTBOX",
+  "Availability": "ALWAYS",
   "Layout": { "X": 600, "Y": 300, "Width": 720, "Height": 400, "Z Order": 10 },
   "List": {
     "Max Visible Items": 4,
@@ -112,6 +113,7 @@ Global Event prepare 同時保存 `owner_node_id = "__global__"` 與 `node_id = 
       "Name": "繼續",
       "Text": "繼續",
       "Trigger": "Action:continue",
+      "Availability": "CONTROLLED",
       "Style Override": {}
     }
   ]
@@ -120,7 +122,7 @@ Global Event prepare 同時保存 `owner_node_id = "__global__"` 與 `node_id = 
 
 ### Picture
 
-Picture 使用相同的 `ID`、`Name`、`Layout`、`Hover` 與聲音欄位，並增加：
+Picture 使用相同的 `ID`、`Name`、`Availability`、`Layout`、`Hover` 與聲音欄位，並增加：
 
 ```json
 {
@@ -151,7 +153,9 @@ Picture 使用相同的 `ID`、`Name`、`Layout`、`Hover` 與聲音欄位，並
 }
 ```
 
-Options 沒有生命週期、個別顯示條件或自訂 Screen 來源。所有顯示的 Options 都可操作。
+`Availability` 可為 `ALWAYS` 或 `CONTROLLED`。`ALWAYS` 永遠顯示；`CONTROLLED` 初始隱藏，由 Option Effect 啟用後顯示、停用後隱藏。PICTURE／HITBOX 只支援 Element 層級；TEXTBOX 可分別控制整個 Element 與其中 Item。Item 只有在父 Element 與自身都可用時顯示；父 Element 關閉不會清除 Item 狀態，沒有可見 Item 的 TEXTBOX 會自動隱藏。
+
+Options 沒有生命週期、條件運算式或自訂 Screen 來源。所有已顯示的 Options 都可操作。Version 1 或省略 `Availability` 的資料視為 `ALWAYS`，下次儲存會正規化為 Version 2。
 
 ## Event
 
@@ -261,7 +265,21 @@ Memory：
 
 支援 `add`、`remove`、`clear`；`clear` 不使用 `id`。
 
-Event Effects 只處理 Stat 與 Memory。背景、音樂、音效、轉場與淡入淡出由 Content label 使用原生 Ren'Py 語法完成。Options 的 Hover Sound／Click Sound 仍可從 `game/audio/` 選擇。
+Option Element：
+
+```json
+{ "type": "option", "op": "enable", "target": "element", "node": "shop", "element": "special_actions" }
+```
+
+TEXTBOX Item：
+
+```json
+{ "type": "option", "op": "disable", "target": "item", "node": "shop", "element": "shop_actions", "item": "buy_weapon" }
+```
+
+Option Effect 支援 `enable`、`disable`，可由任何 Scene Node 或 Global Event 指向任一實際 Scene Node 的 `CONTROLLED` 目標。操作是冪等的；狀態保存在 Ren'Py 存檔與 rollback 中，不因 REDO、GOTO、REPLACE 或 EXIT 自動重設，但新遊戲會由 `scene_reset_state()` 清空。Editor 顯示創作者 Name，JSON 保存穩定 ID；刪除仍被 Effect 引用的 Node、Element 或 Item 會被拒絕。
+
+Event Effects 處理 Stat、Memory 與 Option Availability。背景、音樂、音效、轉場與淡入淡出由 Content label 使用原生 Ren'Py 語法完成。Options 的 Hover Sound／Click Sound 仍可從 `game/audio/` 選擇。
 
 ## Stats 與 Memories
 
