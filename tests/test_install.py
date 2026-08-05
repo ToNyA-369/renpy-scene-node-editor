@@ -16,6 +16,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "tools"))
+LOCAL_OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 
 import install  # noqa: E402
 
@@ -368,7 +369,7 @@ label start:
                 stdout, stderr = process.communicate()
                 raise AssertionError("Editor stopped early:\n{}\n{}".format(stdout, stderr))
             try:
-                with urllib.request.urlopen(url, timeout=0.5) as response:
+                with LOCAL_OPENER.open(url, timeout=0.5) as response:
                     return json.loads(response.read().decode("utf-8"))
             except OSError:
                 time.sleep(0.1)
@@ -392,7 +393,7 @@ label start:
             headers=headers,
             method=method,
         )
-        with urllib.request.urlopen(request, timeout=2) as response:
+        with LOCAL_OPENER.open(request, timeout=2) as response:
             return json.loads(response.read().decode("utf-8"))
 
 
