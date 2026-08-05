@@ -762,8 +762,8 @@ def create_editor_test_unit(raw_target):
     write_json(
         game_root / "DATA" / "Stats.json",
         {
-            "test_points": {"Name": "測試點數", "Min": 0, "Max": 100, "Init": 20},
-            "test_actions": {"Name": "操作次數", "Min": 0, "Max": 999, "Init": 0},
+            "test_points": {"Name": "測試點數", "Group": "測試資源", "Min": 0, "Max": 100, "Init": 20},
+            "test_actions": {"Name": "操作次數", "Group": "流程追蹤", "Min": 0, "Max": 999, "Init": 0},
         },
     )
     write_json(
@@ -812,13 +812,6 @@ def create_editor_test_unit(raw_target):
                 priority=1,
                 effects=[stat_effect("test_points", "+", 7), action_count],
                 content="test_global_keyboard",
-            ),
-            event_data(
-                "global_enable_controlled_list",
-                "全局啟用受控選項列",
-                "Keyboard:K_o",
-                priority=1,
-                effects=[option_effect("enable", OPTIONS_NODE, "controlled_actions")],
             ),
         ],
         {"global_systems.rpy": global_content_source()},

@@ -65,6 +65,17 @@ async function waitForOptionsSave(page, action) {
   await expect(page.getByRole("status")).toHaveText("已自動儲存");
 }
 
+async function waitForStateSave(page, action) {
+  const response = page.waitForResponse((candidate) => (
+    candidate.url().endsWith("/api/state")
+    && candidate.request().method() === "PUT"
+    && candidate.ok()
+  ));
+  await action();
+  await response;
+  await expect(page.getByRole("status")).toHaveText("已自動儲存");
+}
+
 async function changeSelect(scope, name, value) {
   await scope.locator(`select[name="${name}"]`).selectOption(value, { force: true });
 }
@@ -124,8 +135,70 @@ test("critical editor interactions survive reload without browser errors", async
   });
   page.on("pageerror", (error) => browserErrors.push(`pageerror: ${error.message}`));
 
+  await page.setViewportSize({ width: 1680, height: 900 });
   await page.goto(editorUrl);
   await expect(page.getByRole("navigation", { name: "編輯器分頁" })).toBeVisible();
+
+  await page.getByRole("button", { name: "狀態", exact: true }).click();
+  await expect(page.locator('.stat-group-card[data-stat-group="Normal"]')).toBeVisible();
+  await expect(page.locator('.stat-group-card[data-stat-group="測試資源"]')).toBeVisible();
+  await expect(page.locator('.stat-group-card[data-stat-group="流程追蹤"]')).toBeVisible();
+  const initialStateGeometry = await page.evaluate(() => {
+    const panel = document.querySelector("#statsPanel").getBoundingClientRect();
+    const pageRect = document.querySelector(".state-definitions-page").getBoundingClientRect();
+    const sections = Array.from(document.querySelectorAll(".state-definition-section"));
+    const statsRect = sections[0].getBoundingClientRect();
+    const memoryRect = sections[1].getBoundingClientRect();
+    const innerAdd = document.querySelector("[data-add-stat-to-group]").getBoundingClientRect();
+    return {
+      panelWidth: panel.width,
+      pageWidth: pageRect.width,
+      statsLeftInset: statsRect.left - panel.left,
+      memoryRightInset: panel.right - memoryRect.right,
+      panelRadius: getComputedStyle(document.querySelector("#statsPanel")).borderTopLeftRadius,
+      innerAddWidth: innerAdd.width,
+      innerAddHeight: innerAdd.height,
+      horizontalOverflow: Array.from(document.querySelectorAll(".stat-group-card .state-table-wrap"))
+        .some((wrap) => wrap.scrollWidth > wrap.clientWidth + 1),
+    };
+  });
+  expect(Math.abs(initialStateGeometry.pageWidth - initialStateGeometry.panelWidth)).toBeLessThan(1);
+  expect(Math.abs(initialStateGeometry.statsLeftInset)).toBeLessThan(1);
+  expect(Math.abs(initialStateGeometry.memoryRightInset)).toBeLessThan(1);
+  expect(initialStateGeometry.panelRadius).toBe("0px");
+  expect(initialStateGeometry.innerAddWidth).toBeGreaterThan(initialStateGeometry.innerAddHeight * 2);
+  expect(initialStateGeometry.horizontalOverflow).toBe(false);
+  const initialSectionHeights = await page.evaluate(() => (
+    Array.from(document.querySelectorAll(".state-definition-section")).map((section) => section.getBoundingClientRect().height)
+  ));
+  await waitForStateSave(page, async () => {
+    await page.locator("#addStatGroupButton").click();
+  });
+  const newGroup = page.locator('.stat-group-card[data-stat-group="New Group"]');
+  await expect(newGroup).toBeVisible();
+  await expect(newGroup.locator(".stat-row")).toHaveCount(1);
+  const afterGroupSectionHeights = await page.evaluate(() => (
+    Array.from(document.querySelectorAll(".state-definition-section")).map((section) => section.getBoundingClientRect().height)
+  ));
+  expect(afterGroupSectionHeights[0]).toBeGreaterThan(initialSectionHeights[0]);
+  expect(Math.abs(afterGroupSectionHeights[1] - initialSectionHeights[1])).toBeLessThan(6);
+  await waitForStateSave(page, async () => {
+    await newGroup.locator("[data-add-stat-to-group]").click();
+  });
+  await expect(newGroup.locator(".stat-row")).toHaveCount(2);
+  const afterStatSectionHeights = await page.evaluate(() => (
+    Array.from(document.querySelectorAll(".state-definition-section")).map((section) => section.getBoundingClientRect().height)
+  ));
+  expect(afterStatSectionHeights[0]).toBeGreaterThan(afterGroupSectionHeights[0]);
+  expect(Math.abs(afterStatSectionHeights[1] - afterGroupSectionHeights[1])).toBeLessThan(1);
+  const pointsGroup = page.locator('.stat-group-card[data-stat-group="測試資源"] input[name="statGroupName"]');
+  await waitForStateSave(page, async () => {
+    await pointsGroup.fill("測試資源 Smoke");
+  });
+  await reloadAndWaitForProject(page);
+  await page.getByRole("button", { name: "狀態", exact: true }).click();
+  await expect(page.locator('.stat-group-card[data-stat-group="測試資源 Smoke"]')).toBeVisible();
+  await expect(page.locator('.stat-group-card[data-stat-group="New Group"] .stat-row')).toHaveCount(2);
 
   await page.getByRole("button", { name: /^事件 / }).click();
   await page.getByRole("button", { name: new RegExp(`^${TEST_EVENT_NAME} `) }).click();
@@ -158,15 +231,8 @@ test("critical editor interactions survive reload without browser errors", async
   await changeSelect(memoryEffect, "effectOp", "clear");
   await expect(page.locator('.effect-row[data-index="1"] input[name="effectId"]')).toBeDisabled();
 
-  await page.getByRole("button", { name: "新增 Effect" }).click();
-  await expect(page.locator(".effect-row")).toHaveCount(3);
-  await waitForEventSave(page, async () => {
-    await changeSelect(page.locator('.effect-row[data-index="2"]'), "effectType", "option");
-  });
-  const optionEffect = page.locator('.effect-row[data-index="2"][data-effect-type="option"]');
-  await expect(optionEffect).toBeVisible();
-  await expect(optionEffect.locator('select[name="effectOptionTarget"]')).toHaveValue(/"target":"item"/);
-  await expect(optionEffect.locator('select[name="effectOp"]')).toHaveValue("enable");
+  await expect(page.locator('.effect-row[data-index="0"] select[name="effectId"] option[value="test_actions"]'))
+    .toHaveAttribute("data-picker-path", "流程追蹤/操作次數");
 
   await changeSelect(page, "EndUp", "REPLACE");
   await expect(page.locator('select[name="EndUp"]')).toHaveValue("REPLACE");
@@ -185,14 +251,12 @@ test("critical editor interactions survive reload without browser errors", async
   await expect(page.locator('.condition-row[data-condition-type="memory"] input[name="conditionId"]')).toHaveValue("smoke_not_seen");
   await expect(page.locator('.condition-row[data-condition-type="memory"] select[name="conditionOp"]')).toHaveValue("not_has");
   await expect(page.locator('.effect-row[data-index="1"][data-effect-type="memory"] select[name="effectOp"]')).toHaveValue("clear");
-  await expect(page.locator('.effect-row[data-index="2"][data-effect-type="option"] select[name="effectOptionTarget"]')).toHaveValue(/"item":"controlled_bonus"/);
-
   await waitForEventSave(page, async () => {
     await page.locator('[data-remove-condition="0"]').click();
     await expect(page.locator(".condition-row")).toHaveCount(0);
     await page.locator('[data-remove-effect="1"]').click();
   });
-  await expect(page.locator(".effect-row")).toHaveCount(2);
+  await expect(page.locator(".effect-row")).toHaveCount(1);
   await waitForEventSave(page, async () => {
     await changeSelect(page, "EndUp", "GOTO");
   });
@@ -200,8 +264,25 @@ test("critical editor interactions survive reload without browser errors", async
   await page.getByRole("button", { name: /^事件 / }).click();
   await page.getByRole("button", { name: new RegExp(`^${SAVED_EVENT_NAME} `) }).click();
   await expect(page.locator(".condition-row")).toHaveCount(0);
-  await expect(page.locator(".effect-row")).toHaveCount(2);
+  await expect(page.locator(".effect-row")).toHaveCount(1);
   await expect(page.locator('select[name="EndUp"]')).toHaveValue("GOTO");
+
+  await page.locator("#openSidebar").click();
+  await page.locator('#nodeList [data-node-path="options_lab"]').click();
+  await page.getByRole("button", { name: /^事件 / }).click();
+  await page.getByRole("button", { name: /^顯示受控子選項 / }).click();
+  const optionEffect = page.locator('.effect-row[data-index="0"][data-effect-type="option"]');
+  await expect(optionEffect.locator('select[name="effectOptionTarget"]')).toHaveValue(/"item":"controlled_bonus"/);
+  const localTargets = await optionEffect.locator('select[name="effectOptionTarget"] option').evaluateAll((options) => (
+    options.map((option) => JSON.parse(option.value).node)
+  ));
+  expect(new Set(localTargets)).toEqual(new Set(["options_lab"]));
+
+  await page.locator("#openSidebar").click();
+  await page.locator('#nodeList [data-node-path="@global"]').click();
+  await page.getByRole("button", { name: /^事件 / }).click();
+  await page.getByRole("button", { name: /^全局 Keyboard G / }).click();
+  await expect(page.locator('.effect-row select[name="effectType"] option[value="option"]')).toHaveCount(0);
 
   await page.getByRole("button", { name: "關聯圖" }).click();
   await expect(page.locator("#projectGraphSvg")).toBeVisible();

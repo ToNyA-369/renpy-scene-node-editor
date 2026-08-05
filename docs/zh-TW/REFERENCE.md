@@ -61,7 +61,7 @@
 { "ID": "__global__", "Name": "GLOBAL" }
 ```
 
-Name 可修改，ID 不可修改。Global Node 不屬於 `scene_catalog["nodes"]`，不進入 `scene_stack`，不能成為 Root 或 Next Node。它沒有 `Options.json`；Editor 與 Schema 拒絕 Global Event 的 `Action:<option_id>` Trigger。
+Name 可修改，ID 不可修改。Global Node 不屬於 `scene_catalog["nodes"]`，不進入 `scene_stack`，不能成為 Root 或 Next Node。它沒有 `Options.json`；Editor 與 Schema 拒絕 Global Event 的 `Action:<option_id>` Trigger 與 Option Effect。
 
 Global Event prepare 同時保存 `owner_node_id = "__global__"` 與 `node_id = <目前 Stack 頂端>`。Once 使用 `once:global:<event_id>`；Effects 與 Content 屬於 Global Event，而非生命週期 Event 的 End up 會依目前實際 Stack 執行。
 
@@ -277,7 +277,7 @@ TEXTBOX Item：
 { "type": "option", "op": "disable", "target": "item", "node": "shop", "element": "shop_actions", "item": "buy_weapon" }
 ```
 
-Option Effect 支援 `enable`、`disable`，可由任何 Scene Node 或 Global Event 指向任一實際 Scene Node 的 `CONTROLLED` 目標。操作是冪等的；狀態保存在 Ren'Py 存檔與 rollback 中，不因 REDO、GOTO、REPLACE 或 EXIT 自動重設，但新遊戲會由 `scene_reset_state()` 清空。Editor 顯示創作者 Name，JSON 保存穩定 ID；刪除仍被 Effect 引用的 Node、Element 或 Item 會被拒絕。
+Option Effect 支援 `enable`、`disable`，只能由實際 Scene Node 的 Event 指向同一節點內的 `CONTROLLED` 目標；跨節點與 Global Event 都不得使用。操作是冪等的；狀態保存在 Ren'Py 存檔與 rollback 中，不因 REDO、GOTO、REPLACE 或 EXIT 自動重設，但新遊戲會由 `scene_reset_state()` 清空。Editor 只列出目前節點的 Element／Item 創作者 Name，JSON 保存穩定 Node／Element／Item ID；刪除仍被 Effect 引用的 Element 或 Item 會被拒絕。
 
 Event Effects 處理 Stat、Memory 與 Option Availability。背景、音樂、音效、轉場與淡入淡出由 Content label 使用原生 Ren'Py 語法完成。Options 的 Hover Sound／Click Sound 仍可從 `game/audio/` 選擇。
 
@@ -287,9 +287,11 @@ Event Effects 處理 Stat、Memory 與 Option Availability。背景、音樂、�
 
 ```json
 {
-  "money": { "Name": "金錢", "Init": 0, "Min": 0, "Max": 999 }
+  "money": { "Name": "金錢", "Group": "資源", "Init": 0, "Min": 0, "Max": 999 }
 }
 ```
+
+`Group` 是編輯管理資訊；省略或空白時會正規化為 `Normal`。狀態工作區固定顯示 `Normal`，可由 Stats 外層新增群組、由群組內新增 Stat。Event 的 Stat Condition／Effect 選單以「Group → Stat」顯示；JSON key、Runtime 狀態、存檔與 `scene_get_stat("money")` 仍只使用平面的穩定 Stat ID，不形成巢狀資料。
 
 `Memories.json`：
 

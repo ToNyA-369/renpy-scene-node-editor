@@ -16,6 +16,7 @@ js/core/event_contract.js       Trigger／End up 的 Editor 契約
 js/core/state_rule_contract.js  Condition／Effect 的 Editor 契約
 js/ui/choice_picker.js           共用階層下拉選單
 js/workspaces/event_editor.js    Event 規則、權重選擇與 DOM 序列化
+js/workspaces/state_editor.js    Stats 群組與階層選單資料
 js/workspaces/graph_model.js     關聯圖關係、布局與路徑
 app.js                           狀態組裝、畫面渲染與跨模組協調
 ```

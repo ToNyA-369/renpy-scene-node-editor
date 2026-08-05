@@ -47,9 +47,9 @@ Action / Keyboard / Mouse / Auto:Node Trigger + Global State
 
 - Option、Keyboard 與 Mouse 都可作為玩家輸入來源，只產生 Trigger，不直接選 Event；`Auto:Node` 由 Runner 每輪主動檢查。
 - `Auto:Enter` 在 ROOT 啟動或 GOTO／REPLACE 進入節點時執行；`Auto:Exit` 在 EXIT／REPLACE 移除目前節點前執行。
-- State 系統全遊戲只有一份，包含 Stats 與可自訂的 Memory Banks。
+- State 系統全遊戲只有一份，包含依 Group 整理的平面 Stats 與可自訂的 Memory Banks；缺少 Group 的 Stat 正規化至 `Normal`，Group 不改變 Runtime ID 或存檔鍵。
 - 每個 Scene Node 都有自己的 Event Pool；固定 `__global__` Global Node 另提供跨節點 Event Pool。
-- Global Node 只是一個 Editor／資料作用域，不進入 stack、沒有 Options、不可使用 Option Trigger，也不能成為 Root 或 Next Node。Global Event End up 作用於觸發當下的實際 stack 頂端。
+- Global Node 只是一個 Editor／資料作用域，不進入 stack、沒有 Options、不可使用 Option Trigger 或 Option Effect，也不能成為 Root 或 Next Node。Global Event End up 作用於觸發當下的實際 stack 頂端。
 - 凡是包含選項的互動單位都是 Scene Node。
 - Content 由創作者自行撰寫 Ren'Py label，也可以是 `null`。
 - State 的改變原則上寫在 Event Effects，而不是藏在 Content label。
@@ -155,7 +155,7 @@ Options 工作區分成兩種共用同一份草稿的模式。表單採左小右
 
 Options 沒有條件運算式、不可操作狀態或 CUSTOM Screen 來源。所有顯示的選項都可操作；條件、fallback 與節點分流統一由 Events 和 Scene Nodes 負責。`Options.json` Version 2 在 Element 與 TEXTBOX Item 增加 `Availability: ALWAYS | CONTROLLED`；Version 1／缺值讀作 ALWAYS 並在下次儲存正規化。PICTURE／HITBOX 只控制 Element；TEXTBOX 可控制整列及個別 Item。Item 顯示需要父 Element 與自身都可用，父層停用保留子狀態，空 TEXTBOX 自動隱藏。
 
-Runtime 以獨立 `scene_enabled_options` 保存受控目標，不污染 Stats／Memories。狀態採 reassignment 以支援 Ren'Py save／rollback，不因 REDO、GOTO、REPLACE、EXIT 自動重設，`scene_reset_state()` 開新遊戲時清空。任何實際 Scene Node 或 Global Event 都可跨節點控制目標；Editor 的 Effect 階層選單顯示 Node／Element／Item Name，保存穩定 ID。API 專案檢查、Node 引用與 Element／Item 刪除保護都必須包含 Option Effect。
+Runtime 以獨立 `scene_enabled_options` 保存受控目標，不污染 Stats／Memories。狀態採 reassignment 以支援 Ren'Py save／rollback，不因 REDO、GOTO、REPLACE、EXIT 自動重設，`scene_reset_state()` 開新遊戲時清空。Option Effect 僅能由實際 Scene Node Event 控制同一節點的目標；跨節點與 Global Event 都由 Editor、API 與 Runtime 拒絕。Editor 的 Effect 階層選單只顯示目前節點的 Element／Item Name，JSON 仍保存穩定 Node／Element／Item ID。API 專案檢查及 Element／Item 刪除保護都必須包含 Option Effect。
 
 ## 6. 編輯器目前狀態
 
@@ -164,6 +164,7 @@ Runtime 以獨立 `scene_enabled_options` 保存受控目標，不污染 Stats�
 - 空白專案初始化 ROOT 節點、安全辨識各語系 Ren'Py 預設範本並接線 `script.rpy`、切換起始節點與 Root 刪除保護。
 - 單一 Memory 架構：預設 `Memory`、自訂記憶庫、標籤 add/remove/clear、Runtime API 與舊 Tag 延遲遷移。
 - Scene Node、Event、Stats、Memory Banks 與 Content 的建立與編輯。
+- Stats 工作區固定提供 `Normal` 預設群組；外層加號建立新群組及其第一個 Stat，群組內使用寬版加號加入該組 Stat。State 外框與 Event／Options 一樣使用完整工作區寬度，Stats 左框與 Memory 右框直接對齊分頁邊界，不在外層再套圓角遮罩；桌面版 Stat 欄位依群組容器分配寬度且不依賴橫向捲動。Event 的 Stat Condition／Effect 共用 Group → Stat 階層選單。Group 僅為 authoring metadata，Runtime 與存檔維持平面 Stat ID；Stats 與 Memory 卡片高度各自由自身內容決定。
 - Options Picture 與 Preview Background 只掃描 `game/images/`，並以子目錄階層選單呈現；選定欄位只顯示葉節點檔名。Preview Background 留空時不顯示預覽圖，也不影響遊戲場景。
 - Node Schema 不保存 Background 或 Screen；兩者與音訊、轉場一樣由 Content 使用 Ren'Py 原生語法管理。
 - Editor 不提供 Screen 文件工作區或 CRUD API；Installer 也不管理創作者的 `gui.rpy`、`screens.rpy` 與其他介面文件。
@@ -177,7 +178,7 @@ Runtime 以獨立 `scene_enabled_options` 保存受控目標，不污染 Stats�
 - Options 拖曳把手式表單／畫布切換，以及畫布拖曳、縮放、格線與吸附。
 - 自動儲存採遞增 revision；過期請求不得覆蓋較新的草稿、狀態或儲存提示。切換節點、分頁或文件前先完成目前 revision，刪除則先取消並等待舊寫入，避免刪除後的競態與假失敗。
 - 自動儲存排程與競態控制已抽成可獨立測試的 `autosave_coordinator.js`；Node 測試覆蓋連續編輯、切換前 flush、刪除前 cancel-and-wait、網路重試與失敗阻擋。
-- 前端已開始漸進式模組化：API Client、Editor Settings、Event Trigger／End up 契約、Event 規則與權重表單、共用階層下拉選單及關聯圖純資料模型都有獨立模組與 Node 測試；`app.js` 保留組裝、渲染與跨模組協調。
+- 前端已開始漸進式模組化：API Client、Editor Settings、Event Trigger／End up 契約、Event 規則與權重表單、Stats 群組模型、共用階層下拉選單及關聯圖純資料模型都有獨立模組與 Node 測試；`app.js` 保留組裝、渲染與跨模組協調。
 - Condition／Effect 類型、操作與預設資料形狀集中於 `state_rule_contract.js`；跨層測試會直接比較前端 registry、Editor API registry 與 Runtime 分支，新增操作不得只修改表單。
 - CSS 的設計 token 與瀏覽器基礎規則已分離至 `css/tokens.css`、`css/base.css`；其餘工作區樣式仍在 `styles.css` 漸進整理，不在搬移時改變視覺。
 - 節點刪除引用檢查與 `.scene-node-trash/` 可復原區。
@@ -284,6 +285,9 @@ EDITOR/static/js/ui/choice_picker.js
 EDITOR/static/js/workspaces/event_editor.js
   Event Condition／Effect 列、Content／Next Node 權重表單、DOM 回讀與規則型別切換；依賴由 app.js 建立時明確注入。
 
+EDITOR/static/js/workspaces/state_editor.js
+  Stats 群組正規化、工作區分組與 Group → Stat 階層選單資料；不改變平面 Stat ID。
+
 EDITOR/static/js/workspaces/graph_model.js
   關聯圖 GOTO／REPLACE／管理關係、布局與 SVG edge path 的純資料邏輯。
 
@@ -328,7 +332,7 @@ tests/js/autosave_coordinator.test.js
   自動儲存、切換與刪除競態的獨立 JavaScript 回歸測試。
 
 tests/js/*.test.js
-  API、設定遷移、Event 表單序列化、Event／State Rule 契約、任意深度下拉選單、關聯圖資料模型與自動儲存測試。
+  API、設定遷移、Event 表單序列化、Event／State Rule 契約、Stats 群組模型、任意深度下拉選單、關聯圖資料模型與自動儲存測試。
 
 tests/test_event_api_round_trip.py
   Editor API 保存與重新讀取 Event 的 golden JSON，涵蓋單一／權重選擇、生命週期欄位省略及 Global Event。

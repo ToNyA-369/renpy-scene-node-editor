@@ -22,13 +22,14 @@ function namedOptionTags(items, current) {
   return items.map((item) => `<option value="${item.id}"${item.id === current ? " selected" : ""}>${item.name}</option>`).join("");
 }
 
-function createEditor({ stats = [{ id: "money", name: "Money" }] } = {}) {
+function createEditor({ stats = [{ id: "money", name: "Money" }], effectTypes } = {}) {
   const optionTargets = [{
     target: { target: "item", node: "shop", element: "actions", item: "buy" },
     value: JSON.stringify({ target: "item", node: "shop", element: "actions", item: "buy" }),
   }];
   return SceneEventEditor.createEventEditor({
     contentPickerHtml: (id, index) => `<content-picker data-id="${id}" data-index="${index}"></content-picker>`,
+    effectTypeChoices: () => effectTypes || stateRuleContract.EFFECT_TYPES,
     escapeHtml,
     memoryChoices: () => [{ id: "memory", name: "Memory" }, { id: "daily", name: "Daily" }],
     namedOptionTags,
@@ -154,4 +155,15 @@ test("Event row rendering keeps current selectors and Memory clear semantics", (
   assert.doesNotMatch(effectHtml, /effect-option-spacer/);
   assert.match(contentHtml, /name="contentRepresentation"[^>]*value="single"/);
   assert.match(contentHtml, /<content-picker data-id="intro" data-index="0">/);
+});
+
+test("Event Effect choices can exclude Option for Global Events", () => {
+  const editor = createEditor({ effectTypes: ["stat", "memory"] });
+  const effectHtml = editor.effectRowsHtml([
+    { type: "stat", id: "money", op: "+", value: 1 },
+  ]);
+
+  assert.match(effectHtml, /<option selected>stat<\/option>/);
+  assert.match(effectHtml, /<option>memory<\/option>/);
+  assert.doesNotMatch(effectHtml, /<option>option<\/option>/);
 });

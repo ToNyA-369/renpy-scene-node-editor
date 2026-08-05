@@ -225,13 +225,18 @@ function optionTags(items, current, label = (item) => item, value = (item) => it
 }
 
 function namedOptionTags(items, current, { includeNone = false } = {}) {
-  const normalized = items.map((item) => ({ id: String(item.id), name: String(item.name || item.id) }));
+  const normalized = items.map((item) => ({
+    id: String(item.id),
+    name: String(item.name || item.id),
+    pickerPath: item.pickerPath ? String(item.pickerPath) : "",
+  }));
   const known = new Set(normalized.map((item) => item.id));
   if (current && !known.has(String(current))) normalized.push({ id: String(current), name: `${current}（未找到）` });
   const none = includeNone ? '<option value="">None</option>' : "";
   return none + normalized.map((item) => {
     const selected = item.id === String(current || "") ? " selected" : "";
-    return `<option value="${escapeHtml(item.id)}"${selected}>${escapeHtml(item.name)}</option>`;
+    const pickerPath = item.pickerPath ? ` data-picker-path="${escapeHtml(item.pickerPath)}"` : "";
+    return `<option value="${escapeHtml(item.id)}"${pickerPath}${selected}>${escapeHtml(item.name)}</option>`;
   }).join("");
 }
 
@@ -283,8 +288,14 @@ function eventTriggerModeChoices() {
     : EVENT_TRIGGER_MODES;
 }
 
+function eventEffectTypeChoices() {
+  return isGlobalNode()
+    ? SceneStateRuleContract.EFFECT_TYPES.filter((type) => type !== "option")
+    : SceneStateRuleContract.EFFECT_TYPES;
+}
+
 function statChoices() {
-  return Object.entries(state.stats).map(([id, values]) => ({ id, name: values.Name || id }));
+  return SceneStateEditor.statChoices(state.stats);
 }
 
 function memoryChoices() {
@@ -296,7 +307,7 @@ function warnMissingStat(kind) {
 }
 
 function warnMissingOptionTarget() {
-  toast("目前沒有 CONTROLLED Option。請先在「選項」把 Element 或 Item 的 Availability 設為 CONTROLLED。", "error");
+  toast("目前節點沒有 CONTROLLED Option。請先在「選項」把 Element 或 Item 的 Availability 設為 CONTROLLED。", "error");
 }
 
 function nodeChoices() {
@@ -324,18 +335,22 @@ function optionEffectTargetFromEntry(entry) {
 }
 
 function optionEffectChoices() {
+  const currentNodeId = String(state.nodeDetail?.node?.ID || "");
   return (state.optionTargets || [])
-    .filter((entry) => entry.availability === "CONTROLLED")
+    .filter((entry) => (
+      !isGlobalNode()
+      && entry.nodeId === currentNodeId
+      && entry.availability === "CONTROLLED"
+    ))
     .map((entry) => {
       const target = optionEffectTargetFromEntry(entry);
-      const nodeName = String(entry.nodeName || entry.nodeId).replaceAll("/", "／");
       const elementName = String(entry.elementName || entry.elementId).replaceAll("/", "／");
       const leaf = entry.target === "item"
         ? String(entry.itemName || entry.itemId).replaceAll("/", "／")
         : entry.elementType === "TEXTBOX" ? "整個選項列" : elementName;
       const pickerPath = entry.target === "item" || entry.elementType === "TEXTBOX"
-        ? `${nodeName}/${elementName}/${leaf}`
-        : `${nodeName}/${leaf}`;
+        ? `${elementName}/${leaf}`
+        : leaf;
       return { target, value: optionEffectTargetValue(target), name: leaf, pickerPath };
     });
 }
@@ -466,6 +481,7 @@ function contentPickerHtml(label, index) {
 
 const eventEditor = SceneEventEditor.createEventEditor({
   contentPickerHtml,
+  effectTypeChoices: eventEffectTypeChoices,
   escapeHtml,
   memoryChoices,
   namedOptionTags,
@@ -1848,7 +1864,6 @@ function optionHoverFields(element, { picture = false } = {}) {
 function optionSoundSection(element) {
   return `
     <div class="form-section option-sound-section">
-      <div class="form-section-header option-static-header"><div><h3>聲音</h3></div></div>
       <div class="form-grid two-columns option-field-grid">
         <label class="field"><span>Hover Sound</span><select data-option-path="Hover Sound" aria-label="Hover Sound">${audioOptionTags(element["Hover Sound"] || "", [{ id: "", name: "None" }])}</select></label>
         <label class="field"><span>Click Sound</span><select data-option-path="Click Sound" aria-label="Click Sound">${audioOptionTags(element["Click Sound"] || "", [{ id: "", name: "None" }])}</select></label>
@@ -2881,17 +2896,37 @@ async function deleteContent() {
   }
 }
 
-function statsRowsHtml() {
-  const entries = Object.entries(state.statsDraft);
-  if (!entries.length) return `<tr><td colspan="5"><div class="row-empty">尚未建立 Stat。</div></td></tr>`;
-  return entries.map(([id, values], index) => `
-    <tr class="stat-row" data-stat-index="${index}" data-stat-id="${escapeHtml(id)}">
-      <td><input name="statName" value="${escapeHtml(values.Name || id)}"></td>
+function statRowsHtml(entries) {
+  if (!entries.length) return `<tr><td colspan="5"><div class="row-empty">這個群組尚未建立 Stat。</div></td></tr>`;
+  return entries.map(([id, values]) => `
+    <tr class="stat-row" data-stat-id="${escapeHtml(id)}">
+      <td><input name="statName" aria-label="Stat Name" value="${escapeHtml(values.Name || id)}"></td>
       <td><input name="statMin" type="number" step="any" value="${escapeHtml(values.Min)}"></td>
       <td><input name="statInit" type="number" step="any" value="${escapeHtml(values.Init)}"></td>
       <td><input name="statMax" type="number" step="any" value="${escapeHtml(values.Max)}"></td>
-      <td class="action-cell"><button class="row-button" type="button" data-remove-stat="${index}" title="移除 Stat" aria-label="移除 Stat">×</button></td>
+      <td class="action-cell"><button class="row-button" type="button" data-remove-stat="${escapeHtml(id)}" title="移除 Stat" aria-label="移除 Stat">×</button></td>
     </tr>
+  `).join("");
+}
+
+function statGroupsHtml() {
+  const groups = SceneStateEditor.groupedStatEntries(state.statsDraft);
+  return groups.map(({ group, entries }) => `
+    <section class="stat-group-card" data-stat-group="${escapeHtml(group)}">
+      <div class="stat-group-heading">
+        <label class="field stat-group-name-field">
+          <span class="visually-hidden">群組名稱</span>
+          <input name="statGroupName" aria-label="群組名稱" value="${escapeHtml(group)}" ${group === SceneStateEditor.DEFAULT_GROUP ? "readonly" : ""}>
+        </label>
+        <button class="stat-group-add-button add-button" type="button" data-add-stat-to-group title="在 ${escapeHtml(group)} 新增 Stat" aria-label="在 ${escapeHtml(group)} 新增 Stat">＋</button>
+      </div>
+      <div class="state-table-wrap">
+        <table class="data-table state-data-table stats-table">
+          <thead><tr><th>Name</th><th>Min</th><th>Init</th><th>Max</th><th></th></tr></thead>
+          <tbody>${statRowsHtml(entries)}</tbody>
+        </table>
+      </div>
+    </section>
   `).join("");
 }
 
@@ -2909,20 +2944,14 @@ function memoryRowsHtml() {
 }
 
 function renderStatsPanel() {
-  const hasEqualRowCounts = Object.keys(state.statsDraft).length === Object.keys(state.memoriesDraft).length;
   dom.statsPanel.innerHTML = `
-    <div class="panel-page wide state-definitions-page ${hasEqualRowCounts ? "equal-row-counts" : ""}" id="stateDefinitionsPage">
+    <div class="panel-page wide state-definitions-page" id="stateDefinitionsPage">
       <section class="state-definition-section">
         <div class="state-section-heading">
           <div><h2>Stats</h2></div>
-          <button class="state-add-button add-button" id="addStatButton" type="button" title="新增 Stat" aria-label="新增 Stat">＋</button>
+          <button class="state-add-button add-button" id="addStatGroupButton" type="button" title="新增 Stat 群組" aria-label="新增 Stat 群組">＋</button>
         </div>
-        <div class="state-table-wrap">
-          <table class="data-table state-data-table stats-table">
-            <thead><tr><th>Name</th><th>Min</th><th>Init</th><th>Max</th><th></th></tr></thead>
-            <tbody id="statsBody">${statsRowsHtml()}</tbody>
-          </table>
-        </div>
+        <div class="stat-groups" id="statsGroups">${statGroupsHtml()}</div>
       </section>
 
       <section class="state-definition-section">
@@ -2939,11 +2968,16 @@ function renderStatsPanel() {
       </section>
     </div>
   `;
-  document.querySelector("#addStatButton")?.addEventListener("click", addStat);
+  document.querySelector("#addStatGroupButton")?.addEventListener("click", addStatGroup);
+  document.querySelectorAll("[data-add-stat-to-group]").forEach((button) => button.addEventListener("click", () => {
+    const group = button.closest(".stat-group-card")?.querySelector('[name="statGroupName"]')?.value;
+    addStat(group);
+  }));
   document.querySelector("#addMemoryButton")?.addEventListener("click", addMemory);
-  document.querySelectorAll("[data-remove-stat]").forEach((button) => button.addEventListener("click", () => removeStat(Number(button.dataset.removeStat))));
+  document.querySelectorAll("[data-remove-stat]").forEach((button) => button.addEventListener("click", () => removeStat(button.dataset.removeStat)));
   document.querySelectorAll("[data-remove-memory]:not([disabled])").forEach((button) => button.addEventListener("click", () => removeMemory(Number(button.dataset.removeMemory))));
-  document.querySelector("#stateDefinitionsPage")?.addEventListener("input", scheduleStatsAutosave);
+  const page = document.querySelector("#stateDefinitionsPage");
+  page?.addEventListener("input", scheduleStatsAutosave);
 }
 
 function readStatsForm() {
@@ -2951,8 +2985,12 @@ function readStatsForm() {
   document.querySelectorAll(".stat-row").forEach((row) => {
     const id = row.dataset.statId;
     if (!id) return;
+    const group = SceneStateEditor.normalizeGroup(
+      row.closest(".stat-group-card")?.querySelector('[name="statGroupName"]')?.value,
+    );
     result[id] = {
       Name: row.querySelector('[name="statName"]').value.trim() || id,
+      Group: group,
       Min: numberValue(row.querySelector('[name="statMin"]').value),
       Init: numberValue(row.querySelector('[name="statInit"]').value),
       Max: numberValue(row.querySelector('[name="statMax"]').value),
@@ -2973,23 +3011,45 @@ function readMemoriesForm() {
   return result;
 }
 
-function addStat() {
+function addStat(group = SceneStateEditor.DEFAULT_GROUP) {
   state.statsDraft = readStatsForm();
   state.memoriesDraft = readMemoriesForm();
   const id = generateId("stat");
-  state.statsDraft[id] = { Name: "新數值", Min: 0, Init: 0, Max: 100 };
+  state.statsDraft[id] = {
+    Name: "新數值",
+    Group: SceneStateEditor.normalizeGroup(group),
+    Min: 0,
+    Init: 0,
+    Max: 100,
+  };
   renderStatsPanel();
   scheduleStatsAutosave();
-  const inputs = document.querySelectorAll('[name="statName"]');
-  inputs[inputs.length - 1]?.select();
+  document.querySelector(`.stat-row[data-stat-id="${CSS.escape(id)}"] [name="statName"]`)?.select();
+  return id;
 }
 
-function removeStat(index) {
+function addStatGroup() {
   state.statsDraft = readStatsForm();
   state.memoriesDraft = readMemoriesForm();
-  const entries = Object.entries(state.statsDraft);
-  entries.splice(index, 1);
-  state.statsDraft = Object.fromEntries(entries);
+  const existing = new Set(SceneStateEditor.groupedStatEntries(state.statsDraft).map(({ group }) => group));
+  const base = "New Group";
+  let group = base;
+  let suffix = 2;
+  while (existing.has(group)) {
+    group = `${base} ${suffix}`;
+    suffix += 1;
+  }
+  const id = addStat(group);
+  document.querySelector(`.stat-row[data-stat-id="${CSS.escape(id)}"]`)
+    ?.closest(".stat-group-card")
+    ?.querySelector('[name="statGroupName"]')
+    ?.select();
+}
+
+function removeStat(id) {
+  state.statsDraft = readStatsForm();
+  state.memoriesDraft = readMemoriesForm();
+  delete state.statsDraft[id];
   renderStatsPanel();
   scheduleStatsAutosave();
 }
