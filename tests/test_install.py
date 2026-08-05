@@ -154,7 +154,9 @@ class InstallerTest(unittest.TestCase):
             port = self.available_port()
             editor_app = project_root / ".scene-node-editor" / "EDITOR" / "app.py"
             environment = dict(os.environ)
-            environment["PYTHONPYCACHEPREFIX"] = str(Path(temporary) / "pycache")
+            environment.pop("PYTHONPYCACHEPREFIX", None)
+            environment["PYTHONDONTWRITEBYTECODE"] = "1"
+            environment["PYTHONUNBUFFERED"] = "1"
             settings_payload = {
                 "version": 6,
                 "autosave": True,
