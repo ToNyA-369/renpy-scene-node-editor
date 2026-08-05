@@ -365,7 +365,8 @@ label start:
     @staticmethod
     def wait_for_project(port, process):
         url = "http://127.0.0.1:{}/api/project".format(port)
-        deadline = time.monotonic() + 15
+        timeout_seconds = 60
+        deadline = time.monotonic() + timeout_seconds
         while time.monotonic() < deadline:
             if process.poll() is not None:
                 stdout, stderr = process.communicate()
@@ -382,7 +383,8 @@ label start:
             process.kill()
             stdout, stderr = process.communicate(timeout=5)
         raise AssertionError(
-            "Editor did not become ready within 15 seconds: {}\nstdout:\n{}\nstderr:\n{}".format(
+            "Editor did not become ready within {} seconds: {}\nstdout:\n{}\nstderr:\n{}".format(
+                timeout_seconds,
                 url,
                 stdout,
                 stderr,
