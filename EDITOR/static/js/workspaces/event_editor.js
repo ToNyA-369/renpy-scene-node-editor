@@ -98,10 +98,9 @@
         if (isOption) {
           return `
             <div class="repeat-row effect-row option-effect-row" data-index="${index}" data-effect-type="${escapeHtml(type)}">
-              <label class="field"><span class="visually-hidden">類型</span><select name="effectType" aria-label="效果類型">${optionTags(EFFECT_TYPES, type)}</select></label>
-              <label class="field"><span class="visually-hidden">Option 目標</span><select name="effectOptionTarget" aria-label="Option 目標">${optionEffectOptionTags(effect)}</select></label>
-              <label class="field"><span class="visually-hidden">操作</span><select name="effectOp" aria-label="操作">${optionTags(opItems, effect.op)}</select></label>
-              <span class="effect-option-spacer" aria-hidden="true"></span>
+              <label class="field option-effect-type-field"><span class="visually-hidden">類型</span><select name="effectType" aria-label="效果類型">${optionTags(EFFECT_TYPES, type)}</select></label>
+              <label class="field option-effect-target-field"><span class="visually-hidden">Option 目標</span><select name="effectOptionTarget" aria-label="Option 目標">${optionEffectOptionTags(effect)}</select></label>
+              <label class="field option-effect-operation-field"><span class="visually-hidden">操作</span><select name="effectOp" aria-label="操作">${optionTags(opItems, effect.op)}</select></label>
               <button class="row-button" type="button" data-remove-effect="${index}" title="移除 Effect" aria-label="移除 Effect">×</button>
             </div>
           `;

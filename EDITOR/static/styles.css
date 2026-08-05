@@ -5934,6 +5934,25 @@ body *::-webkit-scrollbar {
   border-bottom: 0;
 }
 
+#effectList .option-effect-row {
+  grid-template-columns: 122px minmax(0, 2fr) minmax(140px, 0.8fr) 34px;
+}
+
+@media (max-width: 1180px) and (min-width: 761px) {
+  #effectList .option-effect-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) 34px;
+  }
+
+  #effectList .option-effect-row .option-effect-operation-field {
+    grid-column: 1 / 3;
+  }
+
+  #effectList .option-effect-row .row-button {
+    grid-column: 3;
+    grid-row: 1;
+  }
+}
+
 .weighted-choice-table .content-choice-trigger,
 .weighted-choice-table .select-choice-trigger,
 .end-up-control .select-choice-trigger {

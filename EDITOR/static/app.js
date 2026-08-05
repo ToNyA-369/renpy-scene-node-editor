@@ -1906,21 +1906,23 @@ function optionInspectorHtml() {
           <label class="field"><span>Name</span><input data-option-path="Name" value="${escapeHtml(element.Name || "")}"></label>
           <label class="field"><span>Availability</span><select data-option-path="Availability">${optionTags(["ALWAYS", "CONTROLLED"], element.Availability || "ALWAYS", (value) => value === "ALWAYS" ? "Always" : "Controlled")}</select></label>
         </div>
-        <div class="option-primary-block">
+      `;
+      sections += `
+        <div class="form-section option-textbox-items-section selected-item-editor">
           <div class="form-section-header option-static-header">
             <div><h3>Items</h3><span>${element.Items?.length || 0} 個選項</span></div>
             <button class="icon-button section-add-button add-button" id="addOptionItem" type="button" title="新增選項" aria-label="新增選項">＋</button>
           </div>
           ${textBoxItemsHtml(element)}
+          ${item ? `<div class="option-primary-block option-item-fields">
+            <div class="form-grid two-columns option-field-grid">
+              <label class="field"><span>Name</span><input data-option-item-path="Name" value="${escapeHtml(item.Name || "")}"></label>
+              <label class="field"><span>Availability</span><select data-option-item-path="Availability">${optionTags(["ALWAYS", "CONTROLLED"], item.Availability || "ALWAYS", (value) => value === "ALWAYS" ? "Always" : "Controlled")}</select></label>
+              <label class="field"><span>Text</span><input data-option-item-path="Text" value="${escapeHtml(item.Text || "")}"></label>
+              <label class="field"><span>Trigger</span><input data-option-item-path="Trigger" value="${escapeHtml(actionTriggerName(item.Trigger))}"></label>
+            </div>
+          </div>` : ""}
         </div>
-        ${item ? `<div class="option-primary-block selected-item-editor">
-          <div class="form-grid two-columns option-field-grid">
-            <label class="field"><span>Name</span><input data-option-item-path="Name" value="${escapeHtml(item.Name || "")}"></label>
-            <label class="field"><span>Availability</span><select data-option-item-path="Availability">${optionTags(["ALWAYS", "CONTROLLED"], item.Availability || "ALWAYS", (value) => value === "ALWAYS" ? "Always" : "Controlled")}</select></label>
-            <label class="field"><span>Text</span><input data-option-item-path="Text" value="${escapeHtml(item.Text || "")}"></label>
-            <label class="field option-wide-field"><span>Trigger</span><input data-option-item-path="Trigger" value="${escapeHtml(actionTriggerName(item.Trigger))}"></label>
-          </div>
-        </div>` : ""}
       `;
       sections += optionSoundSection(element);
     } else {
@@ -1977,8 +1979,14 @@ function optionInspectorHtml() {
           <label class="field"><span>Name</span><input data-option-path="Name" value="${escapeHtml(element.Name || "")}"></label>
           <label class="field"><span>Availability</span><select data-option-path="Availability">${optionTags(["ALWAYS", "CONTROLLED"], element.Availability || "ALWAYS", (value) => value === "ALWAYS" ? "Always" : "Controlled")}</select></label>
           <label class="field option-wide-field"><span>Trigger</span><input data-option-path="Trigger" value="${escapeHtml(actionTriggerName(element.Trigger))}"></label>
-          <label class="field"><span>Idle 圖片</span><select data-option-path="Picture.Idle" aria-label="Idle 圖片">${imageOptionTags(picture.Idle || "", [{ id: "", name: "None" }])}</select></label>
-          ${optionBooleanField("只讓不透明部分可點擊", 'data-option-path="Picture.Alpha Hit Test"', Boolean(picture["Alpha Hit Test"]))}
+        </div>
+      `;
+      sections += `
+        <div class="form-section option-picture-source-section">
+          <div class="form-grid two-columns option-field-grid">
+            <label class="field"><span>Idle 圖片</span><select data-option-path="Picture.Idle" aria-label="Idle 圖片">${imageOptionTags(picture.Idle || "", [{ id: "", name: "None" }])}</select></label>
+            ${optionBooleanField("只讓不透明部分可點擊", 'data-option-path="Picture.Alpha Hit Test"', Boolean(picture["Alpha Hit Test"]))}
+          </div>
         </div>
       `;
       sections += optionSoundSection(element);

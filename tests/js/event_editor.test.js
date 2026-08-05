@@ -150,6 +150,8 @@ test("Event row rendering keeps current selectors and Memory clear semantics", (
   assert.match(effectHtml, /name="effectId"[^>]*disabled/);
   assert.match(effectHtml, /data-effect-type="option"/);
   assert.match(effectHtml, /name="effectOptionTarget"/);
+  assert.match(effectHtml, /option-effect-operation-field/);
+  assert.doesNotMatch(effectHtml, /effect-option-spacer/);
   assert.match(contentHtml, /name="contentRepresentation"[^>]*value="single"/);
   assert.match(contentHtml, /<content-picker data-id="intro" data-index="0">/);
 });
