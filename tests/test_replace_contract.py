@@ -88,20 +88,23 @@ class ReplaceContractTest(unittest.TestCase):
             finally:
                 app.PROJECT_ROOT = previous_project_root
 
-    def test_graph_derives_parent_management_edges_and_reuses_goto_color(self):
+    def test_graph_derives_chained_parent_management_edges_and_reuses_goto_color(self):
         frontend = FRONTEND.read_text(encoding="utf-8")
         graph_model = GRAPH_MODEL.read_text(encoding="utf-8")
         styles = STYLES.read_text(encoding="utf-8")
 
         self.assertIn('endUp: "MANAGEMENT"', graph_model)
-        self.assertIn("gotoParents.get(relationship.source)", graph_model)
-        self.assertIn('relationship.endUp === "MANAGEMENT" ? "Management" : "Goto"', frontend)
+        self.assertIn("replaceBySource.get(current.nodeId)", graph_model)
+        self.assertIn("replacePath", graph_model)
+        self.assertIn("SceneGraphModel.edgeArrowPoints", frontend)
         self.assertIn(".graph-edge.is-replace path", styles)
         self.assertIn("stroke-dasharray: 8 5", styles)
         replace_rule = styles.split(".graph-edge.is-replace path", 1)[1].split("}", 1)[0]
         self.assertNotIn("stroke:", replace_rule)
         self.assertIn(".graph-edge.is-management path", styles)
-        self.assertIn("#graphArrowManagement path", styles)
+        self.assertIn("stroke: currentColor", styles)
+        self.assertIn(".graph-edge-arrow", styles)
+        self.assertIn("fill: currentColor", styles)
 
 
 if __name__ == "__main__":

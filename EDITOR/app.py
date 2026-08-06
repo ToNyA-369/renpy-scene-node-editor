@@ -504,10 +504,10 @@ def option_target_entries(node_id, node_name, node_path_value, options):
 
 def scan_option_targets():
     targets = []
-    for summary in scan_nodes():
+    for summary in [global_node_summary()] + scan_nodes():
         try:
             options = validate_options(
-                read_json(node_path(summary["path"]) / OPTIONS_FILE, default_options())
+                read_json(authoring_directory(summary["path"]) / OPTIONS_FILE, default_options())
             )
         except ApiError:
             continue
@@ -630,13 +630,19 @@ def global_node_summary():
         parse_error = exc.message
     events = list((directory / EVENT_DIR).glob("*.json")) if (directory / EVENT_DIR).exists() else []
     contents = list((directory / CONTENT_DIR).glob("*.rpy")) if (directory / CONTENT_DIR).exists() else []
+    try:
+        raw_options = read_json(directory / OPTIONS_FILE, default_options()) or default_options()
+    except ApiError as exc:
+        raw_options = default_options()
+        parse_error = f"{parse_error}; {exc.message}" if parse_error else exc.message
+    option_elements = raw_options.get("Elements", []) if isinstance(raw_options, dict) else []
     return {
         "path": GLOBAL_NODE_PATH,
         "id": data.get("ID", GLOBAL_NODE_ID),
         "name": data.get("Name", "GLOBAL"),
         "eventCount": len(events),
         "contentCount": len(contents),
-        "optionCount": 0,
+        "optionCount": len(option_elements),
         "parseError": parse_error,
         "isGlobal": True,
         "isRoot": False,
@@ -731,7 +737,7 @@ def read_node(relative):
             event = read_json(path, {}) or {}
             events.append({"file": path.name, "data": event})
 
-    options = default_options() if global_scope else validate_options(read_json(directory / OPTIONS_FILE, default_options()))
+    options = validate_options(read_json(directory / OPTIONS_FILE, default_options()))
     return {
         "path": clean_node_path(relative),
         "node": read_json(node_file, {}) or {},
@@ -846,10 +852,10 @@ def validate_event_trigger(value):
 def validate_event(event, global_scope=False, owner_node_id=None):
     if not isinstance(event, dict):
         raise ApiError(HTTPStatus.BAD_REQUEST, "Event 必須是 JSON object。")
+    if global_scope and owner_node_id is None:
+        owner_node_id = GLOBAL_NODE_ID
     event_id = clean_file_name(event.get("ID") or generate_id("event"), ".json")
     trigger = validate_event_trigger(event.get("Trigger"))
-    if global_scope and trigger.startswith("Action:"):
-        raise ApiError(HTTPStatus.BAD_REQUEST, "Global Event 不可使用 Option Trigger。")
     is_lifecycle = trigger in LIFECYCLE_TRIGGERS
 
     priority = event.get("Priority", 5)
@@ -869,8 +875,6 @@ def validate_event(event, global_scope=False, owner_node_id=None):
     content = event.get("Content")
     validate_weight_map(content, "Content")
     validated_effects = [validate_effect(item, "Event Effect") for item in effects]
-    if global_scope and any(item.get("type") == "option" for item in validated_effects):
-        raise ApiError(HTTPStatus.BAD_REQUEST, "Global Event 不可使用 Option Effect。")
     for effect in validated_effects:
         if (
             effect.get("type") == "option"
@@ -879,7 +883,7 @@ def validate_event(event, global_scope=False, owner_node_id=None):
         ):
             raise ApiError(
                 HTTPStatus.BAD_REQUEST,
-                "Option Effect 只能控制同一個 Scene Node 的 Option。",
+                "Option Effect 只能控制同一個 Options 作用域內的 Option。",
             )
 
     result = {
@@ -953,13 +957,6 @@ def validate_project():
     global_summary = global_node_summary()
     labels = all_rpy_symbols()
     seen_node_ids = set()
-    if (global_node_path() / OPTIONS_FILE).exists():
-        issues.append({
-            "level": "warning",
-            "location": f"{GLOBAL_NODE_DIRECTORY}/{OPTIONS_FILE}",
-            "message": "Global Node 不支援 Options；這個檔案不會被 Runtime 使用。",
-        })
-
     if scene_project_path().exists():
         try:
             root_node = configured_root_node()
@@ -1026,7 +1023,7 @@ def validate_project():
                 event = validate_event(
                     entry["data"],
                     global_scope=global_scope,
-                    owner_node_id=None if global_scope else node_id,
+                    owner_node_id=node_id,
                 )
             except ApiError as exc:
                 issues.append({"level": "error", "location": event_location, "message": exc.message})
@@ -1142,7 +1139,7 @@ def save_event(payload):
     event = validate_event(
         payload.get("event"),
         global_scope=global_scope,
-        owner_node_id=None if global_scope else node.get("ID"),
+        owner_node_id=GLOBAL_NODE_ID if global_scope else node.get("ID"),
     )
     event_root = directory / EVENT_DIR
     event_root.mkdir(exist_ok=True)
@@ -1311,8 +1308,6 @@ class EditorHandler(BaseHTTPRequestHandler):
                 return
             if parsed.path == "/api/options/references":
                 detail = read_node(self.query_value("node"))
-                if detail.get("isGlobal"):
-                    raise ApiError(HTTPStatus.CONFLICT, "Global Node 不支援 Options。")
                 node_id = detail.get("node", {}).get("ID")
                 element_id = clean_file_name(self.query_value("element"), "")
                 item_value = self.query_value("item")
@@ -1397,17 +1392,17 @@ class EditorHandler(BaseHTTPRequestHandler):
                 self.send_json(save_root_node(payload))
                 return
             if parsed.path == "/api/options":
-                if is_global_node_path(payload.get("node")):
-                    raise ApiError(HTTPStatus.CONFLICT, "Global Node 不支援 Options。")
-                directory = node_path(payload.get("node"))
+                global_scope = is_global_node_path(payload.get("node"))
+                directory = authoring_directory(payload.get("node"))
                 if not (directory / "Node.json").exists():
-                    raise ApiError(HTTPStatus.NOT_FOUND, "找不到指定的 Scene Node。")
+                    raise ApiError(HTTPStatus.NOT_FOUND, "找不到指定的 authoring scope。")
                 result = {"saved": True}
                 if "options" in payload:
                     previous = validate_options(read_json(directory / OPTIONS_FILE, default_options()))
                     options = validate_options(payload.get("options"))
                     node = read_json(directory / "Node.json", {}) or {}
-                    validate_option_target_removals(node.get("ID"), previous, options)
+                    node_id = GLOBAL_NODE_ID if global_scope else node.get("ID")
+                    validate_option_target_removals(node_id, previous, options)
                     write_json(directory / OPTIONS_FILE, options)
                     result["options"] = options
                     result["optionTargets"] = scan_option_targets()

@@ -35,7 +35,7 @@ For a complete walkthrough, read [Your First Playable Flow](https://github.com/T
 - An Option emits a Trigger. Its Event decides conditions, state changes, and routing.
 - Content stores a Ren'Py `label` name, not an `.rpy` filename.
 - `REDO` reruns the current node, `GOTO` pushes a destination, `REPLACE` atomically swaps the stack top, and `EXIT` returns to the parent.
-- The node list has a fixed, undeletable Global Node. Its Events participate from every real node; the Global Node has no Options and offers no Option Trigger.
+- The node list has a fixed, undeletable Global Node. Its Events participate from every real node; its Options render beside the current real node's Options and may use Option Triggers plus same-scope Option Effects.
 - A Global Event's End up acts on the current real node. The Global Node never enters the Stack and is not available as ROOT or Next Node.
 - Every visible Option is interactive and ends with the current interaction. The Runtime creates it again for a later round.
 - Define screens and HUDs in `screens.rpy` or another `.rpy`, then control them from Content with native Ren'Py `show screen`, `hide screen`, or `call screen`.

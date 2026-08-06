@@ -40,7 +40,11 @@ class EditorTestUnitTest(unittest.TestCase):
                 json.loads((game_root / "GLOBALNODE" / "Node.json").read_text(encoding="utf-8")),
                 {"ID": "__global__", "Name": "全局系統"},
             )
-            self.assertFalse((game_root / "GLOBALNODE" / "Options.json").exists())
+            global_options = json.loads(
+                (game_root / "GLOBALNODE" / "Options.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(global_options["Elements"][0]["ID"], "global_actions")
+            self.assertEqual(global_options["Elements"][0]["Items"][1]["Availability"], "CONTROLLED")
             self.assertTrue((game_root / create_editor_test_unit.TEST_IMAGE_FILE).is_file())
             self.assertTrue((game_root / create_editor_test_unit.TEST_MANIFEST_FILE).is_file())
 
@@ -268,12 +272,12 @@ class EditorTestUnitTest(unittest.TestCase):
                 root_detail = app.read_node("root")
                 global_detail = app.read_node("@global")
                 self.assertTrue(global_detail["isGlobal"])
-                self.assertEqual(global_detail["options"], app.default_options())
+                self.assertEqual(global_detail["options"]["Elements"][0]["ID"], "global_actions")
                 self.assertEqual(
                     [entry["data"]["ID"] for entry in global_detail["events"]],
-                    ["global_action_checkpoint", "global_keyboard"],
+                    ["global_action_checkpoint", "global_bonus", "global_keyboard", "global_reveal_bonus"],
                 )
-                self.assertFalse(any(
+                self.assertTrue(any(
                     effect.get("type") == "option"
                     for entry in global_detail["events"]
                     for effect in entry["data"].get("Effects", [])
@@ -323,7 +327,7 @@ class EditorTestUnitTest(unittest.TestCase):
                         event_path,
                     )
                 edges = app.project_graph()["edges"]
-                self.assertEqual(len(edges), 11)
+                self.assertEqual(len(edges), 14)
                 self.assertEqual(
                     {(edge["source"], edge["target"]) for edge in edges},
                     {
@@ -334,17 +338,26 @@ class EditorTestUnitTest(unittest.TestCase):
                         ("options_lab", "outcome_fallback"),
                         ("branch_lab", "outcome_success"),
                         ("branch_lab", "outcome_fallback"),
+                        ("outcome_success", "branch_lab"),
                         (create_editor_test_unit.REPLACE_PARENT_NODE, create_editor_test_unit.REPLACE_CHILD_A_NODE),
                         (create_editor_test_unit.REPLACE_CHILD_A_NODE, create_editor_test_unit.REPLACE_CHILD_B_NODE),
+                        (create_editor_test_unit.REPLACE_CHILD_B_NODE, create_editor_test_unit.REPLACE_CHILD_A_NODE),
+                        (create_editor_test_unit.REPLACE_CHILD_B_NODE, create_editor_test_unit.REPLACE_CHILD_C_NODE),
                     },
                 )
                 replace_edges = [edge for edge in edges if edge["endUp"] == "REPLACE"]
                 self.assertEqual(
                     [(edge["source"], edge["target"]) for edge in replace_edges],
-                    [(create_editor_test_unit.REPLACE_CHILD_A_NODE, create_editor_test_unit.REPLACE_CHILD_B_NODE)],
+                    [
+                        (create_editor_test_unit.REPLACE_CHILD_A_NODE, create_editor_test_unit.REPLACE_CHILD_B_NODE),
+                        (create_editor_test_unit.REPLACE_CHILD_B_NODE, create_editor_test_unit.REPLACE_CHILD_A_NODE),
+                        (create_editor_test_unit.REPLACE_CHILD_B_NODE, create_editor_test_unit.REPLACE_CHILD_C_NODE),
+                    ],
                 )
                 references = app.node_references(create_editor_test_unit.REPLACE_CHILD_B_NODE)["references"]
                 self.assertEqual([item["eventId"] for item in references], ["replace_child_a_with_b"])
+                references = app.node_references(create_editor_test_unit.REPLACE_CHILD_C_NODE)["references"]
+                self.assertEqual([item["eventId"] for item in references], ["replace_child_b_with_c_preview"])
                 self.assertEqual(app.validate_project(), [])
             finally:
                 app.PROJECT_ROOT = previous_project_root

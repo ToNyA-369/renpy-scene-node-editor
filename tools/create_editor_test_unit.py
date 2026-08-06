@@ -39,6 +39,7 @@ FALLBACK_NODE = "outcome_fallback"
 REPLACE_PARENT_NODE = "replace_parent"
 REPLACE_CHILD_A_NODE = "replace_child_a"
 REPLACE_CHILD_B_NODE = "replace_child_b"
+REPLACE_CHILD_C_NODE = "replace_child_c"
 TEST_NODES = (
     ROOT_NODE,
     OPTIONS_NODE,
@@ -48,6 +49,7 @@ TEST_NODES = (
     REPLACE_PARENT_NODE,
     REPLACE_CHILD_A_NODE,
     REPLACE_CHILD_B_NODE,
+    REPLACE_CHILD_C_NODE,
 )
 
 # A tiny valid PNG which the DATA Picture option stretches and tints.
@@ -289,6 +291,34 @@ def root_options_data():
     ])
 
 
+def global_options_data():
+    element = textbox_element(
+        "global_actions",
+        "全域常駐操作",
+        [
+            option_item("reveal_bonus", "顯示全域獎勵", "Action:global_reveal_bonus"),
+            option_item(
+                "global_bonus",
+                "領取全域 5 點獎勵",
+                "Action:global_bonus",
+                availability="CONTROLLED",
+            ),
+        ],
+        x=40,
+        y=40,
+        width=380,
+        height=170,
+    )
+    element["List"].update({
+        "Max Visible Items": 2,
+        "Item Height": 56,
+        "Item Spacing": 8,
+        "Padding": 12,
+    })
+    element["Style"]["Text Size"] = 22
+    return options_document([element])
+
+
 def outcome_options_data(success):
     name = "成功結果" if success else "Fallback 結果"
     return options_document([
@@ -486,6 +516,20 @@ def replace_child_b_options_data():
             "replace_child_b_actions",
             "REPLACE Child B",
             [option_item("exit_child_b", "EXIT 回到 Parent", "Action:exit_child_b")],
+            x=610,
+            y=400,
+            width=700,
+            height=180,
+        )
+    ])
+
+
+def replace_child_c_options_data():
+    return options_document([
+        textbox_element(
+            "replace_child_c_actions",
+            "REPLACE Child C",
+            [option_item("exit_child_c", "EXIT 回到 Parent", "Action:exit_child_c")],
             x=610,
             y=400,
             width=700,
@@ -716,11 +760,12 @@ label test_global_keyboard:
 '''
 
 
-def write_global_node(game_root, events, contents):
+def write_global_node(game_root, options, events, contents):
     node_root = game_root / "GLOBALNODE"
     (node_root / "EVENTPOOL").mkdir(parents=True, exist_ok=True)
     (node_root / "CONTENT").mkdir(parents=True, exist_ok=True)
     write_json(node_root / "Node.json", {"ID": "__global__", "Name": "全局系統"})
+    write_json(node_root / "Options.json", options)
     for event in events:
         write_json(node_root / "EVENTPOOL" / (event["ID"] + ".json"), event)
     for filename, source in contents.items():
@@ -792,6 +837,7 @@ def create_editor_test_unit(raw_target):
     action_count = stat_effect("test_actions", "+", 1)
     write_global_node(
         game_root,
+        global_options_data(),
         [
             event_data(
                 "global_action_checkpoint",
@@ -812,6 +858,33 @@ def create_editor_test_unit(raw_target):
                 priority=1,
                 effects=[stat_effect("test_points", "+", 7), action_count],
                 content="test_global_keyboard",
+            ),
+            event_data(
+                "global_reveal_bonus",
+                "顯示全域獎勵",
+                "Action:global_reveal_bonus",
+                priority=1,
+                effects=[option_effect(
+                    "enable",
+                    "__global__",
+                    "global_actions",
+                    "global_bonus",
+                )],
+            ),
+            event_data(
+                "global_bonus",
+                "領取全域獎勵",
+                "Action:global_bonus",
+                priority=1,
+                effects=[
+                    stat_effect("test_points", "+", 5),
+                    option_effect(
+                        "disable",
+                        "__global__",
+                        "global_actions",
+                        "global_bonus",
+                    ),
+                ],
             ),
         ],
         {"global_systems.rpy": global_content_source()},
@@ -1111,21 +1184,30 @@ def create_editor_test_unit(raw_target):
         (SUCCESS_NODE, "成功結果", "test_success_return", True),
         (FALLBACK_NODE, "Fallback 結果", "test_fallback_return", False),
     ):
+        outcome_events = [
+            event_data(
+                "{}_return".format(node_id),
+                "返回上一個節點",
+                "Action:return",
+                effects=[action_count],
+                content=label,
+                end_up="EXIT",
+            )
+        ]
+        if success:
+            outcome_events.append(event_data(
+                "success_cycle_to_branch",
+                "GOTO Cycle 至 Branch",
+                "Keyboard:K_c",
+                end_up="GOTO",
+                next_node=BRANCH_NODE,
+            ))
         write_node(
             game_root,
             node_id,
             node_data(node_id, name),
             outcome_options_data(success),
-            [
-                event_data(
-                    "{}_return".format(node_id),
-                    "返回上一個節點",
-                    "Action:return",
-                    effects=[action_count],
-                    content=label,
-                    end_up="EXIT",
-                )
-            ],
+            outcome_events,
             {"result.rpy": outcome_content_source(success)},
         )
 
@@ -1213,8 +1295,39 @@ def create_editor_test_unit(raw_target):
                 content="test_replace_child_b_exit",
                 end_up="EXIT",
             ),
+            event_data(
+                "replace_child_b_with_a_preview",
+                "REPLACE 回 Child A（關聯圖測試）",
+                "Keyboard:K_r",
+                end_up="REPLACE",
+                next_node=REPLACE_CHILD_A_NODE,
+            ),
+            event_data(
+                "replace_child_b_with_c_preview",
+                "REPLACE 至 Child C（鏈式關聯圖測試）",
+                "Keyboard:K_d",
+                end_up="REPLACE",
+                next_node=REPLACE_CHILD_C_NODE,
+            ),
         ],
         {"replace_child_b.rpy": replace_child_b_content_source()},
+    )
+
+    write_node(
+        game_root,
+        REPLACE_CHILD_C_NODE,
+        node_data(REPLACE_CHILD_C_NODE, "REPLACE Child C"),
+        replace_child_c_options_data(),
+        [
+            event_data(
+                "replace_child_c_exit",
+                "Child C 返回 Parent",
+                "Action:exit_child_c",
+                effects=[action_count],
+                end_up="EXIT",
+            ),
+        ],
+        {},
     )
 
     return {

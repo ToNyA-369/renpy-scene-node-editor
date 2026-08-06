@@ -37,10 +37,11 @@ Nodes do not store a Screen. Define HUDs, scene shells, and other Screens in cre
 
 ### Global Node
 
-The top of the node list contains a fixed, undeletable Global Node. It is an authoring scope for global Events and Content, not a real Scene Node:
+The top of the node list contains a fixed, undeletable Global Node. It is an authoring scope for global Events, Options, and Content, not a real Scene Node:
 
 - It never enters the Scene Stack and cannot be ROOT or a GOTO / REPLACE destination.
-- It has no Options workspace, and Global Events cannot use Option Triggers or Option Effects.
+- It owns an Options workspace; Global Options render together with the current real node's Options everywhere.
+- Global Events may use Global Option Triggers and may enable or disable Controlled Options in the same `__global__` scope.
 - On Node, Keyboard, and Mouse Events merge with the current real node's same-Trigger Events before Conditions, Priority, and Weight selection.
 - On Enter / On Exit join every real node's matching lifecycle queue.
 - A Global Event's REDO, GOTO, REPLACE, or EXIT operates on the real Stack-top node at trigger time.
@@ -61,7 +62,7 @@ An Event is the current node's reaction to a Trigger:
 - `Content`: a Ren'Py label called after Effects, optionally weighted.
 - `End up`: REDO, GOTO, REPLACE, or EXIT after Content returns. GOTO and REPLACE accept one or weighted Next Node.
 
-The UI calls the source `Option`; the technical format remains `Action:<id>`. The Event picker lists Triggers registered by the current node's Options.
+The UI calls the source `Option`; the technical format remains `Action:<id>`. The Event picker lists Triggers registered by the current authoring scope's Options. A Trigger authored on the Global Node is available during every real-node interaction.
 
 Picture and Preview Background images are listed only from `game/images/`; Options Hover Sound and Click Sound are listed only from `game/audio/`. You may organize assets in subdirectories: the Editor preserves that hierarchy in the picker but shows only the filename after selection. Write game scenes, BGM, SE, transitions, and fades in Content with native Ren'Py syntax.
 
@@ -103,7 +104,9 @@ Every Element has an `Availability` mode:
 
 TEXTBOX supports Availability on both the whole Element and each Item, so an Effect can reveal a separate list or add one Item to an existing list. An Item requires both its own and its parent Element's availability; temporarily disabling the parent does not erase enabled Item state. PICTURE and HITBOX provide Element-level control only.
 
-Add an `option` Effect to an Event on a real Scene Node, then choose “Element → whole list or Item” from that current Node and select `enable` / `disable`. An Event cannot control Options owned by another Scene Node, and Global Events do not provide Option Effects. The Editor saves stable Node, Element, and Item IDs and protects referenced Elements and Items from deletion. Enabled state participates in Ren'Py saves, does not reset on stack transitions, and is cleared when a new game starts.
+Add an `option` Effect to an Event, then choose “Element → whole list or Item” from the current Options scope and select `enable` / `disable`. A Scene Node Event can control only that same node, while a Global Event can control only Global Options; neither may cross scopes. The Editor saves stable Node, Element, and Item IDs and protects referenced Elements and Items from deletion. Enabled state participates in Ren'Py saves, does not reset on stack transitions, and is cleared when a new game starts.
+
+On every interaction, the Runtime places the current Scene Node Options first and overlays Global Options. If both scopes reuse the same Trigger, all same-Trigger Events still compete together by Conditions, Priority, and Weight, so Global Options should use clear, collision-resistant Trigger IDs.
 
 Canvas Preview Background affects only that Options document in the editor. Leaving it empty means no preview image and never changes the game scene.
 
@@ -139,12 +142,20 @@ The default `Memory` bank cannot be deleted and also tracks Once Events. Custom 
 
 ## Graph
 
-The graph is a read-only directed view generated from GOTO / REPLACE Next Node values. GOTO is solid and REPLACE is dashed in the same color. When `Parent → A` is GOTO and `A → B` is REPLACE, a more transparent solid `Parent → B` edge shows the derived management relation. Global Event edges are marked as Contextual Transitions: their real source is the Stack top at trigger time, not a Runtime visit to the Global Node. The graph adds no Schema Parent and does not modify Events.
+The graph is a read-only directed view generated from GOTO / REPLACE Next Node values and uses a hierarchy-aware live force layout similar to Obsidian. Each real Scene Node is an opaque white bordered dot and the canvas shows only its Node Name; technical IDs and the GLOBAL authoring scope do not occupy graph space. The configured ROOT is the default force center: first-level GOTO nodes spread around it, while deeper children form their own circular clusters around their respective parents. Management nodes derived through a REPLACE chain remain in the same parent cluster, and multiple GOTO parents jointly pull a shared destination. These are soft forces rather than fixed coordinates or a static Parent Schema.
+
+A node's radius and repulsive charge inherit the spatial demand of all unique descendants. Direct children contribute most and deeper descendants decay by level before logarithmic compression; radius growth and its cap are deliberately restrained so hubs remain recognizable without becoming oversized. Cycles and repeated paths are deduplicated instead of recursing forever. Base node repulsion follows an inverse-square law. Direct parent-child spacing remains spring-led, while ancestry beyond the first level uses a slower square-root attenuation so ROOT and its grandchildren retain meaningful separation without allowing ROOT to dominate the entire branch. Each group of direct and REPLACE-management children also receives a soft tangential correction that distributes it around the parent without locking positions. When a node has multiple parent sources, only the first primary parent reached from ROOT supplies its orbit angle; the remaining relationships retain their springs and edges without imposing contradictory angular targets.
+
+The simulation plane is effectively unbounded: nodes are no longer clamped to the initial canvas rectangle, the empty plane can be panned continuously in any direction, and the zoom range accommodates large projects. The initial view centers ROOT at a readable node scale instead of shrinking every dot to force distant branches into one frame; zoom out manually when an overview is useful. Reset View preserves the current zoom level and returns ROOT to the viewport center; it neither rearranges nor saves node positions.
+
+GOTO is solid and REPLACE is dashed in the same color. Every edge path still runs from node center to node center, while each arrow tip stops exactly on the receiving circle; both ends of a bidirectional relationship follow the same rule. Arrowheads are graph geometry and scale with the canvas, while Node Names compensate for zoom to retain an approximately constant readable screen size. Lines carry no inline text; Event name, Trigger, End up, and direction details remain available in tooltips. Reciprocal `A REPLACE B` and `B REPLACE A` references become one line with arrowheads at both ends, while its tooltip still lists each directional Event and the JSON remains unchanged. Reciprocal GOTO references are not merged: two high-contrast reverse arcs expose the GOTO Cycle structure that may keep growing the Stack. Management references follow the complete REPLACE chain: `Parent GOTO A`, `A REPLACE B`, and `B REPLACE C` produce the translucent `Parent → B` and `Parent → C` edges, all sharing the parent center with the direct GOTO. Global Events and the GLOBAL node are omitted from the graph; this affects only visualization, not their Editor, data, or Runtime behavior. The graph adds no Schema Parent and changes neither Events nor Runtime contracts.
 
 - Wheel or two-finger vertical movement: zoom around the pointer.
 - Drag empty space: pan.
-- Search: dim non-matching nodes.
-- Round button: reset the view.
+- Drag a node: it follows the pointer directly while the rest of the graph responds; releasing it hands velocity back to the simulation so the graph settles again. Positions belong only to the current graph view and are not saved into project data.
+- Search: dim non-matching nodes and unrelated edges.
+- Focus a node: temporarily dim unrelated nodes and edges while preserving direct neighbors.
+- Round button: preserve the current zoom level and return ROOT to the viewport center.
 - Click a node: select it in the editor.
 
 ## Check Project

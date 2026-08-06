@@ -157,7 +157,7 @@ test("Event row rendering keeps current selectors and Memory clear semantics", (
   assert.match(contentHtml, /<content-picker data-id="intro" data-index="0">/);
 });
 
-test("Event Effect choices can exclude Option for Global Events", () => {
+test("Event Effect choices honor a caller-provided restricted type list", () => {
   const editor = createEditor({ effectTypes: ["stat", "memory"] });
   const effectHtml = editor.effectRowsHtml([
     { type: "stat", id: "money", op: "+", value: 1 },

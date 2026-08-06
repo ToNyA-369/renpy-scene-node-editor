@@ -49,8 +49,8 @@ Action / Keyboard / Mouse / Auto:Node Trigger + Global State
 - `Auto:Enter` 在 ROOT 啟動或 GOTO／REPLACE 進入節點時執行；`Auto:Exit` 在 EXIT／REPLACE 移除目前節點前執行。
 - State 系統全遊戲只有一份，包含依 Group 整理的平面 Stats 與可自訂的 Memory Banks；缺少 Group 的 Stat 正規化至 `Normal`，Group 不改變 Runtime ID 或存檔鍵。
 - 每個 Scene Node 都有自己的 Event Pool；固定 `__global__` Global Node 另提供跨節點 Event Pool。
-- Global Node 只是一個 Editor／資料作用域，不進入 stack、沒有 Options、不可使用 Option Trigger 或 Option Effect，也不能成為 Root 或 Next Node。Global Event End up 作用於觸發當下的實際 stack 頂端。
-- 凡是包含選項的互動單位都是 Scene Node。
+- Global Node 只是一個 Editor／資料作用域，不進入 stack，也不能成為 Root 或 Next Node；它擁有會疊加顯示於每個實際節點的 Options，可使用 Option Trigger，並可由同一 Global 作用域的 Event 執行 Option Effect。Global Event End up 作用於觸發當下的實際 stack 頂端。
+- 實際 Scene Node 提供當前互動 Options，Global Node 則提供跨所有實際節點的常駐 Options；兩者同時交給 Renderer。
 - Content 由創作者自行撰寫 Ren'Py label，也可以是 `null`。
 - State 的改變原則上寫在 Event Effects，而不是藏在 Content label。
 - 每個可互動 Trigger 建議保留一個無條件 Event 作為 fallback。
@@ -107,6 +107,7 @@ DATA/
 
 GLOBALNODE/
   Node.json
+  Options.json
   EVENTPOOL/
     <event_id>.json
   CONTENT/
@@ -155,7 +156,7 @@ Options 工作區分成兩種共用同一份草稿的模式。表單採左小右
 
 Options 沒有條件運算式、不可操作狀態或 CUSTOM Screen 來源。所有顯示的選項都可操作；條件、fallback 與節點分流統一由 Events 和 Scene Nodes 負責。`Options.json` Version 2 在 Element 與 TEXTBOX Item 增加 `Availability: ALWAYS | CONTROLLED`；Version 1／缺值讀作 ALWAYS 並在下次儲存正規化。PICTURE／HITBOX 只控制 Element；TEXTBOX 可控制整列及個別 Item。Item 顯示需要父 Element 與自身都可用，父層停用保留子狀態，空 TEXTBOX 自動隱藏。
 
-Runtime 以獨立 `scene_enabled_options` 保存受控目標，不污染 Stats／Memories。狀態採 reassignment 以支援 Ren'Py save／rollback，不因 REDO、GOTO、REPLACE、EXIT 自動重設，`scene_reset_state()` 開新遊戲時清空。Option Effect 僅能由實際 Scene Node Event 控制同一節點的目標；跨節點與 Global Event 都由 Editor、API 與 Runtime 拒絕。Editor 的 Effect 階層選單只顯示目前節點的 Element／Item Name，JSON 仍保存穩定 Node／Element／Item ID。API 專案檢查及 Element／Item 刪除保護都必須包含 Option Effect。
+Runtime 以獨立 `scene_enabled_options` 保存受控目標，不污染 Stats／Memories。狀態採 reassignment 以支援 Ren'Py save／rollback，不因 REDO、GOTO、REPLACE、EXIT 自動重設，`scene_reset_state()` 開新遊戲時清空。Option Effect 只能控制 Event 所屬 Options 作用域：實際 Scene Node Event 只能控制同一節點，Global Event 只能控制 `__global__`；所有跨作用域引用都由 Editor、API 與 Runtime 拒絕。Editor 的 Effect 階層選單只顯示目前作用域的 Element／Item Name，JSON 仍保存穩定 Node／Element／Item ID。API 專案檢查及 Element／Item 刪除保護都必須包含 Option Effect。
 
 ## 6. 編輯器目前狀態
 
@@ -164,6 +165,7 @@ Runtime 以獨立 `scene_enabled_options` 保存受控目標，不污染 Stats�
 - 空白專案初始化 ROOT 節點、安全辨識各語系 Ren'Py 預設範本並接線 `script.rpy`、切換起始節點與 Root 刪除保護。
 - 單一 Memory 架構：預設 `Memory`、自訂記憶庫、標籤 add/remove/clear、Runtime API 與舊 Tag 延遲遷移。
 - Scene Node、Event、Stats、Memory Banks 與 Content 的建立與編輯。
+- Global Node 擁有與 Scene Node 相同的 Options 工作區；Runtime 在任何實際節點互動時疊加目前節點與 Global Options。Global Event 可使用 Option Trigger，Option Effect 只能控制 `__global__` 作用域目標。
 - Stats 工作區固定提供 `Normal` 預設群組；外層加號建立新群組及其第一個 Stat，群組內使用寬版加號加入該組 Stat。State 外框與 Event／Options 一樣使用完整工作區寬度，Stats 左框與 Memory 右框直接對齊分頁邊界，不在外層再套圓角遮罩；桌面版 Stat 欄位依群組容器分配寬度且不依賴橫向捲動。Event 的 Stat Condition／Effect 共用 Group → Stat 階層選單。Group 僅為 authoring metadata，Runtime 與存檔維持平面 Stat ID；Stats 與 Memory 卡片高度各自由自身內容決定。
 - Options Picture 與 Preview Background 只掃描 `game/images/`，並以子目錄階層選單呈現；選定欄位只顯示葉節點檔名。Preview Background 留空時不顯示預覽圖，也不影響遊戲場景。
 - Node Schema 不保存 Background 或 Screen；兩者與音訊、轉場一樣由 Content 使用 Ren'Py 原生語法管理。
@@ -183,7 +185,10 @@ Runtime 以獨立 `scene_enabled_options` 保存受控目標，不污染 Stats�
 - CSS 的設計 token 與瀏覽器基礎規則已分離至 `css/tokens.css`、`css/base.css`；其餘工作區樣式仍在 `styles.css` 漸進整理，不在搬移時改變視覺。
 - 節點刪除引用檢查與 `.scene-node-trash/` 可復原區。
 - 專案引用檢查。
-- 依 `GOTO / REPLACE / Next Node` 產生唯讀有向關聯圖；GOTO 為實線、REPLACE 為同色虛線。若 `Parent → A` 是 GOTO 且 `A → B` 是 REPLACE，前端另推導半透明實線 `Parent → B` 管理邊，但不寫入 Parent Schema。Global Event 邊以 Contextual Transition 呈現，不視為 Global Node 實際進入 Stack。圖可搜尋、以滾輪／觸控板雙指縮放、平移並切換節點。
+- 依 `GOTO / REPLACE / Next Node` 產生唯讀有向關聯圖，採可互動的階層感知即時力導向布局。只顯示實際 Scene Nodes；GLOBAL 作用域與 Global Event 邊不進入圖面或力場。節點是只顯示 Node Name 的不透明白底圓點，不顯示技術 ID。連線路徑統一為圓心到圓心，手工計算的 SVG polygon 箭頭尖端停在接收端圓周；箭頭隨圖面縮放，Node Name 依 viewBox／viewport 比例反向補償並維持近似固定的螢幕字級。完整 Event／Trigger／End up 保留在 SVG tooltip。
+- 設定的 ROOT 是預設力場中心；GOTO／管理關係提供父節點局部圓環，REPLACE 提供同層柔性關係，多父節點共同拉動共享目標。節點半徑與斥力以 cycle-safe 唯一後代遍歷繼承空間需求，深層後代逐層衰減並以 `log2` 壓縮；半徑增幅係數為 3.25、上限為 32 graph units，使 hub 可辨識但不過度放大。
+- 逐幀兩兩斥力維持 O(n²) 且採距離平方反比。直接父子保留較低祖先係數並由彈簧維持距離；第二層以上改以較慢的平方根衰減且保留 0.24 下限，避免 ROOT 與孫節點幾乎失去斥力，同時不讓 ROOT 把局部群集全推往外側。從 ROOT 做 cycle-safe BFS 建立單一 `orbitChildren` 主樹；GOTO／管理關係只有主要父來源以 `orbitAngles` 施加有上限的弱切向校正，多父來源的其他邊只保留徑向 spring。
+- 模擬座標不 clamp 於初始 `width × height`；空白平移不限邊界，縮放寬度安全範圍為 120–250000 graph units，重新置中保留 zoom。節點可用 Pointer Events 直接拖曳並在放開後重新平衡；`prefers-reduced-motion` 使用有限次數靜態收斂。雙向 REPLACE 合成一條雙箭頭虛線，雙向 GOTO 保留兩條高對比反向弧線；管理邊遞迴追蹤完整 REPLACE 鏈且不寫入 Parent Schema。節點 hover／鍵盤 focus、搜尋降噪、縮放、無邊平移與節點切換行為維持不變。
 - 編輯器快捷鍵與自訂設定。
 - 編輯器設定透過 `/api/editor-settings` 寫入專案根目錄 `.scene-node-editor/settings.json`，不可退回只依賴隨機連接埠來源的 `localStorage`。
 - 安裝到空白 Ren'Py 專案及原地更新。
@@ -289,7 +294,7 @@ EDITOR/static/js/workspaces/state_editor.js
   Stats 群組正規化、工作區分組與 Group → Stat 階層選單資料；不改變平面 Stat ID。
 
 EDITOR/static/js/workspaces/graph_model.js
-  關聯圖 GOTO／REPLACE／管理關係、布局與 SVG edge path 的純資料邏輯。
+  關聯圖 GOTO／REPLACE／遞迴管理關係、雙向關係正規化、可逐幀驅動的力導向模擬、Cycle route 與 SVG edge path 的可測試資料邏輯。
 
 EDITOR/static/styles.css
   尚待逐步拆分的既有元件、工作區版面、響應式規則與互動狀態。
@@ -311,7 +316,7 @@ tools/create_editor_test_unit.py
   只對全新空白專案建立可拋棄的 Editor／Runtime 綜合測試內容；安全閘門會拒絕既有 Editor 資料。
 
 INTEGRATION/EDITOR_TEST_UNIT.md
-  8 節點關聯圖、Content、Options Availability、Event、State、原生 Screen 演出與 Runtime 流程的手動驗證步驟，包含 parent → child A → REPLACE child B → EXIT parent。
+  9 節點關聯圖、Content、Options Availability、Event、State、原生 Screen 演出與 Runtime 流程的手動驗證步驟，包含 parent → child A → REPLACE child B → EXIT parent 及鏈式 REPLACE 管理邊。
 
 tests/test_install.py
   乾淨安裝、更新保護與 Editor 啟動測試。

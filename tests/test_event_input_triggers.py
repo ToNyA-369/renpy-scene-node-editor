@@ -41,6 +41,12 @@ class FakeRenpy:
             "DATA/SceneProject.json": {"Root Node": "root"},
             "DATA/Stats.json": {},
             "DATA/Memories.json": {"memory": {"Name": "Memory"}},
+            "GLOBALNODE/Options.json": {
+                "Version": 2,
+                "Canvas": {},
+                "Elements": [{"ID": "global", "Type": "HITBOX", "Trigger": "Action:global"}],
+            },
+            "GLOBALNODE/EVENTPOOL/global.json": event_document("Action:global"),
             "SCENENODE/root/Node.json": {
                 "ID": "root",
                 "Name": "ROOT",
@@ -181,6 +187,13 @@ class EventInputTriggerTest(unittest.TestCase):
         self.assertIn("screen scene_option_renderer(node_id, input_bindings=None):", source)
         self.assertIn("for keysym, trigger in (input_bindings or []):", source)
         self.assertIn("key keysym action Return(trigger)", source)
+        self.assertIn("for option_node_id in scene_option_scope_ids(node_id):", source)
+        self.assertIn("use scene_option_scope(option_node_id) id option_node_id", source)
+
+        runtime, _ = load_runtime_namespace()
+        self.assertEqual(runtime["scene_option_scope_ids"]("root"), ["root", "__global__"])
+        self.assertEqual(runtime["scene_option_data"]("__global__")["Elements"][0]["ID"], "global")
+        self.assertEqual(runtime["scene_select_event"]("root", "Action:global")["ID"], "input_event")
 
     def test_runtime_leaves_native_screen_management_to_content(self):
         source = RUNTIME.read_text(encoding="utf-8")

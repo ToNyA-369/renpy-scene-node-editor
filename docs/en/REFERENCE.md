@@ -18,6 +18,7 @@ This document defines the current public-alpha data and Runtime contracts. For n
       Memories.json
     GLOBALNODE/
       Node.json
+      Options.json
       EVENTPOOL/<event_id>.json
       CONTENT/<file>.rpy
     SCENENODE/
@@ -58,7 +59,7 @@ This document defines the current public-alpha data and Runtime contracts. For n
 { "ID": "__global__", "Name": "GLOBAL" }
 ```
 
-Name is editable; ID is not. The Global Node is absent from `scene_catalog["nodes"]`, never enters `scene_stack`, and cannot be Root or Next Node. It has no `Options.json`; the Editor and schema reject both `Action:<option_id>` Triggers and Option Effects on Global Events.
+Name is editable; ID is not. The Global Node is absent from `scene_catalog["nodes"]`, never enters `scene_stack`, and cannot be Root or Next Node. It owns an `Options.json` with the same format as a Scene Node. Those Options render beside the current real node's Options everywhere. Global Events may use their `Action:<option_id>` Triggers and may control `CONTROLLED` targets within the `__global__` Options scope.
 
 Global Event prepare retains both `owner_node_id = "__global__"` and `node_id = <current Stack top>`. Once uses `once:global:<event_id>`. Effects and Content belong to the Global Event, while a non-lifecycle End up resolves against the current real Stack.
 
@@ -262,7 +263,7 @@ TEXTBOX Item:
 { "type": "option", "op": "disable", "target": "item", "node": "shop", "element": "shop_actions", "item": "buy_weapon" }
 ```
 
-Option Effects support `enable` and `disable`. A real Scene Node Event may target only a `CONTROLLED` Option owned by that same Scene Node; cross-node and Global Event Option Effects are invalid. Operations are idempotent. State participates in Ren'Py saves and rollback and does not reset on REDO, GOTO, REPLACE, or EXIT; a new game clears it through `scene_reset_state()`. The Editor lists only the current Node's creator-facing Element and Item Names while JSON stores stable Node, Element, and Item IDs. Referenced Elements and Items cannot be deleted.
+Option Effects support `enable` and `disable` and may target only a `CONTROLLED` Option owned by the Event's Options scope: a Scene Node Event targets that same node, while a Global Event targets `__global__`. Both reject cross-scope references. Operations are idempotent. State participates in Ren'Py saves and rollback and does not reset on REDO, GOTO, REPLACE, or EXIT; a new game clears it through `scene_reset_state()`. The Editor lists only the current scope's creator-facing Element and Item Names while JSON stores stable Node, Element, and Item IDs. Referenced Elements and Items cannot be deleted.
 
 Event Effects handle Stats, Memories, and Option Availability. Backgrounds, music, sound effects, transitions, and fades belong in Content labels using native Ren'Py syntax. Options may still select Hover Sound and Click Sound from `game/audio/`.
 
@@ -291,7 +292,7 @@ Event Effects handle Stats, Memories, and Option Availability. Backgrounds, musi
 
 `Auto:Node`, Option, Keyboard, and Mouse use the single-selection flow:
 
-1. Merge same-Trigger Events from the current Node and Global Node.
+1. Merge same-Trigger Events from the current Node and Global Node; the Trigger may come from current-node or Global Options.
 2. Exclude failed Conditions and completed Once Events.
 3. Find the minimum Priority.
 4. Choose one Event by Weight only within that Priority.

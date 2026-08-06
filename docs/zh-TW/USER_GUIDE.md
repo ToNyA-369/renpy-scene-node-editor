@@ -37,10 +37,11 @@ Node 不保存 Screen。HUD、場景外殼與其他 Screen 由創作者在 `.rpy
 
 ### Global Node
 
-節點列表頂端固定有一個不可刪除的 Global Node。它是全局 Event 與 Content 的編輯作用域，不是真實 Scene Node：
+節點列表頂端固定有一個不可刪除的 Global Node。它是全局 Event、Options 與 Content 的編輯作用域，不是真實 Scene Node：
 
 - 不進入 Scene Stack，不能成為 ROOT、GOTO 或 REPLACE 的目標。
-- 沒有 Options 工作區，Global Event 不能使用 Option Trigger 或 Option Effect。
+- 擁有自己的 Options 工作區；Global Options 會與任何當前實際節點的 Options 同時顯示。
+- Global Event 可使用 Global Options 的 Option Trigger，也可啟用／停用同一 `__global__` 作用域內的 Controlled Options。
 - On Node、Keyboard、Mouse Event 會與目前實際節點的同 Trigger Events 合併，再一起比較 Conditions、Priority 與 Weight。
 - On Enter／On Exit 會在每個實際節點的對應生命週期中與本地 Events 一起依序執行。
 - Global Event 的 REDO、GOTO、REPLACE、EXIT 都作用於當時的實際 Stack 頂端節點。
@@ -61,7 +62,7 @@ Event 是目前節點對 Trigger 的反應。主要欄位：
 - `Content`：接著呼叫的 Ren'Py label，可使用權重。
 - `End up`：Content 返回後執行 REDO、GOTO、REPLACE 或 EXIT。GOTO／REPLACE 都可使用單一或權重 Next Node。
 
-UI 中的 `Option` 技術格式仍是 `Action:<id>`。Event 選擇器會列出目前節點 Options 已註冊的 Triggers。
+UI 中的 `Option` 技術格式仍是 `Action:<id>`。Event 選擇器會列出目前作用域 Options 已註冊的 Triggers；在 Global Node 編輯的 Option Trigger 會在所有實際節點的互動畫面可用。
 
 Picture 與 Preview Background 只列出 `game/images/`；Options 的 Hover Sound／Click Sound 只列出 `game/audio/`。資源可用子資料夾整理，Editor 會保留其階層供選擇，但選定欄位只顯示檔名。遊戲場景、BGM、SE 與轉場請在 Content 使用 Ren'Py 原生語法。
 
@@ -103,7 +104,9 @@ Options 是固定資料化的玩家互動介面。所有顯示的選項都可操
 
 TEXTBOX 的整個 Element 與各 Item 可各自設定 Availability，因此可以用 Element 控制一整列，也可以只在既有清單中加入或移除一個 Item。Item 必須同時通過父 Element 與自身 Availability；暫時隱藏父 Element 不會清除已啟用的 Item。PICTURE 與 HITBOX 只提供 Element 層級。
 
-在實際 Scene Node Event 的 Effects 新增 `option`，再由階層選單選擇目前節點的「Element → 整列或 Item」與 `enable`／`disable`。Event 不能控制其他 Scene Node 的 Option，Global Event 也不提供 Option Effect；Editor 保存穩定 Node／Element／Item ID，並保護仍被引用的 Element 與 Item。這些啟用狀態會進入 Ren'Py 存檔，不會因節點切換自行重設，但開始新遊戲時會清空。
+在 Event 的 Effects 新增 `option`，再由階層選單選擇目前作用域的「Element → 整列或 Item」與 `enable`／`disable`。Scene Node Event 只能控制同一節點，Global Event 只能控制 Global Options；兩者都不能跨作用域。Editor 保存穩定 Node／Element／Item ID，並保護仍被引用的 Element 與 Item。這些啟用狀態會進入 Ren'Py 存檔，不會因節點切換自行重設，但開始新遊戲時會清空。
+
+Runtime 每輪會先放入目前 Scene Node 的 Options，再疊加 Global Options。若兩個作用域使用相同 Trigger，兩邊同 Trigger 的 Events 仍會依 Conditions、Priority 與 Weight 一起競爭；因此全域操作建議使用清楚且不易碰撞的 Trigger ID。
 
 畫布 Preview Background 只改變該 Options 文件的 Editor 預覽；留空代表沒有預覽底圖，不影響遊戲畫面。
 
@@ -139,12 +142,20 @@ Memory Banks 保存標籤。Conditions 使用 `has`／`not_has`，Effects 使用
 
 ## 關聯圖
 
-關聯圖依 GOTO／REPLACE 的 Next Node 產生唯讀有向圖。GOTO 使用實線，REPLACE 使用同色虛線；若 `Parent → A` 是 GOTO 且 `A → B` 是 REPLACE，圖上另以較透明的實線顯示推導出的 `Parent → B` 管理關係。Global Event 的線條標示為 Contextual Transition，表示實際來源是觸發當下的 Stack 頂端，不代表 Runtime 進入 Global Node。關聯圖不建立 Schema Parent，也不直接修改 Event。
+關聯圖依 GOTO／REPLACE 的 Next Node 產生唯讀有向圖，並使用階層感知、類似 Obsidian 的即時力導向布局。每個實際 Scene Node 以不透明、帶邊框的白底圓點呈現，圖面只顯示 Node Name；技術 ID 與不屬於遊戲空間的 GLOBAL 作用域都不佔用圖面。設定的 ROOT 是預設力場中心，第一層 GOTO 節點會在它周圍散開；更深層的子節點則以各自父節點為局部中心形成自己的圓形群集。REPLACE 鏈推導出的管理節點留在同一個父層群集，多個 GOTO 父節點則會共同拉動共享目標。這些都是柔性力量而非固定座標或靜態 Parent Schema。
+
+節點半徑與斥力會繼承它所有不重複後代的空間需求。直接子節點影響最大，更深後代會逐層衰減，再以對數函數壓縮；半徑的成長幅度與上限特別收斂，讓分支中心仍可辨識但不會過度放大。循環與多條路徑會去重，不會無限遞迴計算。節點間的基礎斥力採距離平方反比；直接父子仍由彈簧維持群集，第二層以上祖先關係改以較慢的平方根衰減，避免 ROOT 與孫節點幾乎失去斥力，同時不讓 ROOT 壓制整個分支。每組直接與 REPLACE 管理子節點另有柔性的切向校正力，協助它們均勻分布於父節點周圍，而不把位置鎖死。若同一節點有多個父來源，只有從 ROOT 展開時最先成立的主要父來源負責圓環角度，其餘關係仍保留彈簧與連線，避免多個互相矛盾的角度同時拉扯。
+
+模擬座標平面近似無邊：節點不再受到初始畫布矩形的硬性裁切，空白處可持續往任意方向平移，縮放範圍也足以巡覽大型專案。初始畫面以 ROOT 為中心並維持可讀的節點比例，不會為了把所有遠端分支強塞進同一畫面而把圓點縮得過小；需要總覽時可自行縮小。重新置中只把 ROOT 帶回視窗中心並保留目前的縮放層級，不會重排、搬動或保存節點位置。
+
+GOTO 使用實線，REPLACE 使用同色虛線；所有連線路徑仍由節點圓心連到圓心，箭頭尖端則精確停在接收端圓周，雙向關係的兩端亦相同。箭頭屬於圖面幾何，會隨圖面縮放；Node Name 會反向補償縮放，維持近似固定的螢幕字級與可讀性。連線不放置行內文字，Event 名稱、Trigger、End up 與方向細節仍保留在 tooltip。`A REPLACE B` 與 `B REPLACE A` 會合併成一條兩端都有箭頭的線，但 tooltip 仍分別列出兩個方向的 Events，JSON 也保持原樣。雙向 GOTO 不合併，而以高對比的兩條反向弧線呈現 GOTO Cycle，提醒可能持續推高 Stack 的結構。管理關係會追蹤完整 REPLACE 鏈：若 `Parent GOTO A`、`A REPLACE B`、`B REPLACE C`，圖上會以較透明實線顯示 `Parent → B` 與 `Parent → C`，並與直接 GOTO 共用 Parent 圓心。Global Event 與 GLOBAL 節點不顯示在關聯圖中；這只影響視覺化，不改變它們在 Editor、資料或 Runtime 的行為。關聯圖不建立 Schema Parent，不修改 Event 或 Runtime 契約。
 
 - 滾輪或觸控板雙指上下移動：以游標位置縮放。
 - 拖曳空白處：平移。
-- 搜尋：淡化不符合的節點。
-- 圓形按鈕：重新置中。
+- 拖曳節點：節點即時跟隨游標；其他節點同時受力回應，放開後會延續速度並重新達到平衡。位置只屬於目前這次關聯圖檢視，不寫入專案資料。
+- 搜尋：淡化不符合的節點及無關連線。
+- 將焦點移到節點：暫時淡化無關節點與連線，只保留直接相鄰關係。
+- 圓形按鈕：保留目前縮放層級，把 ROOT 放回畫面中心。
 - 點擊節點：切換 Editor 目前節點。
 
 ## 檢查專案
