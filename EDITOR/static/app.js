@@ -3191,6 +3191,8 @@ function updateGraphGeometry(layout, relationships) {
     const position = layout.positions.get(node.dataset.nodeId);
     if (position) node.setAttribute("transform", `translate(${position.x} ${position.y})`);
   });
+  const svg = dom.graphPanel.querySelector("#projectGraphSvg");
+  if (svg) svg.dataset.edgeCrossings = String(SceneGraphModel.countEdgeCrossings(relationships, layout));
 }
 
 function bindGraphPanel(layout, relationships, simulation) {
@@ -3430,7 +3432,7 @@ function renderGraphPanel() {
   });
   const layout = SceneGraphModel.layout(nodes, relationships, state.rootNodeId);
   const simulation = SceneGraphModel.createForceSimulation(nodes, relationships, layout, state.rootNodeId);
-  simulation.tick(260);
+  simulation.settleGrowth();
   if (signature !== state.graphLayoutSignature) {
     state.graphLayoutSignature = signature;
     state.graphViewBox = centeredGraphViewBox(layout);
@@ -3500,7 +3502,7 @@ function renderGraphPanel() {
         <button class="graph-reset-button" id="resetGraphView" type="button" title="重新置中" aria-label="重新置中">
           <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"></circle><path d="M12 3v3M12 18v3M3 12h3M18 12h3"></path></svg>
         </button>
-        <svg id="projectGraphSvg" role="img" aria-label="Scene Node GOTO 與 REPLACE 有向關聯圖" viewBox="${graphViewBoxValue()}" data-graph-width="${layout.width}" data-graph-height="${layout.height}">
+        <svg id="projectGraphSvg" role="img" aria-label="Scene Node GOTO 與 REPLACE 有向關聯圖" viewBox="${graphViewBoxValue()}" data-graph-width="${layout.width}" data-graph-height="${layout.height}" data-growth-stages="${layout.growthStages.length}" data-edge-crossings="${SceneGraphModel.countEdgeCrossings(relationships, layout)}">
           <g class="graph-edges">${edgesHtml}</g>
           <g class="graph-nodes">${nodesHtml}</g>
         </svg>

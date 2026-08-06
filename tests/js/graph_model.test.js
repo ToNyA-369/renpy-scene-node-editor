@@ -35,6 +35,11 @@ function polygonPoints(points) {
   });
 }
 
+function setCenter(layout, nodeId, point) {
+  const radius = layout.nodeSizes.get(nodeId).radius;
+  layout.positions.set(nodeId, { x: point.x - radius, y: point.y - radius });
+}
+
 test("graph model groups repeated direct references", () => {
   const result = graph.relationships(nodes, [
     { source: "parent", target: "child_a", endUp: "GOTO", eventId: "open" },
@@ -210,6 +215,67 @@ test("hierarchy-aware forces form nested radial clusters around ROOT", () => {
   assert.ok(distance(center(layout, "shops"), center(layout, "mall")) < 600);
 });
 
+test("growth settlement builds the GOTO skeleton before REPLACE families", () => {
+  const growthNodes = ["root", "a", "a_room", "b", "b_room"].map((id) => ({ id, name: id }));
+  const relationships = graph.relationships(growthNodes, [
+    { source: "root", target: "a", endUp: "GOTO" },
+    { source: "a", target: "a_room", endUp: "GOTO" },
+    { source: "a", target: "b", endUp: "REPLACE" },
+    { source: "b", target: "b_room", endUp: "GOTO" },
+  ]);
+  const layout = graph.layout(growthNodes, relationships, "root");
+
+  assert.deepEqual(layout.growthStages, [
+    { kind: "root", nodeIds: ["root"] },
+    { kind: "goto", nodeIds: ["a"] },
+    { kind: "goto", nodeIds: ["a_room"] },
+    { kind: "replace", nodeIds: ["b"] },
+    { kind: "goto", nodeIds: ["b_room"] },
+  ]);
+  assert.equal(layout.orbitParents.get("a"), "root");
+  assert.equal(layout.orbitParents.get("b"), "root");
+  assert.equal(layout.orbitKinds.get("b"), "MANAGEMENT");
+
+  const simulation = graph.createForceSimulation(growthNodes, relationships, layout, "root");
+  const result = simulation.settleGrowth();
+  assert.equal(result.stageCount, 5);
+  assert.ok(result.ticksPerStage > 0);
+  layout.positions.forEach((position) => {
+    assert.ok(Number.isFinite(position.x));
+    assert.ok(Number.isFinite(position.y));
+  });
+  assert.ok(distance(center(layout, "root"), center(layout, "a")) > 150);
+  assert.ok(distance(center(layout, "root"), center(layout, "b")) > 150);
+  assert.ok(distance(center(layout, "a"), center(layout, "b")) > 180);
+});
+
+test("growth settlement is deterministic and only initializes once", () => {
+  const growthNodes = ["root", "home", "work", "bed", "office"].map((id) => ({ id, name: id }));
+  const relationships = graph.relationships(growthNodes, [
+    { source: "root", target: "home", endUp: "GOTO" },
+    { source: "root", target: "work", endUp: "GOTO" },
+    { source: "home", target: "bed", endUp: "GOTO" },
+    { source: "work", target: "office", endUp: "GOTO" },
+  ]);
+  const firstLayout = graph.layout(growthNodes, relationships, "root");
+  const secondLayout = graph.layout(growthNodes, relationships, "root");
+  const firstSimulation = graph.createForceSimulation(growthNodes, relationships, firstLayout, "root");
+  const secondSimulation = graph.createForceSimulation(growthNodes, relationships, secondLayout, "root");
+
+  firstSimulation.settleGrowth();
+  secondSimulation.settleGrowth();
+  const firstPositions = [...firstLayout.positions].map(([nodeId, position]) => [nodeId, position.x, position.y]);
+  const secondPositions = [...secondLayout.positions].map(([nodeId, position]) => [nodeId, position.x, position.y]);
+  assert.deepEqual(firstPositions, secondPositions);
+
+  const beforeSecondSettlement = structuredClone(firstPositions);
+  firstSimulation.settleGrowth();
+  assert.deepEqual(
+    [...firstLayout.positions].map(([nodeId, position]) => [nodeId, position.x, position.y]),
+    beforeSecondSettlement,
+  );
+});
+
 test("drag pinning is one-to-one and release returns the node to force equilibrium", () => {
   const treeNodes = ["root", "a", "b", "a1", "a2", "b1", "b2"].map((id) => ({ id, name: id }));
   const relationships = graph.relationships(treeNodes, [
@@ -268,6 +334,34 @@ test("route roles remain distinct and every relationship starts at the node cent
   const managementPath = graph.edgePath(layout.positions.get("root"), layout.positions.get("target"), layout, 0, "MANAGEMENT", management);
   assert.deepEqual(pathStart(directPath), pathStart(managementPath));
   assert.deepEqual(pathStart(directPath).map(Number), [center(layout, "root").x, center(layout, "root").y]);
+});
+
+test("crossing detection ignores shared endpoints and crossing penalties untangle independent edges", () => {
+  const crossingNodes = ["a", "b", "c", "d"].map((id) => ({ id, name: id }));
+  const relationships = graph.relationships(crossingNodes, [
+    { source: "a", target: "b", endUp: "GOTO" },
+    { source: "c", target: "d", endUp: "GOTO" },
+  ]);
+  const layout = graph.layout(crossingNodes, relationships, "a");
+  setCenter(layout, "a", { x: 400, y: 300 });
+  setCenter(layout, "b", { x: 800, y: 700 });
+  setCenter(layout, "c", { x: 400, y: 700 });
+  setCenter(layout, "d", { x: 800, y: 300 });
+
+  assert.equal(graph.countEdgeCrossings(relationships, layout), 1);
+  const simulation = graph.createForceSimulation(crossingNodes, relationships, layout, "a");
+  simulation.tick(120);
+  assert.equal(simulation.crossingCount(), 0);
+
+  const sharedRelationships = graph.relationships(crossingNodes, [
+    { source: "a", target: "b", endUp: "GOTO" },
+    { source: "a", target: "c", endUp: "GOTO" },
+  ]);
+  const sharedLayout = graph.layout(crossingNodes, sharedRelationships, "a");
+  setCenter(sharedLayout, "a", { x: 600, y: 500 });
+  setCenter(sharedLayout, "b", { x: 300, y: 200 });
+  setCenter(sharedLayout, "c", { x: 900, y: 800 });
+  assert.equal(graph.countEdgeCrossings(sharedRelationships, sharedLayout), 0);
 });
 
 test("arrow tips touch node surfaces while edge paths continue through node centers", () => {

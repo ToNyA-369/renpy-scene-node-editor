@@ -187,7 +187,9 @@ Runtime 以獨立 `scene_enabled_options` 保存受控目標，不污染 Stats�
 - 專案引用檢查。
 - 依 `GOTO / REPLACE / Next Node` 產生唯讀有向關聯圖，採可互動的階層感知即時力導向布局。只顯示實際 Scene Nodes；GLOBAL 作用域與 Global Event 邊不進入圖面或力場。節點是只顯示 Node Name 的不透明白底圓點，不顯示技術 ID。連線路徑統一為圓心到圓心，手工計算的 SVG polygon 箭頭尖端停在接收端圓周；箭頭隨圖面縮放，Node Name 依 viewBox／viewport 比例反向補償並維持近似固定的螢幕字級。完整 Event／Trigger／End up 保留在 SVG tooltip。
 - 設定的 ROOT 是預設力場中心；GOTO／管理關係提供父節點局部圓環，REPLACE 提供同層柔性關係，多父節點共同拉動共享目標。節點半徑與斥力以 cycle-safe 唯一後代遍歷繼承空間需求，深層後代逐層衰減並以 `log2` 壓縮；半徑增幅係數為 3.25、上限為 32 graph units，使 hub 可辨識但不過度放大。
+- 初始佈局不是把全部節點同時投入力場。`layout()` 以固定名稱／ID 排序建立 `growthStages`：ROOT 先成立，從已啟用節點逐層長出主要 GOTO 骨架，該輪可達的管理節點再以 REPLACE 階段加入；由 REPLACE 節點延伸的 GOTO 分支會在下一輪繼續生長，最後才加入無法從 ROOT 推導的 detached 節點。完整拓撲會預先保留每個父層的 `orbitAngles`，而 `settleGrowth()` 讓新節點從父節點附近起步、以固定 tick budget 局部收斂，最後再啟用全部關係做全局鬆弛。這只是 deterministic warm start；畫面仍直接顯示收斂結果，拖曳後沿用原本可中斷的即時力場。
 - 逐幀兩兩斥力維持 O(n²) 且採距離平方反比。直接父子保留較低祖先係數並由彈簧維持距離；第二層以上改以較慢的平方根衰減且保留 0.24 下限，避免 ROOT 與孫節點幾乎失去斥力，同時不讓 ROOT 把局部群集全推往外側。從 ROOT 做 cycle-safe BFS 建立單一 `orbitChildren` 主樹；GOTO／管理關係只有主要父來源以 `orbitAngles` 施加有上限的弱切向校正，多父來源的其他邊只保留徑向 spring。
+- 線路清晰度採 crossing-aware 弱力而不是全線段互斥：以圓心直線作結構交叉近似，排除共用端點、自環與 Global 邊，先用 bounding-box sweep 刪除不可能相交的組合，每 3 tick 最多處理 96 個實際交叉。處理時依 tree、GOTO Cycle、REPLACE、cross、management 的優先度選擇成本最低的端點，沿另一條線的法向移動並緩慢調整該節點的 `orbitAngles` 目標；ROOT、hub 與拖曳中 pinned 節點有額外保護。非樹狀 cross route 的 quadratic control point 固定彎向圖面中心外側，中央重疊時才使用 stable lane。`countEdgeCrossings()` 與 SVG `data-edge-crossings` 提供測試／診斷值，不影響專案資料。
 - 模擬座標不 clamp 於初始 `width × height`；空白平移不限邊界，縮放寬度安全範圍為 120–250000 graph units，重新置中保留 zoom。節點可用 Pointer Events 直接拖曳並在放開後重新平衡；`prefers-reduced-motion` 使用有限次數靜態收斂。雙向 REPLACE 合成一條雙箭頭虛線，雙向 GOTO 保留兩條高對比反向弧線；管理邊遞迴追蹤完整 REPLACE 鏈且不寫入 Parent Schema。節點 hover／鍵盤 focus、搜尋降噪、縮放、無邊平移與節點切換行為維持不變。
 - 編輯器快捷鍵與自訂設定。
 - 編輯器設定透過 `/api/editor-settings` 寫入專案根目錄 `.scene-node-editor/settings.json`，不可退回只依賴隨機連接埠來源的 `localStorage`。
