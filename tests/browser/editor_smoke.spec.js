@@ -311,6 +311,8 @@ test("critical editor interactions survive reload without browser errors", async
 
   await page.getByRole("button", { name: "關聯圖" }).click();
   await expect(page.locator("#projectGraphSvg")).toBeVisible();
+  await expect(page.locator("#projectGraphSvg")).toHaveAttribute("data-growth-stages", /^\d+$/);
+  await expect(page.locator("#projectGraphSvg")).toHaveAttribute("data-edge-crossings", /^\d+$/);
   await expect(page.locator(".graph-edge.is-replace")).toHaveCount(2);
   await expect(page.locator(".graph-edge.is-replace.is-bidirectional")).toHaveCount(1);
   await expect(page.locator(".graph-edge.is-management")).toHaveCount(2);
