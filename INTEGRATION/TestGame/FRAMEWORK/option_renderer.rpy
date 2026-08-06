@@ -9,18 +9,23 @@ screen scene_option_renderer(node_id, input_bindings=None):
         xfill True
         yfill True
 
-        for element in scene_option_data(node_id).get("Elements", []):
-            if scene_option_is_available(node_id, element):
-                if element.get("Type") == "TEXTBOX":
-                    use scene_option_textbox(node_id, element)
-                elif element.get("Type") == "PICTURE":
-                    use scene_option_picture(node_id, element)
-                elif element.get("Type") == "HITBOX":
-                    use scene_option_hitbox(node_id, element)
+        for option_node_id in scene_option_scope_ids(node_id):
+            use scene_option_scope(option_node_id) id option_node_id
+
+
+screen scene_option_scope(node_id):
+    for element in scene_option_data(node_id).get("Elements", []):
+        if scene_option_is_available(node_id, element):
+            if element.get("Type") == "TEXTBOX":
+                use scene_option_textbox(node_id, element)
+            elif element.get("Type") == "PICTURE":
+                use scene_option_picture(node_id, element)
+            elif element.get("Type") == "HITBOX":
+                use scene_option_hitbox(node_id, element)
 
 
 screen scene_option_textbox(node_id, element):
-    $ element_id = element.get("ID", "option_textbox")
+    $ element_id = scene_option_widget_id(node_id, element.get("ID", "option_textbox"))
     $ rect = scene_option_rect(node_id, element)
     $ settings = element.get("List", {})
     $ items = scene_option_visible_items(node_id, element)
@@ -69,7 +74,7 @@ screen scene_option_textbox(node_id, element):
                             $ item_background = scene_option_item_style(element, item, "Item Background", "#20302a")
                             $ item_hover_background = scene_option_composite_color(item_background, hover_color) if hover_enabled else item_background
                             button:
-                                id item.get("ID", "option_item")
+                                id scene_option_widget_id(node_id, "{}__{}".format(element.get("ID", "option_textbox"), item.get("ID", "option_item")))
                                 xfill True
                                 ysize item_height
                                 action Return(item.get("Trigger"))
@@ -96,7 +101,7 @@ screen scene_option_textbox(node_id, element):
 
 
 screen scene_option_picture(node_id, element):
-    $ element_id = element.get("ID", "option_picture")
+    $ element_id = scene_option_widget_id(node_id, element.get("ID", "option_picture"))
     $ rect = scene_option_rect(node_id, element)
     $ picture = element.get("Picture", {})
     $ picture_fit = picture.get("Fit") if picture.get("Keep Aspect", True) else "STRETCH"
@@ -119,7 +124,7 @@ screen scene_option_picture(node_id, element):
 
 
 screen scene_option_hitbox(node_id, element):
-    $ element_id = element.get("ID", "option_hitbox")
+    $ element_id = scene_option_widget_id(node_id, element.get("ID", "option_hitbox"))
     $ rect = scene_option_rect(node_id, element)
     $ hover_settings = element.get("Hover", {})
     $ hitbox_hover_background = Solid(hover_settings.get("Color", "#ffffff18")) if hover_settings.get("Enabled", True) else Solid("#00000000")

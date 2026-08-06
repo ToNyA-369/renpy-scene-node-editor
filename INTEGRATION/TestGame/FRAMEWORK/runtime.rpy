@@ -7,6 +7,7 @@ init -100 python:
     SCENE_DEFAULT_MEMORY = "memory"
     SCENE_GLOBAL_NODE_ID = "__global__"
     SCENE_GLOBAL_NODE_FILE = "GLOBALNODE/Node.json"
+    SCENE_GLOBAL_OPTIONS_FILE = "GLOBALNODE/Options.json"
     SCENE_GLOBAL_EVENT_ROOT = "GLOBALNODE/EVENTPOOL/"
     SCENE_NODE_ROOT = "SCENENODE/"
     SCENE_NODE_FILE = "/Node.json"
@@ -70,7 +71,13 @@ init -100 python:
             if node_id is not None:
                 events[node_id].append(scene_read_json(path))
 
-        options = {}
+        options = {
+            SCENE_GLOBAL_NODE_ID: (
+                scene_read_json(SCENE_GLOBAL_OPTIONS_FILE)
+                if SCENE_GLOBAL_OPTIONS_FILE in files
+                else {"Version": 2, "Canvas": {}, "Elements": []}
+            )
+        }
         for directory, node_id in node_directories.items():
             options_path = directory + SCENE_OPTIONS_FILE
             if options_path in files:
@@ -254,8 +261,6 @@ init -100 python:
     def scene_event_matches(event, trigger, owner_node_id=None):
         if event.get("Trigger") != trigger:
             return False
-        if owner_node_id == SCENE_GLOBAL_NODE_ID and str(event.get("Trigger") or "").startswith("Action:"):
-            return False
         if event.get("Once") and scene_memory_has(
             SCENE_DEFAULT_MEMORY,
             scene_event_once_memory(event, owner_node_id),
@@ -430,14 +435,18 @@ init -100 python:
         )
 
 
+    def scene_option_widget_id(node_id, element_id):
+        return "{}__{}".format(str(node_id or ""), str(element_id or ""))
+
+
     def scene_option_target(effect):
         node_id = str(effect.get("node") or "").strip()
         element_id = str(effect.get("element") or "").strip()
         target = str(effect.get("target") or "element").lower()
         item_id = str(effect.get("item") or "").strip() if target == "item" else None
 
-        if node_id not in scene_catalog["nodes"]:
-            raise Exception("Unknown Option Effect Scene Node: {}".format(node_id))
+        if node_id not in scene_catalog["options"]:
+            raise Exception("Unknown Option Effect scope: {}".format(node_id))
         if target not in ("element", "item"):
             raise Exception("Unknown Option Effect target: {}".format(target))
 
@@ -516,7 +525,7 @@ init -100 python:
             target_node_id = str(effect.get("node") or "").strip()
             if target_node_id != str(node_id or "").strip():
                 raise Exception(
-                    "Option Effect must target its owning Scene Node: {} cannot target {}".format(
+                    "Option Effect must target its owning Options scope: {} cannot target {}".format(
                         node_id,
                         target_node_id,
                     )
@@ -533,13 +542,9 @@ init -100 python:
                 SCENE_DEFAULT_MEMORY,
                 scene_event_once_memory(event, prepared.get("owner_node_id")),
             )
+        owner_node_id = prepared.get("owner_node_id") or prepared["node_id"]
         for effect in event.get("Effects", []):
-            if (
-                prepared.get("owner_node_id") == SCENE_GLOBAL_NODE_ID
-                and str(effect.get("type") or "").lower() == "option"
-            ):
-                raise Exception("Global Event cannot use an Option Effect.")
-            scene_apply_effect(prepared["node_id"], effect)
+            scene_apply_effect(owner_node_id, effect)
 
 
     def scene_get_node(node_id):
@@ -599,6 +604,13 @@ init -100 python:
             node_id,
             {"Version": 2, "Canvas": {}, "Elements": []},
         )
+
+
+    def scene_option_scope_ids(node_id):
+        scopes = [node_id]
+        if node_id != SCENE_GLOBAL_NODE_ID:
+            scopes.append(SCENE_GLOBAL_NODE_ID)
+        return scopes
 
 
     def scene_option_is_available(node_id, element, item=None):
@@ -709,11 +721,12 @@ init -100 python:
         global scene_option_adjustments
 
         updated = dict(scene_option_adjustments)
-        for element in scene_option_data(node_id).get("Elements", []):
-            if element.get("Type") != "TEXTBOX":
-                continue
-            key = "{}:{}".format(node_id, element.get("ID"))
-            updated[key] = ui.adjustment()
+        for option_node_id in scene_option_scope_ids(node_id):
+            for element in scene_option_data(option_node_id).get("Elements", []):
+                if element.get("Type") != "TEXTBOX":
+                    continue
+                key = "{}:{}".format(option_node_id, element.get("ID"))
+                updated[key] = ui.adjustment()
         scene_option_adjustments = updated
 
 

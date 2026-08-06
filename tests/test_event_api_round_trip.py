@@ -104,7 +104,7 @@ class EventApiRoundTripTest(unittest.TestCase):
         self.assertEqual(self.saved_event("root", "single_goto"), goto)
         self.assertEqual(self.saved_event("root", "enter_scene"), lifecycle_golden)
 
-    def test_global_event_round_trip_rejects_option_trigger(self):
+    def test_global_event_round_trips_option_trigger_and_scope_owned_effect(self):
         golden = {
             "ID": "global_clock",
             "Name": "Global Clock",
@@ -122,31 +122,28 @@ class EventApiRoundTripTest(unittest.TestCase):
         self.assertEqual(app.save_event({"node": "@global", "event": golden}), golden)
         self.assertEqual(self.saved_event("@global", "global_clock"), golden)
 
-        invalid = dict(golden, ID="global_option", Trigger="Action:continue")
-        with self.assertRaisesRegex(app.ApiError, "Global Event 不可使用 Option Trigger"):
-            app.save_event({"node": "@global", "event": invalid})
-
-        invalid_effect = dict(
+        global_option = dict(
             golden,
-            ID="global_option_effect",
+            ID="global_option",
+            Trigger="Action:continue",
             Effects=[{
                 "type": "option",
                 "op": "enable",
                 "target": "element",
-                "node": "root",
+                "node": "__global__",
                 "element": "actions",
             }],
         )
-        with self.assertRaisesRegex(app.ApiError, "Global Event 不可使用 Option Effect"):
-            app.save_event({"node": "@global", "event": invalid_effect})
+        self.assertEqual(app.save_event({"node": "@global", "event": global_option}), global_option)
+        self.assertEqual(self.saved_event("@global", "global_option"), global_option)
 
         cross_node_effect = {
-            **invalid_effect,
+            **global_option,
             "ID": "cross_node_option_effect",
-            "Effects": [{**invalid_effect["Effects"][0], "node": "other"}],
+            "Effects": [{**global_option["Effects"][0], "node": "root"}],
         }
-        with self.assertRaisesRegex(app.ApiError, "只能控制同一個 Scene Node"):
-            app.save_event({"node": "root", "event": cross_node_effect})
+        with self.assertRaisesRegex(app.ApiError, "只能控制同一個 Options 作用域"):
+            app.save_event({"node": "@global", "event": cross_node_effect})
 
 
 if __name__ == "__main__":

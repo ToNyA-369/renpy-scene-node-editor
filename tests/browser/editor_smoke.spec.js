@@ -280,16 +280,197 @@ test("critical editor interactions survive reload without browser errors", async
 
   await page.locator("#openSidebar").click();
   await page.locator('#nodeList [data-node-path="@global"]').click();
+  const optionsTab = page.getByRole("button", { name: "選項", exact: true });
+  await expect(optionsTab).toBeEnabled();
+  await optionsTab.click();
+  await expect(page.getByRole("button", { name: /全域常駐操作/ })).toBeVisible();
+  const globalOptionName = page.locator('input[data-option-path="Name"]');
+  await waitForOptionsSave(page, async () => {
+    await globalOptionName.fill("全域常駐操作 Smoke");
+  });
+  await reloadAndWaitForProject(page);
+  await page.locator("#openSidebar").click();
+  await page.locator('#nodeList [data-node-path="@global"]').click();
+  await optionsTab.click();
+  await expect(page.getByRole("button", { name: /全域常駐操作 Smoke/ })).toBeVisible();
   await page.getByRole("button", { name: /^事件 / }).click();
+  await page.getByRole("button", { name: /^顯示全域獎勵 / }).click();
+  await expect(page.locator('select[name="TriggerMode"]')).toHaveValue("Action");
+  const globalOptionEffect = page.locator('.effect-row[data-index="0"][data-effect-type="option"]');
+  await expect(globalOptionEffect.locator('select[name="effectOptionTarget"]')).toHaveValue(/"node":"__global__"/);
+  const globalTargets = await globalOptionEffect.locator('select[name="effectOptionTarget"] option').evaluateAll((options) => (
+    options.map((option) => JSON.parse(option.value).node)
+  ));
+  expect(new Set(globalTargets)).toEqual(new Set(["__global__"]));
   await page.getByRole("button", { name: /^全局 Keyboard G / }).click();
-  await expect(page.locator('.effect-row select[name="effectType"] option[value="option"]')).toHaveCount(0);
+  const globalKeyboardEffects = page.locator(".effect-row");
+  const globalKeyboardEffectCount = await globalKeyboardEffects.count();
+  expect(globalKeyboardEffectCount).toBeGreaterThan(0);
+  await expect(page.locator('.effect-row select[name="effectType"] option[value="option"]'))
+    .toHaveCount(globalKeyboardEffectCount);
 
   await page.getByRole("button", { name: "關聯圖" }).click();
   await expect(page.locator("#projectGraphSvg")).toBeVisible();
-  await expect(page.locator(".graph-edge.is-replace")).toHaveCount(1);
-  await expect(page.locator(".graph-edge.is-management")).toHaveCount(1);
+  await expect(page.locator(".graph-edge.is-replace")).toHaveCount(2);
+  await expect(page.locator(".graph-edge.is-replace.is-bidirectional")).toHaveCount(1);
+  await expect(page.locator(".graph-edge.is-management")).toHaveCount(2);
+  await expect(page.locator(".graph-edge.is-goto-cycle")).toHaveCount(2);
+  await expect(page.locator(".graph-edge text")).toHaveCount(0);
+  await expect(page.locator(".graph-node-id, .graph-root-label, .graph-global-label")).toHaveCount(0);
+  await expect(page.locator(".graph-node .graph-node-dot")).toHaveCount(9);
+  await expect(page.locator('.graph-node[data-node-id="__global__"], .graph-edge[data-scope="global"]')).toHaveCount(0);
+  await expect(page.locator(".graph-node .graph-node-dot").first()).toHaveCSS("fill-opacity", "1");
+  expect(await page.locator(".graph-edge.is-tree").count()).toBeGreaterThan(0);
+  expect(await page.locator(".graph-edge.is-secondary").count()).toBeGreaterThan(0);
+  await expect(page.locator('.graph-edge.is-cross[data-source="branch_lab"][data-target="outcome_fallback"] path'))
+    .toHaveAttribute("d", / Q /);
+  await expect(page.locator('.graph-edge.is-replace-local[data-source="replace_child_a"][data-target="replace_child_b"]'))
+    .toHaveCount(1);
+  await expect(page.locator('.graph-edge.is-management[data-source="replace_parent"][data-target="replace_child_b"]'))
+    .toHaveCount(1);
+  const chainedManagement = page.locator('.graph-edge.is-management[data-source="replace_parent"][data-target="replace_child_c"]');
+  await expect(chainedManagement).toHaveCount(1);
+  await expect(chainedManagement.locator("title")).toContainText("REPLACE Child A → REPLACE Child B → REPLACE Child C");
+  const nodeRadii = await page.evaluate(() => ({
+    parent: Number(document.querySelector('.graph-node[data-node-id="replace_parent"] .graph-node-dot').getAttribute("r")),
+    leaf: Number(document.querySelector('.graph-node[data-node-id="replace_child_c"] .graph-node-dot').getAttribute("r")),
+  }));
+  expect(nodeRadii.parent).toBeGreaterThan(nodeRadii.leaf);
+  const replacePorts = await page.evaluate(() => {
+    const path = (selector) => document.querySelector(selector).getAttribute("d");
+    const start = (value) => value.match(/^M ([^ ]+) ([^ ]+)/).slice(1).map(Number);
+    const replaceGroup = document.querySelector('.graph-edge.is-replace-local[data-source="replace_child_a"][data-target="replace_child_b"]');
+    const replaceElement = replaceGroup.querySelector("path");
+    const replace = replaceElement.getAttribute("d");
+    const goto = path('.graph-edge[data-source="replace_parent"][data-target="replace_child_a"][data-end-up="GOTO"] path');
+    const management = path('.graph-edge.is-management[data-source="replace_parent"][data-target="replace_child_b"] path');
+    const chainedManagement = path('.graph-edge.is-management[data-source="replace_parent"][data-target="replace_child_c"] path');
+    const parent = document.querySelector('.graph-node[data-node-id="replace_parent"]');
+    const parentMatrix = parent.transform.baseVal.consolidate().matrix;
+    const parentRadius = Number(parent.querySelector(".graph-node-dot").getAttribute("r"));
+    return {
+      replace,
+      replaceStartArrows: replaceGroup.querySelectorAll(".graph-edge-arrow.is-start").length,
+      replaceEndArrows: replaceGroup.querySelectorAll(".graph-edge-arrow.is-end").length,
+      replaceUsesMarkers: replaceElement.hasAttribute("marker-start") || replaceElement.hasAttribute("marker-end"),
+      gotoStart: start(goto),
+      managementStart: start(management),
+      chainedManagementStart: start(chainedManagement),
+      parentCenter: [parentMatrix.e + parentRadius, parentMatrix.f + parentRadius],
+    };
+  });
+  expect(replacePorts.replace).toMatch(/ Q /);
+  expect(replacePorts.replaceStartArrows).toBe(1);
+  expect(replacePorts.replaceEndArrows).toBe(1);
+  expect(replacePorts.replaceUsesMarkers).toBe(false);
+  expect(replacePorts.gotoStart).toEqual(replacePorts.managementStart);
+  expect(replacePorts.gotoStart).toEqual(replacePorts.chainedManagementStart);
+  expect(replacePorts.gotoStart[0]).toBeCloseTo(replacePorts.parentCenter[0], 3);
+  expect(replacePorts.gotoStart[1]).toBeCloseTo(replacePorts.parentCenter[1], 3);
 
-  await page.getByRole("button", { name: /Options 元件實驗室/ }).click();
+  const graphView = async () => page.locator("#projectGraphSvg").evaluate((svg) => {
+    const view = svg.viewBox.baseVal;
+    return { x: view.x, y: view.y, width: view.width, height: view.height };
+  });
+  await page.getByRole("button", { name: "重新置中" }).click();
+  const fittedView = await graphView();
+  const rootCenter = await page.evaluate(() => {
+    const root = document.querySelector('.graph-node[data-node-id="root"]');
+    const rootMatrix = root.transform.baseVal.consolidate().matrix;
+    const rootCircle = root.querySelector(".graph-node-dot");
+    const rootRadius = Number(rootCircle.getAttribute("r"));
+    return { x: rootMatrix.e + rootRadius, y: rootMatrix.f + rootRadius };
+  });
+  expect(Math.abs(rootCenter.x - (fittedView.x + fittedView.width / 2))).toBeLessThan(1);
+  expect(Math.abs(rootCenter.y - (fittedView.y + fittedView.height / 2))).toBeLessThan(1);
+
+  const graphBox = await page.locator("#projectGraphSvg").boundingBox();
+  const visualMetrics = async () => page.evaluate(() => {
+    const label = document.querySelector('.graph-node[data-node-id="root"] .graph-node-name');
+    const arrow = document.querySelector(".graph-edge.is-tree .graph-edge-arrow.is-end");
+    const svg = document.querySelector("#projectGraphSvg");
+    const labelBox = label.getBoundingClientRect();
+    const arrowBox = arrow.getBoundingClientRect();
+    return {
+      labelHeight: labelBox.height,
+      arrowExtent: Math.max(arrowBox.width, arrowBox.height),
+      viewWidth: svg.viewBox.baseVal.width,
+    };
+  });
+  const beforeZoom = await visualMetrics();
+  await page.mouse.move(graphBox.x + graphBox.width / 2, graphBox.y + graphBox.height / 2);
+  await page.mouse.wheel(0, 120);
+  await page.waitForTimeout(80);
+  const afterZoomOut = await visualMetrics();
+  expect(afterZoomOut.viewWidth).toBeGreaterThan(beforeZoom.viewWidth * 1.3);
+  expect(afterZoomOut.arrowExtent).toBeLessThan(beforeZoom.arrowExtent * 0.82);
+  expect(Math.abs(afterZoomOut.labelHeight - beforeZoom.labelHeight)).toBeLessThan(1.5);
+  await page.mouse.wheel(0, -120);
+  await page.waitForTimeout(80);
+
+  const panStart = await page.evaluate(() => {
+    const svg = document.querySelector("#projectGraphSvg");
+    const rect = svg.getBoundingClientRect();
+    const candidates = [[0.86, 0.18], [0.82, 0.76], [0.18, 0.72], [0.14, 0.22]];
+    for (const [xRatio, yRatio] of candidates) {
+      const x = rect.left + rect.width * xRatio;
+      const y = rect.top + rect.height * yRatio;
+      const target = document.elementFromPoint(x, y);
+      if (target && !target.closest(".graph-node, .graph-search, .graph-reset-button")) return { x, y };
+    }
+    return { x: rect.left + 24, y: rect.top + rect.height / 2 };
+  });
+  await page.mouse.move(panStart.x, panStart.y);
+  await page.mouse.down();
+  await page.mouse.move(
+    Math.min(graphBox.x + graphBox.width - 12, panStart.x + 180),
+    Math.max(graphBox.y + 12, panStart.y - 90),
+    { steps: 8 },
+  );
+  await page.mouse.up();
+  const pannedView = await graphView();
+  expect(Math.hypot(pannedView.x - fittedView.x, pannedView.y - fittedView.y)).toBeGreaterThan(50);
+  await page.getByRole("button", { name: "重新置中" }).click();
+  const resetView = await graphView();
+  expect(Math.abs(resetView.x - fittedView.x)).toBeLessThan(2);
+  expect(Math.abs(resetView.y - fittedView.y)).toBeLessThan(2);
+
+  const draggableGraphNode = page.locator('.graph-node[data-node-id="root"]');
+  const graphPosition = async () => draggableGraphNode.evaluate((element) => {
+    const matrix = element.transform.baseVal.consolidate().matrix;
+    return { x: matrix.e, y: matrix.f };
+  });
+  const beforeDrag = await graphPosition();
+  const dragBox = await draggableGraphNode.locator(".graph-node-dot").boundingBox();
+  await page.mouse.move(dragBox.x + dragBox.width / 2, dragBox.y + dragBox.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(dragBox.x + dragBox.width / 2 + 110, dragBox.y + dragBox.height / 2 - 55, { steps: 8 });
+  await expect(draggableGraphNode).toHaveAttribute("aria-grabbed", "true");
+  const duringDrag = await graphPosition();
+  expect(Math.hypot(duringDrag.x - beforeDrag.x, duringDrag.y - beforeDrag.y)).toBeGreaterThan(70);
+  await page.mouse.up();
+  await expect(draggableGraphNode).toHaveAttribute("aria-grabbed", "false");
+  await page.waitForTimeout(450);
+  const afterRelease = await graphPosition();
+  expect(Math.hypot(afterRelease.x - duringDrag.x, afterRelease.y - duringDrag.y)).toBeGreaterThan(2);
+  await expect(page.locator("#projectGraphSvg")).toBeVisible();
+
+  const graphBranchNode = page.locator('.graph-node[data-node-id="branch_lab"]');
+  await graphBranchNode.hover();
+  await expect(page.locator(".graph-canvas")).toHaveClass(/has-graph-focus/);
+  expect(await page.locator(".graph-edge.is-focus-related").count()).toBeGreaterThan(0);
+  await graphBranchNode.focus();
+  await expect(page.locator(".graph-canvas")).toHaveClass(/has-graph-focus/);
+  expect(await page.locator(".graph-edge.is-focus-related").count()).toBeGreaterThan(0);
+  expect(await page.locator(".graph-node.is-focus-related").count()).toBeGreaterThan(1);
+  const graphSearch = page.getByRole("searchbox", { name: "搜尋關聯圖節點" });
+  await graphSearch.fill("replace_child_b");
+  await expect(page.locator(".graph-node.is-search-match")).toHaveCount(1);
+  expect(await page.locator(".graph-edge.is-search-dimmed").count()).toBeGreaterThan(0);
+  await graphSearch.fill("");
+
+  await page.locator("#openSidebar").click();
+  await page.locator('#nodeList [data-node-path="options_lab"]').click();
   await page.getByRole("button", { name: "選項", exact: true }).click();
   await page.getByRole("button", { name: /DATA Options 綜合測試/ }).click();
   const availability = page.locator('select[data-option-path="Availability"]');

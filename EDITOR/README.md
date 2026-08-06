@@ -35,7 +35,7 @@ Editor 只在本機運作，關閉啟動器的終端視窗就會停止服務。
 - Option 只送出 Trigger；真正的條件、狀態變更與流程分支由 Event 決定。
 - Content 儲存的是 Ren'Py `label` 名稱，不是 `.rpy` 文件名。
 - `REDO` 重跑目前節點、`GOTO` push 目標節點、`REPLACE` 原子替換 Stack 頂端、`EXIT` 回到父節點。
-- 節點列表頂端固定有不可刪除的 Global Node。它的 Events 會在所有實際節點參與候選或生命週期流程；Global Node 沒有 Options，也不提供 Option Trigger。
+- 節點列表頂端固定有不可刪除的 Global Node。它的 Events 會在所有實際節點參與候選或生命週期流程；其 Options 也會與目前實際節點 Options 同時顯示，並可使用 Option Trigger 與同作用域 Option Effect。
 - Global Event 的 End up 作用於當時的實際節點；Global Node 本身不進入 Stack，也不會出現在 Root 或 Next Node 選單。
 - 所有顯示中的 Option 都可操作，並在一次互動結束後消失；下一輪顯示是 Runtime 再次建立它。
 - Screen／HUD 請自行在 `screens.rpy` 或其他 `.rpy` 中定義，再由 Content 使用 Ren'Py 原生 `show screen`、`hide screen` 或 `call screen` 控制。

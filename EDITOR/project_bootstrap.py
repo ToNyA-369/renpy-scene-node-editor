@@ -195,6 +195,8 @@ def initialize_scene_project(game_root, connect_script=True):
     (global_node / "CONTENT").mkdir(parents=True, exist_ok=True)
     if not (global_node / "Node.json").exists():
         write_json(global_node / "Node.json", default_global_node())
+    if not (global_node / "Options.json").exists():
+        write_json(global_node / "Options.json", default_options())
 
     nodes = list((game_root / "SCENENODE").rglob("Node.json"))
     config_path = game_root / PROJECT_CONFIG_RELATIVE

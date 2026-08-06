@@ -45,6 +45,7 @@ const state = {
   graphViewBox: null,
   graphLayoutSignature: "",
   graphSearch: "",
+  graphStopSimulation: null,
   images: [],
   audio: [],
   optionTargets: [],
@@ -283,15 +284,11 @@ function isGlobalNode() {
 }
 
 function eventTriggerModeChoices() {
-  return isGlobalNode()
-    ? EVENT_TRIGGER_MODES.filter((item) => item.id !== "Action")
-    : EVENT_TRIGGER_MODES;
+  return EVENT_TRIGGER_MODES;
 }
 
 function eventEffectTypeChoices() {
-  return isGlobalNode()
-    ? SceneStateRuleContract.EFFECT_TYPES.filter((type) => type !== "option")
-    : SceneStateRuleContract.EFFECT_TYPES;
+  return SceneStateRuleContract.EFFECT_TYPES;
 }
 
 function statChoices() {
@@ -307,7 +304,7 @@ function warnMissingStat(kind) {
 }
 
 function warnMissingOptionTarget() {
-  toast("目前節點沒有 CONTROLLED Option。請先在「選項」把 Element 或 Item 的 Availability 設為 CONTROLLED。", "error");
+  toast("目前作用域沒有 CONTROLLED Option。請先在「選項」把 Element 或 Item 的 Availability 設為 CONTROLLED。", "error");
 }
 
 function nodeChoices() {
@@ -338,8 +335,7 @@ function optionEffectChoices() {
   const currentNodeId = String(state.nodeDetail?.node?.ID || "");
   return (state.optionTargets || [])
     .filter((entry) => (
-      !isGlobalNode()
-      && entry.nodeId === currentNodeId
+      entry.nodeId === currentNodeId
       && entry.availability === "CONTROLLED"
     ))
     .map((entry) => {
@@ -606,7 +602,7 @@ function renderNodeList() {
       <button class="node-item global-node-item ${globalNode.path === state.selectedNodePath ? "active" : ""}" type="button" data-node-path="${escapeHtml(globalNode.path)}">
         <span class="node-item-copy">
           <strong>${escapeHtml(globalNode.name || "GLOBAL")}<span class="global-node-badge">GLOBAL</span></strong>
-          <span>所有 Scene Node 的事件作用域</span>
+          <span>所有 Scene Node 的事件與選項作用域</span>
         </span>
         <span class="node-event-count" title="Global Event 數量">${globalNode.eventCount}</span>
       </button>
@@ -680,7 +676,6 @@ async function selectNode(path, { preserveTab = false } = {}) {
     state.selectedContent = detail.contents[0]?.name || null;
     state.selectedContentDisplayName = detail.contents[0]?.displayName || "";
     state.contentSource = "";
-    if (detail.isGlobal && state.activeTab === "options") state.activeTab = "events";
     if (!preserveTab && !state.activeTab) state.activeTab = "node";
     renderAll();
     if (state.selectedContent) await loadContent(state.selectedContent);
@@ -694,11 +689,10 @@ async function selectNode(path, { preserveTab = false } = {}) {
 }
 
 function renderAll() {
-  if (isGlobalNode() && state.activeTab === "options") state.activeTab = "events";
   const optionsTab = dom.tabbar?.querySelector('[data-tab="options"]');
   if (optionsTab) {
-    optionsTab.disabled = isGlobalNode();
-    optionsTab.title = isGlobalNode() ? "Global Node 不支援 Options" : "";
+    optionsTab.disabled = false;
+    optionsTab.title = "";
   }
   updateHeader();
   updateDatalists();
@@ -740,7 +734,6 @@ function playWorkspaceAnimation(className) {
 }
 
 function switchTab(tab, { render = true } = {}) {
-  if (tab === "options" && isGlobalNode()) tab = "events";
   const isSwitchingTab = state.activeTab !== tab;
   state.activeTab = tab;
   document.querySelectorAll(".tab").forEach((button) => button.classList.toggle("active", button.dataset.tab === tab));
@@ -809,7 +802,7 @@ function renderNodePanel() {
         <div class="node-root-row">
           <div>
             <span class="root-node-badge ${isGlobal ? "is-global" : ""}">${isGlobal ? "GLOBAL" : isRoot ? "ROOT" : "NODE"}</span>
-            <span>${isGlobal ? "套用至所有 Scene Node 的虛擬事件作用域" : isRoot ? "目前的遊戲起始節點" : "可設為遊戲起始節點"}</span>
+            <span>${isGlobal ? "套用至所有 Scene Node 的全域事件與選項作用域" : isRoot ? "目前的遊戲起始節點" : "可設為遊戲起始節點"}</span>
           </div>
           ${isGlobal || isRoot ? "" : '<button class="quiet-button compact" id="setRootNodeButton" type="button">設為起始節點</button>'}
         </div>
@@ -832,7 +825,7 @@ function renderNodePanel() {
         <section class="node-overview" aria-label="Node overview">
           <div class="node-overview-metrics">
             <article><span>Events</span><strong>${events.length}</strong></article>
-            <article><span>Options</span><strong>${isGlobal ? "—" : optionsCount}</strong></article>
+            <article><span>Options</span><strong>${optionsCount}</strong></article>
             <article><span>Content Labels</span><strong>${labelCount}</strong></article>
             <article><span>Flow Links</span><strong>${outgoingConnections.length}</strong></article>
           </div>
@@ -1005,7 +998,7 @@ function defaultEvent(id = generateId("event")) {
   return {
     ID: id,
     Name: "新事件",
-    Trigger: isGlobalNode() ? "Auto:Node" : (eventActionChoices()[0]?.id || "Auto:Node"),
+    Trigger: eventActionChoices()[0]?.id || "Auto:Node",
     Priority: 5,
     Weight: 1,
     Once: false,
@@ -2102,10 +2095,6 @@ function renderOptionsPanel() {
     dom.optionsPanel.innerHTML = "";
     return;
   }
-  if (isGlobalNode()) {
-    dom.optionsPanel.innerHTML = '<div class="panel-page wide"><div class="success-state">Global Node 不提供 Options；全局事件不可由選項觸發。</div></div>';
-    return;
-  }
   if (!state.optionsDraft) state.optionsDraft = clone(state.nodeDetail.options || defaultOptionsDraft());
   const canvas = state.optionsDraft.Canvas || {};
   const isFormMode = state.optionWorkspaceMode === "form";
@@ -3117,42 +3106,226 @@ function graphViewBoxValue() {
 
 function applyGraphViewBox() {
   const svg = dom.graphPanel.querySelector("#projectGraphSvg");
-  if (svg && state.graphViewBox) svg.setAttribute("viewBox", graphViewBoxValue());
+  if (svg && state.graphViewBox) {
+    svg.setAttribute("viewBox", graphViewBoxValue());
+    updateGraphNameScale(svg);
+  }
 }
 
-function resetGraphView() {
+function updateGraphNameScale(svg = dom.graphPanel.querySelector("#projectGraphSvg")) {
+  if (!svg || !state.graphViewBox) return;
+  const rect = svg.getBoundingClientRect();
+  if (!rect.width || !rect.height) return;
+  const unitsPerPixel = Math.max(
+    state.graphViewBox.width / rect.width,
+    state.graphViewBox.height / rect.height,
+  );
+  svg.querySelectorAll(".graph-node").forEach((node) => {
+    const name = node.querySelector(".graph-node-name");
+    const radius = Number(node.querySelector(".graph-node-dot")?.getAttribute("r"));
+    if (!name || !Number.isFinite(radius)) return;
+    name.setAttribute("y", String(radius * 2 + 17 * unitsPerPixel));
+    name.style.fontSize = `${12 * unitsPerPixel}px`;
+    name.style.strokeWidth = `${4 * unitsPerPixel}px`;
+  });
+}
+
+function centeredGraphViewBox(layout, svg = null, currentView = null) {
+  const centerNodeId = String(layout.centerNodeId || "");
+  const centerPosition = layout.positions.get(centerNodeId);
+  const centerRadius = layout.nodeSizes.get(centerNodeId)?.radius || 0;
+  const center = centerPosition
+    ? { x: centerPosition.x + centerRadius, y: centerPosition.y + centerRadius }
+    : layout.center;
+  const rect = svg?.getBoundingClientRect();
+  const viewportRatio = rect?.width && rect?.height ? rect.width / rect.height : 1.6;
+  const rootClusterRadius = layout.nodeSizes.get(centerNodeId)?.clusterRadius || 300;
+  const width = currentView?.width || Math.max(1800, Math.min(3400, rootClusterRadius * 8));
+  const height = width / viewportRatio;
+  return { x: center.x - width / 2, y: center.y - height / 2, width, height };
+}
+
+function resetGraphView(layout) {
   const svg = dom.graphPanel.querySelector("#projectGraphSvg");
-  if (!svg) return;
-  state.graphViewBox = {
-    x: 0,
-    y: 0,
-    width: Number(svg.dataset.graphWidth) || 760,
-    height: Number(svg.dataset.graphHeight) || 480,
-  };
+  if (!svg || !layout) return;
+  state.graphViewBox = centeredGraphViewBox(layout, svg, state.graphViewBox);
   applyGraphViewBox();
 }
 
 function updateGraphSearch() {
   const query = state.graphSearch.trim().toLocaleLowerCase();
+  const matches = new Set();
   dom.graphPanel.querySelectorAll(".graph-node").forEach((node) => {
-    const matches = !query || (node.dataset.searchText || "").includes(query);
-    node.classList.toggle("is-dimmed", !matches);
-    node.classList.toggle("is-search-match", Boolean(query && matches));
+    const nodeMatches = !query || (node.dataset.searchText || "").includes(query);
+    if (nodeMatches) matches.add(node.dataset.nodeId);
+    node.classList.toggle("is-dimmed", !nodeMatches);
+    node.classList.toggle("is-search-match", Boolean(query && nodeMatches));
+  });
+  dom.graphPanel.querySelectorAll(".graph-edge").forEach((edge) => {
+    edge.classList.toggle("is-search-dimmed", Boolean(
+      query && !matches.has(edge.dataset.source) && !matches.has(edge.dataset.target)
+    ));
   });
 }
 
-function bindGraphPanel() {
+function updateGraphGeometry(layout, relationships) {
+  relationships.forEach((relationship, index) => {
+    const source = layout.positions.get(relationship.source);
+    const target = layout.positions.get(relationship.target);
+    const edge = dom.graphPanel.querySelector(`.graph-edge[data-edge-index="${index}"]`);
+    if (!source || !target || !edge) return;
+    edge.querySelector("path")?.setAttribute(
+      "d",
+      SceneGraphModel.edgePath(source, target, layout, index, relationship.endUp, relationship),
+    );
+    edge.querySelector(".graph-edge-arrow.is-end")?.setAttribute(
+      "points",
+      SceneGraphModel.edgeArrowPoints(source, target, layout, index, relationship.endUp, relationship),
+    );
+    edge.querySelector(".graph-edge-arrow.is-start")?.setAttribute(
+      "points",
+      SceneGraphModel.edgeArrowPoints(source, target, layout, index, relationship.endUp, relationship, "start"),
+    );
+  });
+  dom.graphPanel.querySelectorAll(".graph-node[data-node-id]").forEach((node) => {
+    const position = layout.positions.get(node.dataset.nodeId);
+    if (position) node.setAttribute("transform", `translate(${position.x} ${position.y})`);
+  });
+}
+
+function bindGraphPanel(layout, relationships, simulation) {
   const svg = dom.graphPanel.querySelector("#projectGraphSvg");
   const canvas = dom.graphPanel.querySelector(".graph-canvas");
   const search = dom.graphPanel.querySelector("#graphSearch");
-  dom.graphPanel.querySelector("#resetGraphView")?.addEventListener("click", resetGraphView);
+  dom.graphPanel.querySelector("#resetGraphView")?.addEventListener("click", () => resetGraphView(layout));
   search?.addEventListener("input", (event) => {
     state.graphSearch = event.target.value;
     updateGraphSearch();
   });
+  const setGraphFocus = (nodeId = null) => {
+    canvas?.classList.toggle("has-graph-focus", Boolean(nodeId));
+    const relatedNodeIds = new Set(nodeId ? [nodeId] : []);
+    dom.graphPanel.querySelectorAll(".graph-edge").forEach((edge) => {
+      const related = Boolean(
+        nodeId && (edge.dataset.source === nodeId || edge.dataset.target === nodeId)
+      );
+      edge.classList.toggle("is-focus-related", related);
+      if (related) {
+        relatedNodeIds.add(edge.dataset.source);
+        relatedNodeIds.add(edge.dataset.target);
+      }
+    });
+    dom.graphPanel.querySelectorAll(".graph-node").forEach((node) => {
+      node.classList.toggle("is-focus-related", Boolean(nodeId && relatedNodeIds.has(node.dataset.nodeId)));
+    });
+  };
+  const reducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches;
+  let simulationFrame = null;
+  const refreshGraphNameScale = () => updateGraphNameScale(svg);
+  window.addEventListener("resize", refreshGraphNameScale);
+  const drawSimulation = () => {
+    simulationFrame = null;
+    if (!svg?.isConnected) return;
+    const changed = simulation.tick();
+    if (changed) updateGraphGeometry(layout, relationships);
+    if (simulation.isActive()) simulationFrame = window.requestAnimationFrame(drawSimulation);
+  };
+  const requestSimulationFrame = () => {
+    if (reducedMotion || simulationFrame !== null) return;
+    simulationFrame = window.requestAnimationFrame(drawSimulation);
+  };
+  state.graphStopSimulation?.();
+  state.graphStopSimulation = () => {
+    if (simulationFrame !== null) window.cancelAnimationFrame(simulationFrame);
+    simulationFrame = null;
+    window.removeEventListener("resize", refreshGraphNameScale);
+  };
+
   dom.graphPanel.querySelectorAll(".graph-node").forEach((node) => {
     const openNode = () => selectNode(node.dataset.nodePath, { preserveTab: true });
-    node.addEventListener("click", openNode);
+    let nodeDrag = null;
+    let suppressClick = false;
+    const graphPoint = (event) => {
+      const rect = svg.getBoundingClientRect();
+      const view = state.graphViewBox || { x: 0, y: 0, width: layout.width, height: layout.height };
+      return {
+        x: view.x + (event.clientX - rect.left) / rect.width * view.width,
+        y: view.y + (event.clientY - rect.top) / rect.height * view.height,
+      };
+    };
+    const finishNodeDrag = (event, cancelled = false) => {
+      if (!nodeDrag || event.pointerId !== nodeDrag.pointerId) return;
+      if (nodeDrag.moved) {
+        const samples = nodeDrag.samples;
+        const last = samples[samples.length - 1];
+        const first = [...samples].reverse().find((sample) => last.time - sample.time >= 45) || samples[0];
+        const seconds = Math.max(0.016, (last.time - first.time) / 1000);
+        const velocityX = cancelled ? 0 : (last.x - first.x) / seconds;
+        const velocityY = cancelled ? 0 : (last.y - first.y) / seconds;
+        simulation.release(node.dataset.nodeId, velocityX, velocityY);
+        suppressClick = true;
+        if (reducedMotion) {
+          simulation.tick(90);
+          updateGraphGeometry(layout, relationships);
+        } else {
+          requestSimulationFrame();
+        }
+      }
+      node.classList.remove("is-dragging");
+      node.setAttribute("aria-grabbed", "false");
+      if (node.hasPointerCapture(event.pointerId)) node.releasePointerCapture(event.pointerId);
+      nodeDrag = null;
+    };
+    node.addEventListener("pointerenter", () => setGraphFocus(node.dataset.nodeId));
+    node.addEventListener("pointerleave", () => {
+      if (document.activeElement !== node) setGraphFocus();
+    });
+    node.addEventListener("focus", () => setGraphFocus(node.dataset.nodeId));
+    node.addEventListener("blur", () => setGraphFocus());
+    node.addEventListener("pointerdown", (event) => {
+      if (event.button !== 0) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const position = layout.positions.get(node.dataset.nodeId);
+      const point = graphPoint(event);
+      nodeDrag = {
+        pointerId: event.pointerId,
+        startClientX: event.clientX,
+        startClientY: event.clientY,
+        offsetX: point.x - position.x,
+        offsetY: point.y - position.y,
+        moved: false,
+        samples: [{ x: point.x, y: point.y, time: event.timeStamp }],
+      };
+      node.setPointerCapture(event.pointerId);
+    });
+    node.addEventListener("pointermove", (event) => {
+      if (!nodeDrag || event.pointerId !== nodeDrag.pointerId) return;
+      const movement = Math.hypot(event.clientX - nodeDrag.startClientX, event.clientY - nodeDrag.startClientY);
+      if (!nodeDrag.moved && movement < 6) return;
+      if (!nodeDrag.moved) {
+        nodeDrag.moved = true;
+        node.classList.add("is-dragging");
+        node.setAttribute("aria-grabbed", "true");
+      }
+      const point = graphPoint(event);
+      simulation.pin(node.dataset.nodeId, point.x - nodeDrag.offsetX, point.y - nodeDrag.offsetY);
+      nodeDrag.samples.push({ x: point.x, y: point.y, time: event.timeStamp });
+      nodeDrag.samples = nodeDrag.samples.filter((sample) => event.timeStamp - sample.time <= 120);
+      updateGraphGeometry(layout, relationships);
+      requestSimulationFrame();
+    });
+    node.addEventListener("pointerup", (event) => finishNodeDrag(event));
+    node.addEventListener("pointercancel", (event) => finishNodeDrag(event, true));
+    node.addEventListener("click", (event) => {
+      if (suppressClick) {
+        suppressClick = false;
+        event.preventDefault();
+        event.stopPropagation();
+        return;
+      }
+      openNode();
+    });
     node.addEventListener("keydown", (event) => {
       if (event.key !== "Enter" && event.key !== " ") return;
       event.preventDefault();
@@ -3180,7 +3353,7 @@ function bindGraphPanel() {
     // 為最小位移保留可見的縮放量，再限制單一畫面更新的最大幅度。
     const visibleDelta = Math.sign(rawDelta) * Math.max(1.5, Math.abs(rawDelta));
     const requestedFactor = Math.exp(visibleDelta * 0.008);
-    const width = Math.max(320, Math.min(5000, view.width * requestedFactor));
+    const width = Math.max(120, Math.min(250000, view.width * requestedFactor));
     const factor = width / view.width;
     const height = view.height * factor;
     const ratioX = (pointerX - view.x) / view.width;
@@ -3232,19 +3405,35 @@ function bindGraphPanel() {
   svg.addEventListener("pointerup", stopPanning);
   svg.addEventListener("pointercancel", stopPanning);
   updateGraphSearch();
+  updateGraphNameScale(svg);
+  requestSimulationFrame();
 }
 
 function renderGraphPanel() {
-  const nodes = [state.globalNode, ...(state.nodes || [])].filter(Boolean);
+  state.graphStopSimulation?.();
+  state.graphStopSimulation = null;
+  // GLOBAL is an authoring scope rather than a place in the game's node
+  // structure, so neither it nor its contextual Event edges belong in this map.
+  const nodes = (state.nodes || []).filter(Boolean);
   const relationships = SceneGraphModel.relationships(nodes, state.graph?.edges || []);
   const signature = JSON.stringify({
     nodes: nodes.map((node) => [node.id, node.path, node.name]),
-    edges: relationships.map((edge) => [edge.source, edge.target, edge.endUp, edge.scope, edge.events.length]),
+    edges: relationships.map((edge) => [
+      edge.source,
+      edge.target,
+      edge.endUp,
+      edge.scope,
+      edge.events.length,
+      Boolean(edge.bidirectional),
+      Boolean(edge.cycle),
+    ]),
   });
   const layout = SceneGraphModel.layout(nodes, relationships, state.rootNodeId);
+  const simulation = SceneGraphModel.createForceSimulation(nodes, relationships, layout, state.rootNodeId);
+  simulation.tick(260);
   if (signature !== state.graphLayoutSignature) {
     state.graphLayoutSignature = signature;
-    state.graphViewBox = { x: 0, y: 0, width: layout.width, height: layout.height };
+    state.graphViewBox = centeredGraphViewBox(layout);
   }
   if (!nodes.length) {
     dom.graphPanel.innerHTML = '<div class="panel-page wide"><div class="success-state">建立 Scene Node 後，關聯圖會顯示 GOTO／REPLACE 關係。</div></div>';
@@ -3255,15 +3444,35 @@ function renderGraphPanel() {
     const source = layout.positions.get(relationship.source);
     const target = layout.positions.get(relationship.target);
     if (!source || !target) return "";
-    const descriptions = relationship.events.map((event) => relationship.endUp === "MANAGEMENT"
-      ? `${nodeNames.get(String(event.replacedNode)) || event.replacedNode} · ${event.eventName} · ${eventTriggerDisplayName(event.trigger)} · REPLACE 管理關係`
-      : `${event.eventName} · ${eventTriggerDisplayName(event.trigger)} · ${relationship.scope === "global" ? "GLOBAL CONTEXT · " : ""}${relationship.endUp}${event.weight === 1 ? "" : ` · Weight ${event.weight}`}`);
+    const route = layout.routes.get(SceneGraphModel.relationshipKey(relationship)) || { kind: "cross" };
+    const descriptions = relationship.events.map((event) => {
+      if (relationship.endUp === "MANAGEMENT") {
+        const path = (event.replacePath || [event.replacedNode, relationship.target])
+          .map((nodeId) => nodeNames.get(String(nodeId)) || nodeId)
+          .join(" → ");
+        return `${path} · ${event.eventName} · ${eventTriggerDisplayName(event.trigger)} · REPLACE 管理關係`;
+      }
+      const direction = relationship.bidirectional && event.directionSource
+        ? `${nodeNames.get(String(event.directionSource)) || event.directionSource} → ${nodeNames.get(String(event.directionTarget)) || event.directionTarget} · `
+        : "";
+      const cycle = relationship.cycle ? " · GOTO Cycle" : "";
+      return `${direction}${event.eventName} · ${eventTriggerDisplayName(event.trigger)} · ${relationship.scope === "global" ? "GLOBAL CONTEXT · " : ""}${relationship.endUp}${event.weight === 1 ? "" : ` · Weight ${event.weight}`}${cycle}`;
+    });
     const selected = relationship.source === String(state.nodeDetail?.node?.ID || "") || relationship.target === String(state.nodeDetail?.node?.ID || "");
-    const marker = relationship.endUp === "MANAGEMENT" ? "Management" : "Goto";
+    const secondary = ["cross", "context", "management"].includes(route.kind);
+    const endArrow = SceneGraphModel.edgeArrowPoints(
+      source, target, layout, index, relationship.endUp, relationship,
+    );
+    const startArrow = relationship.bidirectional
+      ? SceneGraphModel.edgeArrowPoints(
+          source, target, layout, index, relationship.endUp, relationship, "start",
+        )
+      : "";
     return `
-      <g class="graph-edge is-${relationship.endUp.toLocaleLowerCase()} ${relationship.scope === "global" ? "is-global" : ""} ${selected ? "is-related" : ""}" data-end-up="${relationship.endUp}" data-scope="${relationship.scope}">
-        <path d="${SceneGraphModel.edgePath(source, target, layout, index, relationship.endUp)}" marker-end="url(#graphArrow${marker})"><title>${escapeHtml(descriptions.join("\n"))}</title></path>
-        ${relationship.events.length > 1 ? `<text x="${(source.x + target.x + layout.nodeWidth) / 2}" y="${(source.y + target.y + layout.nodeHeight) / 2 - 8}">×${relationship.events.length}</text>` : ""}
+      <g class="graph-edge is-${relationship.endUp.toLocaleLowerCase()} is-${route.kind} ${secondary ? "is-secondary" : ""} ${relationship.bidirectional ? "is-bidirectional" : ""} ${relationship.cycle ? "is-cycle" : ""} ${relationship.scope === "global" ? "is-global" : ""} ${selected ? "is-related" : ""}" data-edge-index="${index}" data-end-up="${relationship.endUp}" data-scope="${relationship.scope}" data-source="${escapeHtml(relationship.source)}" data-target="${escapeHtml(relationship.target)}">
+        <path d="${SceneGraphModel.edgePath(source, target, layout, index, relationship.endUp, relationship)}"><title>${escapeHtml(descriptions.join("\n"))}</title></path>
+        ${startArrow ? `<polygon class="graph-edge-arrow is-start" points="${startArrow}"></polygon>` : ""}
+        <polygon class="graph-edge-arrow is-end" points="${endArrow}"></polygon>
       </g>
     `;
   }).join("");
@@ -3273,18 +3482,14 @@ function renderGraphPanel() {
     const global = Boolean(node.isGlobal);
     const root = String(node.id) === String(state.rootNodeId || "");
     const name = String(node.name || node.id);
-    const shortName = name.length > 20 ? `${name.slice(0, 19)}…` : name;
-    const shortId = String(node.id).length > 24 ? `${String(node.id).slice(0, 23)}…` : String(node.id);
+    const shortName = name.length > 18 ? `${name.slice(0, 17)}…` : name;
+    const radius = layout.nodeSizes.get(String(node.id)).radius;
     const searchText = `${name} ${node.id} ${node.path}`.toLocaleLowerCase();
     return `
-      <g class="graph-node ${selected ? "is-selected" : ""} ${root ? "is-root" : ""} ${global ? "is-global" : ""}" transform="translate(${position.x} ${position.y})" role="button" tabindex="0" data-node-path="${escapeHtml(node.path)}" data-search-text="${escapeHtml(searchText)}" aria-label="開啟節點 ${escapeHtml(name)}">
-        <rect width="${layout.nodeWidth}" height="${layout.nodeHeight}" rx="17"></rect>
-        <circle cx="22" cy="24" r="6"></circle>
-        <text class="graph-node-name" x="38" y="29">${escapeHtml(shortName)}</text>
-        <text class="graph-node-id" x="22" y="53">${escapeHtml(shortId)}</text>
-        ${root ? `<text class="graph-root-label" x="${layout.nodeWidth - 12}" y="17" text-anchor="end">ROOT</text>` : ""}
-        ${global ? `<text class="graph-global-label" x="${layout.nodeWidth - 12}" y="17" text-anchor="end">GLOBAL</text>` : ""}
-        <title>${escapeHtml(name)}\n${global ? "GLOBALNODE" : escapeHtml(node.path)}</title>
+      <g class="graph-node ${selected ? "is-selected" : ""} ${root ? "is-root" : ""} ${global ? "is-global" : ""}" transform="translate(${position.x} ${position.y})" role="button" tabindex="0" data-node-id="${escapeHtml(String(node.id))}" data-node-path="${escapeHtml(node.path)}" data-search-text="${escapeHtml(searchText)}" aria-label="開啟節點 ${escapeHtml(name)}" aria-grabbed="false">
+        <circle class="graph-node-dot" cx="${radius}" cy="${radius}" r="${radius}"></circle>
+        <text class="graph-node-name" x="${radius}" y="${radius * 2 + 18}" text-anchor="middle">${escapeHtml(shortName)}</text>
+        <title>${escapeHtml(name)}</title>
       </g>
     `;
   }).join("");
@@ -3296,17 +3501,13 @@ function renderGraphPanel() {
           <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"></circle><path d="M12 3v3M12 18v3M3 12h3M18 12h3"></path></svg>
         </button>
         <svg id="projectGraphSvg" role="img" aria-label="Scene Node GOTO 與 REPLACE 有向關聯圖" viewBox="${graphViewBoxValue()}" data-graph-width="${layout.width}" data-graph-height="${layout.height}">
-          <defs>
-            <marker id="graphArrowGoto" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z"></path></marker>
-            <marker id="graphArrowManagement" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z"></path></marker>
-          </defs>
           <g class="graph-edges">${edgesHtml}</g>
           <g class="graph-nodes">${nodesHtml}</g>
         </svg>
       </div>
     </div>
   `;
-  bindGraphPanel();
+  bindGraphPanel(layout, relationships, simulation);
 }
 
 function renderValidationPanel() {
@@ -3564,7 +3765,7 @@ function saveActiveEditor() {
 }
 
 function cycleActiveTab(direction) {
-  const tabs = isGlobalNode() ? TAB_ORDER.filter((tab) => tab !== "options") : TAB_ORDER;
+  const tabs = TAB_ORDER;
   const currentIndex = tabs.indexOf(state.activeTab);
   const nextIndex = (currentIndex + direction + tabs.length) % tabs.length;
   requestTabSwitch(tabs[nextIndex]);

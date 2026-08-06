@@ -31,7 +31,7 @@ call scene_runtime_start()
 
 節點頁的其餘資訊是由 Events、Options、Content 與流程引用即時計算的摘要，不會寫入額外 Schema。背景、音樂與 Screen 稍後可由 On Enter Event 的 Content 使用原生 Ren'Py 語法建立。
 
-節點列表頂端另有固定的 Global Node。它用來放置換日、全局鍵盤輸入等跨節點 Events；不進入 Stack，也沒有 Options。第一個流程暫時不需要修改它。
+節點列表頂端另有固定的 Global Node。它用來放置換日、全局鍵盤輸入，以及要在所有實際節點顯示的常駐 Options；它不進入 Stack。第一個流程暫時不需要修改它。
 
 ## 4. 建立玩家 Option
 

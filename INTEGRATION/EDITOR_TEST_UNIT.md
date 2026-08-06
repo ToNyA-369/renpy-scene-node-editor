@@ -2,8 +2,8 @@
 
 這是一個只能建立在全新空白 Ren'Py 專案中的可拋棄測試場景。它不只測試外部 Screen，也涵蓋 Editor 與 Runtime 的主要契約：
 
-- 8 個 Scene Nodes 與多分支關聯圖
-- 1 個不可刪除、沒有 Options 的 Global Node
+- 9 個 Scene Nodes 與多分支關聯圖
+- 1 個不可刪除、提供全域常駐 Options 的 Global Node
 - Content 文件／label 階層選擇與權重 Content
 - Content 原生顯示的 Screen／HUD 與資料化 Options Renderer
 - TEXTBOX、PICTURE、HITBOX 三種 Option Element
@@ -17,7 +17,7 @@
 - 由 Content 使用原生 Ren'Py 背景、音樂、淡入與淡出
 - Options Preview Background、Picture、Hover Sound 與 Click Sound
 - REDO、GOTO、REPLACE、EXIT 與多層 Node stack
-- Global On Node、Global Keyboard 與 Context End up
+- Global Options、Global On Node、Global Keyboard 與 Context End up
 - 權重 Next Node
 - 自訂快捷鍵持久化與 Content 刪除後儲存流程
 
@@ -41,12 +41,12 @@ python3 tools/create_editor_test_unit.py "/完整路徑/SceneEditorTest" --launc
 
 1. 按「檢查專案」，預期為 `0 個錯誤、0 個提醒`。
 2. 「狀態」應固定顯示 `Normal`，並將初始值 20 的「測試點數」放在「測試資源」群組、初始值 0 的「操作次數」放在「流程追蹤」群組，同時顯示 `Memory`、`測試階段記憶` 兩個 Memory Banks。State 外框應與 Event／Options 使用相同的完整工作區寬度；桌面版 Stat 欄位應完整顯示而不需橫向捲動。Stats 外層加號應新增群組及第一個 Stat，群組內應使用較寬的長方形加號加入同組 Stat；修改 Group 後應在重載後保留。新增 Stat 只可增高 Stats 卡片，不得同步拉高 Memory 卡片。
-3. 節點抽屜頂端應固定顯示「全局系統」Global Node，下面有 `root`、`options_lab`、`branch_lab`、`outcome_success`、`outcome_fallback`、`replace_parent`、`replace_child_a`、`replace_child_b` 共 8 個實際節點。Global Node 不可刪除、不可設為 ROOT；選取後「選項」功能區必須停用，Event Trigger 與 Effect 類型也都不能選 Option。
+3. 節點抽屜頂端應固定顯示「全局系統」Global Node，下面有 `root`、`options_lab`、`branch_lab`、`outcome_success`、`outcome_fallback`、`replace_parent`、`replace_child_a`、`replace_child_b`、`replace_child_c` 共 9 個實際節點。Global Node 不可刪除、不可設為 ROOT；選取後「選項」功能區可編輯「全域常駐操作」，Event Trigger 可選該作用域的 Option，Effect 也只能列出 `__global__` 的 Controlled 目標。
 4. 在 `root` 的 Event 編輯 Content。下拉選單第一層應顯示「00 節點生命週期演出」「01 獎勵與權重內容」與「02 條件與流程內容」等創作者名稱，而不是生成文件 ID；停留或展開後才看到各自的 label。父選單與 label 子選單之間應有清楚間隔；游標橫越間隔時子選單不可消失。選定 label 後，欄位只顯示 label 的顯示名稱。
 5. Node 表單應只有 Name 與 ID，不應出現 Background 或 Screen；下方顯示 Events、Options、Content Labels、Flow Links 數量，以及 Incoming／Outgoing 與三個生命週期階段摘要。相同目標與流程類型的多個 Events 應合併為一個連接標籤並顯示倍數。開啟 `root_enter_background`、`root_on_node_once`、`root_exit_cleanup` 三個 Events，Auto 時機應分別顯示 On Enter、On Node、On Exit。On Enter／On Exit 只顯示 Priority 與 Once，不應出現 Weight、End up、Next Node 或額外提示文字；Conditions、Effects 與 Content 仍存在。
 6. 巡覽節點、Event、Options 與狀態中的下拉選單；它們應使用一致且固定寬度的自訂選單。圖片或音訊至少展開四層目錄，所有層級都必須可見且保持同一展開方向，不可因欄位寬度反覆左右跳動。聚焦選單後，`↑`／`↓` 應巡覽同層項目、`→` 應進入子選單、`←` 應回到父層、Enter 應選取、Esc 應關閉。
-7. 開啟「關聯圖」。應看到 Global Node、`root → options_lab → branch_lab → 結果節點` 與 `root → replace_parent → replace_child_a → replace_child_b`。REPLACE 邊與 GOTO 同色但使用虛線；另應從 `replace_parent` 到 `replace_child_b` 顯示較透明的實線管理邊。Global GOTO／REPLACE（若測試時新增）應以 Contextual Transition 樣式呈現。REPLACE tooltip 應顯示 Event 名稱、Option Trigger 與 `REPLACE`，管理邊 tooltip 應指出來源 Child A。
-8. 游標放在圖面空白處，用 MacBook 觸控板兩指上下滑動：圖應以游標位置連續縮放；反方向滑動應反向縮放。拖曳空白處應平移且不可反白圖面。搜尋位於左下角，右下角只有圓形重新置中圖示按鈕，不應顯示操作提示文字。
+7. 開啟「關聯圖」。圖面應只顯示 9 個實際 Scene Nodes，不顯示 GLOBAL 節點或 Global Event 邊。節點應是不透明、帶邊框的白底圓點，圖面只顯示 Node Name，不顯示技術 ID、ROOT 文字標籤或任何連線行內文字；所有直接及管理連線路徑都必須從來源圓心射向目標圓心，但箭頭尖端停在接收端圓周。節點應在較低的繼承斥力、第二層以上較慢的平方根衰減、圓形碰撞與柔性階層／切向力量作用下平順移動，形成以 ROOT 為整體中心、各分支中心再擁有均勻局部圓環的疏朗平衡結構；ROOT 與孫節點應保有明顯間隔，同一父節點的子節點也不應全被推到一側。重新置中後 ROOT 應位於視窗正中央，節點保持可讀尺寸，不要求把所有遠端分支強塞進同一畫面。`replace_parent` 因具有直接及鏈式間接後代，其圓點應略大於葉節點 `replace_child_c`，但差距不可過度。拖曳任一節點時它應緊貼游標、周圍節點與線條以較柔和的力同步回應；放開後節點應延續移動並重新平衡，且不會因此切換節點。`replace_child_a` 與 `replace_child_b` 的雙向 REPLACE 應合成一條兩端都有箭頭的虛線；tooltip 必須分別列出 Action 與 Keyboard 兩個方向。`branch_lab ↔ outcome_success` 則應保留兩條高對比 GOTO Cycle 弧線，不可合併。另應從 `replace_parent` 到 `replace_child_b`、`replace_child_c` 顯示兩條較透明的管理邊，表示 A → B → C 的完整 REPLACE 鏈，並與 `replace_parent → replace_child_a` GOTO 共用 Parent 圓心。將滑鼠或鍵盤焦點移到節點時，非相鄰關係應暫時淡化。
+8. 游標放在圖面空白處，用 MacBook 觸控板兩指上下滑動：圖應以游標位置連續縮放；反方向滑動應反向縮放。縮小圖面時，箭頭應連同圖面一起縮小，Node Name 則維持近似固定的螢幕字級，不可反過來讓箭頭壓過名稱。拖曳空白處應可持續往任意方向平移，不可碰到固定畫布邊界，也不可反白圖面。平移後按右下角圓形按鈕，應保留目前縮放層級並把 ROOT 放回視窗中央；搜尋仍位於左下角，不應顯示操作提示文字。
 9. 在設定中修改一組快捷鍵，關閉 Editor 的 Terminal 視窗，重新雙擊啟動器；設定應仍保留。
 10. 要驗證 Content 刪除流程，請在任一節點新增一個「未被 Event 引用」的臨時 Content，輸入後不必等待自動儲存便直接刪除。預期舊寫入會被安全取消，不會跳出「儲存失敗」，刪除後也能立即切換工作區並繼續編輯。不要刪除產生器建立且已被 Event 引用的 labels。
 11. 把任一 Name、數字或選單欄位快速連續修改兩次，第二次完成後等待自動儲存，再切換工作區並返回。畫面與磁碟都必須保留最後一次輸入，不可被較早的儲存回應回滾。
@@ -65,9 +65,11 @@ python3 tools/create_editor_test_unit.py "/完整路徑/SceneEditorTest" --launc
 
 ### Global Node
 
-1. 在任意實際節點按 `G`，應觸發 Global Keyboard Event、增加 7 點，且仍停留在原本節點。
-2. 每累積三次一般操作，下一輪 On Node 應顯示「Global Node」檢查訊息、將操作次數減 3，並在 `test_session` 註冊 `global_checkpoint`。
-3. Global Event 執行後使用 REDO，應回到觸發當下的實際節點，不得把 `__global__` 放入 Stack。
+1. 在 `root`、`options_lab` 或其他任意實際節點，都應在左上角看到 Global Node 的「顯示全域獎勵」選項，並同時看到該節點自己的 Options。
+2. 按「顯示全域獎勵」後，同一個全域清單應新增「領取全域 5 點獎勵」；按下後點數增加 5、該受控 Item 再次隱藏，而且仍停留在觸發當下的實際節點。
+3. 在任意實際節點按 `G`，應觸發 Global Keyboard Event、增加 7 點，且仍停留在原本節點。
+4. 每累積三次一般操作，下一輪 On Node 應顯示「Global Node」檢查訊息、將操作次數減 3，並在 `test_session` 註冊 `global_checkpoint`。
+5. Global Event 執行後使用 REDO，應回到觸發當下的實際節點，不得把 `__global__` 放入 Stack。
 
 ### DATA Options 入口與 Event 選擇
 
@@ -90,7 +92,7 @@ python3 tools/create_editor_test_unit.py "/完整路徑/SceneEditorTest" --launc
 1. 新遊戲進入 `options_lab` 時，不應看見「受控子選項：取得 2 點」或右側「受控選項列」。
 2. 按「顯示受控子選項」後，該 Item 應加入既有 `DATA Options 綜合測試` 清單；按它會增加 2 點。按「隱藏受控子選項」後它應再次消失。重複 enable／disable 不應報錯。
 3. 按「顯示受控選項列」後，右側應出現獨立 TEXTBOX；按其中項目會增加 5 點。按主清單的「隱藏受控選項列」後整列消失。
-4. Option Effect 只能控制所屬 Event 同一個 Scene Node 的目標；其他節點的目標不會出現在選單，手動寫入跨節點引用也應被驗證拒絕。Global Event 不提供 Option Effect。
+4. Option Effect 只能控制所屬 Event 同一個 Options 作用域；Scene Node Event 不能控制其他節點或 Global Options，Global Event 也只能控制 `__global__` 目標。跨作用域目標不會出現在選單，手動寫入也應被驗證拒絕。
 5. 啟用狀態在 REDO、GOTO、REPLACE、EXIT 與 Ren'Py 存檔／讀檔後保留；開始全新遊戲時重設為隱藏。父 TEXTBOX 暫時停用後再啟用時，其先前已啟用的 Item 狀態仍應保留；沒有可見 Item 的 TEXTBOX 不應留下空框。
 
 ### 分支、權重 Next Node 與 Node stack

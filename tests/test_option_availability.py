@@ -159,14 +159,21 @@ class OptionAvailabilityProjectTest(unittest.TestCase):
 
                 event["Effects"][0]["item"] = "buy"
                 write_json(event_path, event)
-                write_json(project_root / "GLOBALNODE" / "EVENTPOOL" / "invalid_option_effect.json", event)
+                global_event = dict(event, ID="global_option_effect")
+                global_event["Effects"] = [option_effect(node="__global__")]
+                write_json(project_root / "GLOBALNODE" / "Options.json", {
+                    "Version": 2,
+                    "Canvas": {},
+                    "Elements": [textbox()],
+                })
+                write_json(project_root / "GLOBALNODE" / "EVENTPOOL" / "global_option_effect.json", global_event)
                 issues = app.validate_project()
-                self.assertTrue(any("Global Event 不可使用 Option Effect" in issue["message"] for issue in issues))
+                self.assertFalse(any("global_option_effect" in issue["location"] for issue in issues))
 
-                (project_root / "GLOBALNODE" / "EVENTPOOL" / "invalid_option_effect.json").unlink()
+                (project_root / "GLOBALNODE" / "EVENTPOOL" / "global_option_effect.json").unlink()
                 write_json(project_root / "SCENENODE" / "controller" / "EVENTPOOL" / "cross_node.json", event)
                 issues = app.validate_project()
-                self.assertTrue(any("只能控制同一個 Scene Node" in issue["message"] for issue in issues))
+                self.assertTrue(any("只能控制同一個 Options 作用域" in issue["message"] for issue in issues))
             finally:
                 app.PROJECT_ROOT = previous
 
@@ -215,18 +222,28 @@ class OptionAvailabilityRuntimeTest(unittest.TestCase):
         with self.assertRaisesRegex(Exception, "not CONTROLLED"):
             runtime["scene_apply_effect"]("shop", option_effect("element"))
 
-        with self.assertRaisesRegex(Exception, "must target its owning Scene Node"):
+        with self.assertRaisesRegex(Exception, "must target its owning Options scope"):
             runtime["scene_apply_effect"]("other", option_effect("element"))
 
-    def test_prepared_global_event_rejects_option_effect(self):
+    def test_prepared_global_event_controls_only_global_options(self):
         runtime = self.runtime()
+        runtime["scene_catalog"]["options"]["__global__"] = app.validate_options({
+            "Elements": [textbox()],
+        })
         prepared = {
             "owner_node_id": "__global__",
             "node_id": "shop",
-            "event": {"Once": False, "Effects": [option_effect("element")]},
+            "event": {"Once": False, "Effects": [option_effect("element", node="__global__")]},
         }
 
-        with self.assertRaisesRegex(Exception, "Global Event cannot use an Option Effect"):
+        runtime["scene_apply_prepared"](prepared)
+        self.assertIn(
+            runtime["scene_option_key"]("__global__", "actions"),
+            runtime["scene_enabled_options"],
+        )
+
+        prepared["event"]["Effects"] = [option_effect("element")]
+        with self.assertRaisesRegex(Exception, "owning Options scope"):
             runtime["scene_apply_prepared"](prepared)
 
 

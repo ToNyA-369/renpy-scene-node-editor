@@ -5332,30 +5332,91 @@ textarea:hover {
 
 .graph-edge path {
   fill: none;
-  stroke: rgba(70, 70, 70, 0.3);
+  stroke: currentColor;
   stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+}
+
+.graph-edge {
+  color: rgba(70, 70, 70, 0.3);
+  opacity: 1;
+  transition: opacity 120ms ease-out;
+}
+
+.graph-edge-arrow {
+  fill: currentColor;
+  stroke: none;
+  pointer-events: none;
+}
+
+.graph-edge.is-tree {
+  color: rgba(70, 70, 70, 0.34);
+}
+
+.graph-edge.is-tree path {
+  stroke-width: 2.2;
+}
+
+.graph-edge.is-secondary {
+  color: rgba(70, 70, 70, 0.18);
+}
+
+.graph-edge.is-secondary path {
+  stroke-width: 1.65;
 }
 
 .graph-edge.is-replace path {
   stroke-dasharray: 8 5;
 }
 
+.graph-edge.is-replace-local {
+  color: rgba(70, 70, 70, 0.3);
+}
+
+.graph-edge.is-replace-local path {
+  stroke-width: 2;
+}
+
+.graph-edge.is-bidirectional path {
+  stroke-width: 2.35;
+}
+
+.graph-edge.is-goto-cycle {
+  color: var(--danger);
+}
+
+.graph-edge.is-goto-cycle path {
+  stroke-width: 2.5;
+  opacity: 0.82;
+}
+
+.graph-edge.is-management {
+  color: rgba(70, 70, 70, 0.14);
+}
+
 .graph-edge.is-management path {
-  stroke: rgba(70, 70, 70, 0.14);
   stroke-width: 1.8;
+}
+
+.graph-edge.is-global {
+  opacity: 0.64;
 }
 
 .graph-edge.is-global path {
   stroke-dasharray: 2 5;
-  opacity: 0.72;
 }
 
 .graph-edge.is-global.is-replace path {
   stroke-dasharray: 8 4 2 4;
 }
 
+.graph-edge.is-related {
+  color: var(--accent);
+}
+
 .graph-edge.is-related path {
-  stroke: var(--accent);
   stroke-width: 2.8;
 }
 
@@ -5363,47 +5424,75 @@ textarea:hover {
   stroke-width: 3;
 }
 
-.graph-edge.is-related.is-management path {
-  stroke: var(--accent);
-  stroke-width: 2;
+.graph-edge.is-related.is-management {
+  color: var(--accent);
   opacity: 0.32;
 }
 
-.graph-edge text {
-  fill: var(--muted);
-  font-size: 11px;
-  font-weight: 700;
+.graph-edge.is-related.is-management path {
+  stroke-width: 2;
 }
 
-#graphArrowGoto path {
-  fill: var(--accent);
-  stroke: none;
+.graph-canvas.has-graph-focus .graph-edge:not(.is-focus-related),
+.graph-edge.is-search-dimmed {
+  opacity: 0.07;
 }
 
-#graphArrowManagement path {
-  fill: var(--accent);
-  opacity: 0.28;
-  stroke: none;
+.graph-canvas.has-graph-focus .graph-edge.is-focus-related {
+  opacity: 1;
+}
+
+.graph-edge.is-focus-related {
+  color: var(--accent);
+}
+
+.graph-edge.is-focus-related path {
+  stroke-width: 2.8;
+}
+
+.graph-edge.is-focus-related.is-management {
+  opacity: 0.38;
+}
+
+.graph-edge.is-focus-related.is-management path {
+  stroke-width: 2;
+}
+
+.graph-edge.is-focus-related.is-goto-cycle {
+  color: var(--danger);
+}
+
+.graph-edge.is-focus-related.is-goto-cycle path {
+  stroke-width: 3;
 }
 
 .graph-node {
-  cursor: pointer;
-  transition: opacity 150ms ease;
+  cursor: grab;
+  transition: opacity 120ms ease-out;
 }
 
-.graph-node rect {
+.graph-node.is-dragging {
+  cursor: grabbing;
+}
+
+.graph-node.is-dragging .graph-node-dot {
+  fill: var(--accent-soft);
+  stroke: var(--accent);
+  stroke-width: 2.5;
+}
+
+.graph-node-dot {
   fill: var(--surface);
+  fill-opacity: 1;
   stroke: var(--line-strong);
-  stroke-width: 1.5;
+  stroke-width: 1.7;
+  transition: fill 120ms ease-out, stroke 120ms ease-out, stroke-width 120ms ease-out;
+  vector-effect: non-scaling-stroke;
 }
 
-.graph-node circle {
-  fill: var(--muted);
-}
-
-.graph-node:hover rect,
-.graph-node:focus-visible rect,
-.graph-node.is-search-match rect {
+.graph-node:hover .graph-node-dot,
+.graph-node:focus-visible .graph-node-dot,
+.graph-node.is-search-match .graph-node-dot {
   fill: var(--accent-soft);
   stroke: var(--accent);
   stroke-width: 2;
@@ -5413,54 +5502,51 @@ textarea:hover {
   outline: none;
 }
 
-.graph-node.is-selected rect {
+.graph-node.is-selected .graph-node-dot {
   fill: var(--accent-soft);
   stroke: var(--accent);
   stroke-width: 3;
 }
 
-.graph-node.is-selected circle,
-.graph-node.is-root circle {
-  fill: var(--accent);
+.graph-node.is-root .graph-node-dot {
+  fill: color-mix(in srgb, var(--accent-soft) 72%, var(--surface));
+  stroke: var(--accent);
+  stroke-width: 2.4;
 }
 
-.graph-node.is-global rect {
+.graph-node.is-global .graph-node-dot {
   fill: color-mix(in srgb, var(--accent-soft) 45%, var(--surface));
   stroke-dasharray: 5 4;
-}
-
-.graph-node.is-global circle {
-  fill: var(--accent);
 }
 
 .graph-node.is-dimmed {
   opacity: 0.2;
 }
 
+.graph-canvas.has-graph-focus .graph-node:not(.is-focus-related) {
+  opacity: 0.16;
+}
+
+.graph-node.is-focus-related .graph-node-dot {
+  stroke: color-mix(in srgb, var(--accent) 62%, var(--line-strong));
+}
+
 .graph-node-name {
   fill: var(--ink);
-  font-size: 14px;
-  font-weight: 720;
+  stroke: var(--surface-soft);
+  stroke-width: 4px;
+  paint-order: stroke;
+  font-size: 12px;
+  font-weight: 680;
+  pointer-events: none;
 }
 
-.graph-node-id {
-  fill: var(--muted);
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 10px;
-}
-
-.graph-root-label {
-  fill: var(--accent);
-  font-size: 9px;
-  font-weight: 800;
-  letter-spacing: 0.08em;
-}
-
-.graph-global-label {
-  fill: var(--accent);
-  font-size: 9px;
-  font-weight: 800;
-  letter-spacing: 0.08em;
+@media (prefers-reduced-motion: reduce) {
+  .graph-edge,
+  .graph-node,
+  .graph-node-dot {
+    transition: none;
+  }
 }
 
 .tab:disabled {

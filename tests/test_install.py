@@ -60,7 +60,14 @@ class InstallerTest(unittest.TestCase):
             )
             self.assertTrue((game_root / "GLOBALNODE" / "EVENTPOOL").is_dir())
             self.assertTrue((game_root / "GLOBALNODE" / "CONTENT").is_dir())
-            self.assertFalse((game_root / "GLOBALNODE" / "Options.json").exists())
+            self.assertEqual(
+                json.loads((game_root / "GLOBALNODE" / "Options.json").read_text(encoding="utf-8")),
+                {
+                    "Version": 2,
+                    "Canvas": {"Width": 1920, "Height": 1080, "Preview Background": ""},
+                    "Elements": [],
+                },
+            )
             memories_file = game_root / "DATA" / "Memories.json"
             self.assertEqual(
                 json.loads(memories_file.read_text(encoding="utf-8")),
@@ -117,6 +124,44 @@ class InstallerTest(unittest.TestCase):
                 json.dumps(custom_memories, ensure_ascii=False, indent=2) + "\n",
                 encoding="utf-8",
             )
+            global_options_file = game_root / "GLOBALNODE" / "Options.json"
+            custom_global_options = {
+                "Version": 2,
+                "Canvas": {"Width": 1920, "Height": 1080, "Preview Background": ""},
+                "Elements": [{
+                    "ID": "global_menu",
+                    "Name": "Global Menu",
+                    "Type": "HITBOX",
+                    "Availability": "ALWAYS",
+                    "Layout": {"X": 0, "Y": 0, "Width": 100, "Height": 100, "Z Order": 10},
+                    "Trigger": "Action:global_menu",
+                    "Hover": {"Enabled": True, "Color": "#ffffff18"},
+                    "Hover Sound": "",
+                    "Click Sound": "",
+                    "Hitbox": {"Editor Color": "#28a47d", "Editor Opacity": 0.24},
+                }],
+            }
+            global_options_file.write_text(
+                json.dumps(custom_global_options, ensure_ascii=False, indent=2) + "\n",
+                encoding="utf-8",
+            )
+            global_event_file = game_root / "GLOBALNODE" / "EVENTPOOL" / "global_menu.json"
+            global_event_file.write_text(
+                json.dumps({
+                    "ID": "global_menu",
+                    "Name": "Global Menu",
+                    "Trigger": "Action:global_menu",
+                    "Priority": 5,
+                    "Weight": 1,
+                    "Once": False,
+                    "Conditions": [],
+                    "Effects": [],
+                    "Content": None,
+                    "End up": "REDO",
+                    "Next Node": None,
+                }, ensure_ascii=False, indent=2) + "\n",
+                encoding="utf-8",
+            )
             custom_screens = game_root / "screens.rpy"
             custom_screens.write_text(
                 "screen creator_hud():\n    text \"HUD\"\n\n"
@@ -133,6 +178,8 @@ class InstallerTest(unittest.TestCase):
             )
             self.assertFalse(stale_handoff.exists())
             self.assertEqual(json.loads(memories_file.read_text(encoding="utf-8")), custom_memories)
+            self.assertEqual(json.loads(global_options_file.read_text(encoding="utf-8")), custom_global_options)
+            self.assertTrue(global_event_file.exists())
             self.assertIn("screen creator_hud", custom_screens.read_text(encoding="utf-8"))
             self.assertFalse((game_root / "SCENESCREEN").exists())
             self.assertEqual(
