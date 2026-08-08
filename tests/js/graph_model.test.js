@@ -97,7 +97,7 @@ test("REPLACE chains derive every transitive parent management relationship", ()
   assert.equal(management[1].events[0].replacedNode, "b");
 });
 
-test("node size and charge increase with direct and transitive child count", () => {
+test("node size still communicates descendant load without affecting coordinates", () => {
   const sizedNodes = ["parent", "b", "c", "d", "leaf"].map((id) => ({ id, name: id }));
   const relationships = graph.relationships(sizedNodes, [
     { source: "parent", target: "b", endUp: "GOTO" },
@@ -115,11 +115,9 @@ test("node size and charge increase with direct and transitive child count", () 
   assert.ok(parent.radius > leaf.radius);
   assert.ok(parent.radius - leaf.radius < 12);
   assert.ok(parent.radius <= 32);
-  assert.ok(parent.chargeScale > leaf.chargeScale);
-  assert.ok(parent.chargeScale < 1 + parent.inheritedLoad);
 });
 
-test("descendant charge is inherited with depth decay and nonlinear compression", () => {
+test("descendant metrics remain cycle-safe and depth-aware", () => {
   const inheritedNodes = ["root", "home", "room", "desk", "shop"].map((id) => ({ id, name: id }));
   const relationships = graph.relationships(inheritedNodes, [
     { source: "root", target: "home", endUp: "GOTO" },
@@ -135,8 +133,7 @@ test("descendant charge is inherited with depth decay and nonlinear compression"
   assert.equal(home.descendantCount, 2);
   assert.equal(layout.hierarchyDepths.get("root").get("desk"), 3);
   assert.ok(root.inheritedLoad > home.inheritedLoad);
-  assert.ok(root.chargeScale > home.chargeScale);
-  assert.ok(root.chargeScale < 1 + root.inheritedLoad);
+  assert.ok(root.radius > home.radius);
 });
 
 test("global GOTO edges do not establish static parent management", () => {
@@ -147,24 +144,25 @@ test("global GOTO edges do not establish static parent management", () => {
   assert.equal(result.some((item) => item.endUp === "MANAGEMENT"), false);
 });
 
-test("force simulation keeps REPLACE siblings on their inherited parent orbit", () => {
+test("REPLACE families share one Stack depth while advancing through bounded micro-ranks", () => {
   const relationships = graph.relationships(nodes, [
     { source: "parent", target: "child_a", endUp: "GOTO" },
     { source: "child_a", target: "child_b", endUp: "REPLACE" },
   ]);
   const layout = graph.layout(nodes, relationships, "parent");
-  const simulation = graph.createForceSimulation(nodes, relationships, layout, "parent");
-  simulation.tick(600);
-
-  const firstRadius = distance(center(layout, "parent"), center(layout, "child_a"));
-  const secondRadius = distance(center(layout, "parent"), center(layout, "child_b"));
-  assert.ok(firstRadius > 200 && firstRadius < 700);
-  assert.ok(secondRadius > 200 && secondRadius < 700);
-  assert.ok(Math.abs(firstRadius - secondRadius) < 80);
-  assert.ok(distance(center(layout, "child_a"), center(layout, "child_b")) > 250);
+  assert.equal(layout.algorithm, "structured-depth");
+  assert.equal(layout.levels.get("parent"), 0);
+  assert.equal(layout.levels.get("child_a"), 1);
+  assert.equal(layout.levels.get("child_b"), 1);
+  assert.ok(center(layout, "child_b").x > center(layout, "child_a").x);
+  assert.ok(center(layout, "child_b").x - center(layout, "child_a").x <= 220);
+  assert.equal(layout.replacementRanks.get("child_a"), 0);
+  assert.equal(layout.replacementRanks.get("child_b"), 1);
+  assert.equal(layout.componentForNode.get("child_a"), layout.componentForNode.get("child_b"));
+  assert.ok(Math.abs(center(layout, "child_a").y - center(layout, "child_b").y) >= 120);
 });
 
-test("hierarchy-aware forces form nested radial clusters around ROOT", () => {
+test("GOTO depth and branch swimlanes expose the game structure", () => {
   const hierarchyNodes = [
     "root", "home", "work", "shops", "park",
     "bed", "bath", "kitchen", "office", "lobby", "mall", "cafe",
@@ -180,42 +178,62 @@ test("hierarchy-aware forces form nested radial clusters around ROOT", () => {
     { source: "shops", target: "cafe", endUp: "GOTO" },
   ]);
   const layout = graph.layout(hierarchyNodes, relationships, "root");
-  const simulation = graph.createForceSimulation(hierarchyNodes, relationships, layout, "root");
-  simulation.tick(700);
-
-  assert.ok(distance(center(layout, "root"), layout.center) < 20);
-  const hubAngles = ["home", "work", "shops", "park"]
-    .map((nodeId) => Math.atan2(
-      center(layout, nodeId).y - center(layout, "root").y,
-      center(layout, nodeId).x - center(layout, "root").x,
-    ))
-    .sort((left, right) => left - right);
-  const wrappedGaps = hubAngles.map((angle, index) => {
-    const next = hubAngles[(index + 1) % hubAngles.length] + (index === hubAngles.length - 1 ? Math.PI * 2 : 0);
-    return next - angle;
-  });
-  assert.ok(Math.min(...wrappedGaps) > 0.7);
-  const homeAngles = ["bed", "bath", "kitchen"]
-    .map((nodeId) => Math.atan2(
-      center(layout, nodeId).y - center(layout, "home").y,
-      center(layout, nodeId).x - center(layout, "home").x,
-    ))
-    .sort((left, right) => left - right);
-  const homeGaps = homeAngles.map((angle, index) => {
-    const next = homeAngles[(index + 1) % homeAngles.length] + (index === homeAngles.length - 1 ? Math.PI * 2 : 0);
-    return next - angle;
-  });
-  assert.ok(Math.min(...homeGaps) > 1.2);
-  assert.ok(Math.max(...homeGaps) < 2.8);
-  const rootGrandchildDistances = ["bed", "bath", "kitchen", "office", "lobby", "mall", "cafe"]
-    .map((nodeId) => distance(center(layout, "root"), center(layout, nodeId)));
-  assert.ok(Math.min(...rootGrandchildDistances) > 300);
-  assert.ok(distance(center(layout, "home"), center(layout, "bed")) < 600);
-  assert.ok(distance(center(layout, "work"), center(layout, "office")) < 600);
-  assert.ok(distance(center(layout, "shops"), center(layout, "mall")) < 600);
+  assert.deepEqual(layout.columns.map((column) => column.depth), [0, 1, 2]);
+  ["home", "work", "shops", "park"].forEach((nodeId) => assert.equal(layout.levels.get(nodeId), 1));
+  ["bed", "bath", "kitchen", "office", "lobby", "mall", "cafe"]
+    .forEach((nodeId) => assert.equal(layout.levels.get(nodeId), 2));
+  assert.equal(center(layout, "home").x - center(layout, "root").x, 360);
+  assert.equal(center(layout, "bed").x - center(layout, "home").x, 360);
+  const branchCenters = ["home", "work", "shops", "park"].map((nodeId) => center(layout, nodeId).y);
+  const orderedBranchCenters = [...branchCenters].sort((left, right) => left - right);
+  assert.ok(orderedBranchCenters.every((value, index) => index === 0 || value - orderedBranchCenters[index - 1] >= 120));
+  assert.ok(center(layout, "root").y >= Math.min(...branchCenters));
+  assert.ok(center(layout, "root").y <= Math.max(...branchCenters));
 });
 
-test("growth settlement builds the GOTO skeleton before REPLACE families", () => {
+test("same-depth GOTO relationships receive a short local progression", () => {
+  const localNodes = ["root", "hub", "branch", "result"].map((id) => ({ id, name: id }));
+  const relationships = graph.relationships(localNodes, [
+    { source: "root", target: "hub", endUp: "GOTO" },
+    { source: "hub", target: "branch", endUp: "GOTO" },
+    { source: "hub", target: "result", endUp: "GOTO" },
+    { source: "branch", target: "result", endUp: "GOTO" },
+  ]);
+  const layout = graph.layout(localNodes, relationships, "root");
+
+  assert.equal(layout.levels.get("branch"), 2);
+  assert.equal(layout.levels.get("result"), 2);
+  assert.equal(layout.componentMicroRanks.get(layout.componentForNode.get("branch")), 0);
+  assert.equal(layout.componentMicroRanks.get(layout.componentForNode.get("result")), 1);
+  assert.ok(center(layout, "result").x > center(layout, "branch").x);
+  assert.equal(center(layout, "result").x - center(layout, "branch").x, 140);
+  assert.match(graph.edgePath(
+    layout.positions.get("branch"),
+    layout.positions.get("result"),
+    layout,
+    0,
+    "GOTO",
+    relationships.find((relationship) => relationship.source === "branch"),
+  ), / C /);
+});
+
+test("REPLACE chains alternate across the depth baseline", () => {
+  const replaceNodes = ["parent", "a", "b", "c"].map((id) => ({ id, name: id }));
+  const relationships = graph.relationships(replaceNodes, [
+    { source: "parent", target: "a", endUp: "GOTO" },
+    { source: "a", target: "b", endUp: "REPLACE" },
+    { source: "b", target: "c", endUp: "REPLACE" },
+  ]);
+  const layout = graph.layout(replaceNodes, relationships, "parent");
+
+  assert.deepEqual(["a", "b", "c"].map((nodeId) => layout.levels.get(nodeId)), [1, 1, 1]);
+  assert.ok(center(layout, "b").x > center(layout, "a").x);
+  assert.ok(center(layout, "c").x < center(layout, "b").x);
+  assert.equal(center(layout, "c").x, center(layout, "a").x);
+  assert.deepEqual(["a", "b", "c"].map((nodeId) => layout.replacementRanks.get(nodeId)), [0, 1, 2]);
+});
+
+test("REPLACE families keep their outgoing GOTO branches on the next depth", () => {
   const growthNodes = ["root", "a", "a_room", "b", "b_room"].map((id) => ({ id, name: id }));
   const relationships = graph.relationships(growthNodes, [
     { source: "root", target: "a", endUp: "GOTO" },
@@ -225,31 +243,18 @@ test("growth settlement builds the GOTO skeleton before REPLACE families", () =>
   ]);
   const layout = graph.layout(growthNodes, relationships, "root");
 
-  assert.deepEqual(layout.growthStages, [
-    { kind: "root", nodeIds: ["root"] },
-    { kind: "goto", nodeIds: ["a"] },
-    { kind: "goto", nodeIds: ["a_room"] },
-    { kind: "replace", nodeIds: ["b"] },
-    { kind: "goto", nodeIds: ["b_room"] },
-  ]);
-  assert.equal(layout.orbitParents.get("a"), "root");
-  assert.equal(layout.orbitParents.get("b"), "root");
-  assert.equal(layout.orbitKinds.get("b"), "MANAGEMENT");
-
-  const simulation = graph.createForceSimulation(growthNodes, relationships, layout, "root");
-  const result = simulation.settleGrowth();
-  assert.equal(result.stageCount, 5);
-  assert.ok(result.ticksPerStage > 0);
-  layout.positions.forEach((position) => {
-    assert.ok(Number.isFinite(position.x));
-    assert.ok(Number.isFinite(position.y));
-  });
-  assert.ok(distance(center(layout, "root"), center(layout, "a")) > 150);
-  assert.ok(distance(center(layout, "root"), center(layout, "b")) > 150);
-  assert.ok(distance(center(layout, "a"), center(layout, "b")) > 180);
+  assert.equal(layout.levels.get("root"), 0);
+  assert.equal(layout.levels.get("a"), 1);
+  assert.equal(layout.levels.get("b"), 1);
+  assert.equal(layout.levels.get("a_room"), 2);
+  assert.equal(layout.levels.get("b_room"), 2);
+  assert.ok(center(layout, "b").x > center(layout, "a").x);
+  assert.ok(center(layout, "b").x < center(layout, "a_room").x);
+  assert.ok(center(layout, "a_room").x > center(layout, "a").x);
+  assert.ok(center(layout, "b_room").x > center(layout, "b").x);
 });
 
-test("growth settlement is deterministic and only initializes once", () => {
+test("structured layout is deterministic", () => {
   const growthNodes = ["root", "home", "work", "bed", "office"].map((id) => ({ id, name: id }));
   const relationships = graph.relationships(growthNodes, [
     { source: "root", target: "home", endUp: "GOTO" },
@@ -259,24 +264,103 @@ test("growth settlement is deterministic and only initializes once", () => {
   ]);
   const firstLayout = graph.layout(growthNodes, relationships, "root");
   const secondLayout = graph.layout(growthNodes, relationships, "root");
-  const firstSimulation = graph.createForceSimulation(growthNodes, relationships, firstLayout, "root");
-  const secondSimulation = graph.createForceSimulation(growthNodes, relationships, secondLayout, "root");
-
-  firstSimulation.settleGrowth();
-  secondSimulation.settleGrowth();
   const firstPositions = [...firstLayout.positions].map(([nodeId, position]) => [nodeId, position.x, position.y]);
   const secondPositions = [...secondLayout.positions].map(([nodeId, position]) => [nodeId, position.x, position.y]);
   assert.deepEqual(firstPositions, secondPositions);
-
-  const beforeSecondSettlement = structuredClone(firstPositions);
-  firstSimulation.settleGrowth();
-  assert.deepEqual(
-    [...firstLayout.positions].map(([nodeId, position]) => [nodeId, position.x, position.y]),
-    beforeSecondSettlement,
-  );
+  assert.deepEqual([...firstLayout.routes], [...secondLayout.routes]);
+  assert.equal(firstLayout.revealSteps.get("root"), 0);
+  assert.ok(firstLayout.revealSteps.get("home") > firstLayout.revealSteps.get("root"));
+  assert.ok(firstLayout.revealSteps.get("bed") > firstLayout.revealSteps.get("home"));
 });
 
-test("drag pinning is one-to-one and release returns the node to force equilibrium", () => {
+test("idle motion stays near deterministic structural anchors and yields to dragging", () => {
+  const motionNodes = ["root", "a", "b"].map((id) => ({ id, name: id }));
+  const relationships = graph.relationships(motionNodes, [
+    { source: "root", target: "a", endUp: "GOTO" },
+    { source: "a", target: "b", endUp: "GOTO" },
+  ]);
+  const firstLayout = graph.layout(motionNodes, relationships, "root");
+  const secondLayout = graph.layout(motionNodes, relationships, "root");
+  const first = graph.createLayoutController(motionNodes, relationships, firstLayout);
+  const second = graph.createLayoutController(motionNodes, relationships, secondLayout);
+  assert.deepEqual(first.connectionPairs, [["a", "root"], ["a", "b"]]);
+
+  for (let time = 0; time <= 800; time += 16) {
+    first.frame(time);
+    second.frame(time);
+  }
+  assert.deepEqual([...firstLayout.positions], [...secondLayout.positions]);
+  firstLayout.positions.forEach((position, nodeId) => {
+    const anchor = first.anchors.get(nodeId);
+    assert.ok(Math.abs(position.x - anchor.x) <= 2.61);
+    assert.ok(Math.abs(position.y - anchor.y) <= 1.81);
+  });
+  const before = { ...firstLayout.positions.get("a") };
+  first.frame(1100);
+  assert.notDeepEqual(firstLayout.positions.get("a"), before);
+
+  first.pin("a", 444, 333);
+  first.frame(1116);
+  assert.deepEqual(firstLayout.positions.get("a"), { x: 444, y: 333 });
+});
+
+test("local physics couples real links, repels only nearby anchors, and remains bounded", () => {
+  const physicsNodes = ["root", "a", "b", "c"].map((id) => ({ id, name: id }));
+  const relationships = graph.relationships(physicsNodes, [
+    { source: "root", target: "a", endUp: "GOTO" },
+    { source: "a", target: "b", endUp: "REPLACE" },
+    { source: "b", target: "c", endUp: "REPLACE" },
+  ]);
+  const layout = graph.layout(physicsNodes, relationships, "root");
+  const controller = graph.createLayoutController(physicsNodes, relationships, layout);
+
+  assert.ok(controller.connectionPairs.some((pair) => pair.includes("a") && pair.includes("b")));
+  assert.ok(controller.connectionPairs.some((pair) => pair.includes("b") && pair.includes("c")));
+  assert.ok(!controller.connectionPairs.some((pair) => pair.includes("root") && pair.includes("c")));
+  assert.ok(controller.repulsionPairs.some((pair) => pair.includes("a") && pair.includes("b")));
+  assert.ok(!controller.repulsionPairs.some((pair) => pair.includes("root") && pair.includes("c")));
+
+  for (let time = 0; time <= 12000; time += 16) controller.frame(time);
+  layout.positions.forEach((position, nodeId) => {
+    const anchor = controller.anchors.get(nodeId);
+    assert.ok(Math.hypot(position.x - anchor.x, position.y - anchor.y) <= 7.001);
+  });
+});
+
+test("a dragged node transmits pull and dynamic repulsion without leaving the pointer", () => {
+  const dragNodes = ["root", "linked", "detached"].map((id) => ({ id, name: id }));
+  const relationships = graph.relationships(dragNodes, [
+    { source: "root", target: "linked", endUp: "GOTO" },
+  ]);
+  const layout = graph.layout(dragNodes, relationships, "root");
+  const controller = graph.createLayoutController(dragNodes, relationships, layout);
+  const rootAnchor = controller.anchors.get("root");
+  const linkedAnchor = controller.anchors.get("linked");
+
+  controller.pin("root", rootAnchor.x + 180, rootAnchor.y);
+  for (let time = 0; time <= 640; time += 16) controller.frame(time);
+  assert.deepEqual(layout.positions.get("root"), { x: rootAnchor.x + 180, y: rootAnchor.y });
+  assert.ok(layout.positions.get("linked").x - linkedAnchor.x > 4);
+  assert.ok(Math.hypot(
+    layout.positions.get("linked").x - linkedAnchor.x,
+    layout.positions.get("linked").y - linkedAnchor.y,
+  ) <= 7.001);
+
+  const detachedAnchor = controller.anchors.get("detached");
+  controller.pin("root", detachedAnchor.x - 36, detachedAnchor.y);
+  const detachedBefore = { ...layout.positions.get("detached") };
+  for (let time = 656; time <= 1296; time += 16) controller.frame(time);
+  assert.ok(Math.hypot(
+    layout.positions.get("detached").x - detachedBefore.x,
+    layout.positions.get("detached").y - detachedBefore.y,
+  ) > 1);
+  assert.deepEqual(layout.positions.get("root"), {
+    x: detachedAnchor.x - 36,
+    y: detachedAnchor.y,
+  });
+});
+
+test("dragging is temporary and returns only that node to its structural slot", () => {
   const treeNodes = ["root", "a", "b", "a1", "a2", "b1", "b2"].map((id) => ({ id, name: id }));
   const relationships = graph.relationships(treeNodes, [
     { source: "root", target: "a", endUp: "GOTO" },
@@ -287,19 +371,21 @@ test("drag pinning is one-to-one and release returns the node to force equilibri
     { source: "b", target: "b2", endUp: "GOTO" },
   ]);
   const layout = graph.layout(treeNodes, relationships, "root");
-  const simulation = graph.createForceSimulation(treeNodes, relationships, layout, "root");
-  simulation.tick(180);
+  const controller = graph.createLayoutController(treeNodes, relationships, layout);
   const before = { ...layout.positions.get("a") };
+  const untouched = { ...layout.positions.get("b") };
   const dragged = { x: before.x + 100, y: before.y - 100 };
 
-  simulation.pin("a", dragged.x, dragged.y);
-  simulation.tick(12);
+  controller.pin("a", dragged.x, dragged.y);
+  controller.tick(12);
   assert.deepEqual(layout.positions.get("a"), dragged);
+  assert.deepEqual(layout.positions.get("b"), untouched);
 
-  simulation.release("a", 0, 0);
-  simulation.tick(180);
-  assert.ok(distance(layout.positions.get("a"), dragged) > 20);
-  assert.ok(distance(center(layout, "a"), center(layout, "a1")) < distance(center(layout, "a"), center(layout, "b1")));
+  controller.release("a", 0, 0);
+  controller.tick(120);
+  assert.deepEqual(layout.positions.get("a"), before);
+  assert.deepEqual(layout.positions.get("b"), untouched);
+  assert.equal(controller.isActive(), false);
 });
 
 test("route roles remain distinct and every relationship starts at the node center", () => {
@@ -323,7 +409,7 @@ test("route roles remain distinct and every relationship starts at the node cent
     layout.routes.get(graph.relationshipKey(relationship)).kind,
   ]));
 
-  assert.equal(routeKinds["a:target:GOTO"], "tree");
+  assert.equal(routeKinds["a:target:GOTO"], "cross");
   assert.equal(routeKinds["b:target:REPLACE"], "replace-local");
   assert.equal(routeKinds["root:target:MANAGEMENT"], "management");
   assert.equal(routeKinds["__global__:target:GOTO"], "context");
@@ -334,9 +420,10 @@ test("route roles remain distinct and every relationship starts at the node cent
   const managementPath = graph.edgePath(layout.positions.get("root"), layout.positions.get("target"), layout, 0, "MANAGEMENT", management);
   assert.deepEqual(pathStart(directPath), pathStart(managementPath));
   assert.deepEqual(pathStart(directPath).map(Number), [center(layout, "root").x, center(layout, "root").y]);
+  assert.match(directPath, / C /);
 });
 
-test("crossing detection ignores shared endpoints and crossing penalties untangle independent edges", () => {
+test("crossing diagnostics ignore shared endpoints", () => {
   const crossingNodes = ["a", "b", "c", "d"].map((id) => ({ id, name: id }));
   const relationships = graph.relationships(crossingNodes, [
     { source: "a", target: "b", endUp: "GOTO" },
@@ -349,10 +436,6 @@ test("crossing detection ignores shared endpoints and crossing penalties untangl
   setCenter(layout, "d", { x: 800, y: 300 });
 
   assert.equal(graph.countEdgeCrossings(relationships, layout), 1);
-  const simulation = graph.createForceSimulation(crossingNodes, relationships, layout, "a");
-  simulation.tick(120);
-  assert.equal(simulation.crossingCount(), 0);
-
   const sharedRelationships = graph.relationships(crossingNodes, [
     { source: "a", target: "b", endUp: "GOTO" },
     { source: "a", target: "c", endUp: "GOTO" },
@@ -397,7 +480,7 @@ test("arrow tips touch node surfaces while edge paths continue through node cent
   assert.ok(Math.abs(distance(endArrow[0], endBase) - 20) < 0.001);
 });
 
-test("multiple GOTO parents pull a shared destination from both sides", () => {
+test("multiple GOTO parents choose one stable hierarchy edge and keep the other as cross-reference", () => {
   const averagedNodes = ["root", "menu", "branch", "result"].map((id) => ({ id, name: id }));
   const relationships = graph.relationships(averagedNodes, [
     { source: "root", target: "menu", endUp: "GOTO" },
@@ -406,16 +489,10 @@ test("multiple GOTO parents pull a shared destination from both sides", () => {
     { source: "menu", target: "result", endUp: "GOTO" },
   ]);
   const layout = graph.layout(averagedNodes, relationships, "root");
-  const simulation = graph.createForceSimulation(averagedNodes, relationships, layout, "root");
-  simulation.tick(280);
-  const branchToResult = distance(center(layout, "branch"), center(layout, "result"));
-  const menuToResult = distance(center(layout, "menu"), center(layout, "result"));
-  const resultOrbitParents = ["menu", "branch"]
-    .filter((parentId) => layout.orbitAngles.has(`${parentId}\u0000result`));
-
-  assert.ok(branchToResult < 650);
-  assert.ok(menuToResult < 450);
-  assert.equal(resultOrbitParents.length, 1);
+  const incoming = relationships.filter((relationship) => relationship.target === "result");
+  const kinds = incoming.map((relationship) => layout.routes.get(graph.relationshipKey(relationship)).kind).sort();
+  assert.deepEqual(kinds, ["cross", "tree"]);
+  assert.equal(layout.levels.get("result"), 2);
 });
 
 test("reciprocal GOTO references stay separate and form a conspicuous cycle", () => {
@@ -441,28 +518,10 @@ test("reciprocal GOTO references stay separate and form a conspicuous cycle", ()
     relationship,
   ));
   assert.notEqual(paths[0], paths[1]);
-  paths.forEach((path) => assert.match(path, / Q /));
+  paths.forEach((path) => assert.match(path, / C /));
 });
 
-test("force relaxation is deterministic for the same graph", () => {
-  const deterministicNodes = ["root", "a", "b", "c", "d"].map((id) => ({ id, name: id }));
-  const relationships = graph.relationships(deterministicNodes, [
-    { source: "root", target: "a", endUp: "GOTO" },
-    { source: "root", target: "b", endUp: "GOTO" },
-    { source: "a", target: "c", endUp: "GOTO" },
-    { source: "b", target: "c", endUp: "GOTO" },
-    { source: "c", target: "d", endUp: "REPLACE" },
-  ]);
-  const first = graph.layout(deterministicNodes, relationships, "root");
-  const second = graph.layout(deterministicNodes, relationships, "root");
-  graph.createForceSimulation(deterministicNodes, relationships, first, "root").tick(240);
-  graph.createForceSimulation(deterministicNodes, relationships, second, "root").tick(240);
-
-  assert.deepEqual([...first.positions], [...second.positions]);
-  assert.deepEqual([...first.routes], [...second.routes]);
-});
-
-test("force layout remains finite outside the initial canvas and produces dynamic view bounds", () => {
+test("large structured layouts remain finite and produce complete view bounds", () => {
   const largeNodes = Array.from({ length: 64 }, (_, index) => ({ id: `node_${index}`, name: `Node ${index}` }));
   const largeEdges = largeNodes.slice(1).map((node, index) => ({
     source: `node_${Math.floor(index / 3)}`,
@@ -471,12 +530,8 @@ test("force layout remains finite outside the initial canvas and produces dynami
   }));
   const relationships = graph.relationships(largeNodes, largeEdges);
   const layout = graph.layout(largeNodes, relationships, "node_0");
-  const simulation = graph.createForceSimulation(largeNodes, relationships, layout, "node_0");
-  simulation.tick(320);
-
   assert.equal(layout.positions.size, largeNodes.length);
   const bounds = graph.viewBounds(layout, 0);
-  let escapedInitialCanvas = false;
   layout.positions.forEach((position, nodeId) => {
     const radius = layout.nodeSizes.get(nodeId).radius;
     assert.ok(Number.isFinite(position.x) && Number.isFinite(position.y));
@@ -484,24 +539,21 @@ test("force layout remains finite outside the initial canvas and produces dynami
     assert.ok(position.y + radius >= bounds.y - 0.001);
     assert.ok(position.x + radius <= bounds.x + bounds.width + 0.001);
     assert.ok(position.y + radius <= bounds.y + bounds.height + 0.001);
-    if (position.x < 0 || position.y < 0 || position.x + radius * 2 > layout.width || position.y + radius * 2 > layout.height) {
-      escapedInitialCanvas = true;
-    }
   });
-  assert.equal(escapedInitialCanvas, true);
+  assert.ok(layout.columns.length > 3);
 });
 
-test("dragging may move a node anywhere in the near-infinite graph plane", () => {
-  const relationships = graph.relationships(nodes, [
-    { source: "parent", target: "child_a", endUp: "GOTO" },
+test("nodes outside ROOT reachability are separated into a detached region", () => {
+  const detachedNodes = ["root", "child", "island", "island_child"].map((id) => ({ id, name: id }));
+  const relationships = graph.relationships(detachedNodes, [
+    { source: "root", target: "child", endUp: "GOTO" },
+    { source: "island", target: "island_child", endUp: "GOTO" },
   ]);
-  const layout = graph.layout(nodes, relationships, "parent");
-  const simulation = graph.createForceSimulation(nodes, relationships, layout, "parent");
+  const layout = graph.layout(detachedNodes, relationships, "root");
 
-  simulation.pin("child_a", -4200, 6100);
-  simulation.tick(8);
-  assert.deepEqual(layout.positions.get("child_a"), { x: -4200, y: 6100 });
-  const bounds = graph.viewBounds(layout);
-  assert.ok(bounds.x < -4200);
-  assert.ok(bounds.y + bounds.height > 6100);
+  assert.deepEqual([...layout.detachedNodeIds].sort(), ["island", "island_child"]);
+  assert.ok(Number.isFinite(layout.detachedStartY));
+  assert.ok(center(layout, "island").y > layout.detachedStartY);
+  assert.equal(layout.levels.get("island"), 0);
+  assert.equal(layout.levels.get("island_child"), 1);
 });

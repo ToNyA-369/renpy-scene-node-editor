@@ -7,14 +7,25 @@
 })(typeof globalThis !== "undefined" ? globalThis : this, () => {
   const BASE_NODE_RADIUS = 19;
   const MAX_NODE_RADIUS = 32;
-  const BASE_CLUSTER_RADIUS = 235;
-  const REPLACE_DISTANCE = 210;
   const DESCENDANT_DECAY = 0.68;
+  const COLUMN_GAP = 360;
+  const ROW_GAP = 132;
+  const COMPONENT_MICRO_SPAN = 140;
+  const REPLACE_MICRO_SPAN = 160;
+  const SUBTREE_GAP = 54;
+  const GRAPH_MARGIN_X = 190;
+  const GRAPH_MARGIN_Y = 170;
+  const DETACHED_GAP = 250;
   const ARROW_LENGTH = 20;
   const ARROW_HALF_WIDTH = 7;
-  const CROSSING_FORCE = 0.92;
-  const CROSSING_CHECK_INTERVAL = 3;
-  const MAX_CROSSINGS_PER_PASS = 96;
+  const IDLE_MOTION_X = 2.6;
+  const IDLE_MOTION_Y = 1.8;
+  const LOCAL_FORCE_RANGE = 210;
+  const LOCAL_REPULSION = 72;
+  const LINK_OFFSET_SPRING = 3.2;
+  const MOTION_ANCHOR_SPRING = 18;
+  const MOTION_DAMPING = 8.5;
+  const MAX_IDLE_DISPLACEMENT = 7;
 
   function relationshipKey(relationship) {
     return `${relationship.source}\u0000${relationship.target}\u0000${relationship.endUp}`;
@@ -27,6 +38,16 @@
   function compareNodes(left, right) {
     return nodeLabel(left).localeCompare(nodeLabel(right), "zh-Hant")
       || String(left.id).localeCompare(String(right.id));
+  }
+
+  function stableUnit(value, salt = "") {
+    const text = `${salt}:${String(value)}`;
+    let hash = 2166136261;
+    for (let index = 0; index < text.length; index += 1) {
+      hash ^= text.charCodeAt(index);
+      hash = Math.imul(hash, 16777619);
+    }
+    return (hash >>> 0) / 4294967295;
   }
 
   function cross(left, right) {
@@ -110,16 +131,6 @@
     }).length;
   }
 
-  function routePriority(relationship, graphLayout) {
-    const kind = graphLayout.routes?.get(relationshipKey(relationship))?.kind;
-    if (kind === "tree") return 4;
-    if (kind === "goto-cycle") return 3.4;
-    if (kind === "replace-local") return 2.4;
-    if (kind === "cross") return 1.7;
-    if (kind === "management") return 0.55;
-    return 1;
-  }
-
   function stableRouteLane(relationship) {
     const key = relationshipKey(relationship);
     let hash = 0;
@@ -129,6 +140,11 @@
     return hash % 2 === 0 ? -1 : 1;
   }
 
+  function stablePairLane(relationship) {
+    const [source, target] = [relationship.source, relationship.target].sort();
+    return stableRouteLane({ source, target, endUp: relationship.endUp });
+  }
+
   function hierarchyChildren(nodes, graphRelationships) {
     const children = new Map(nodes.map((node) => [String(node.id), new Set()]));
     graphRelationships.forEach((relationship) => {
@@ -136,60 +152,6 @@
       children.get(relationship.source)?.add(relationship.target);
     });
     return children;
-  }
-
-  function hierarchyRelationshipsBySource(nodes, graphRelationships) {
-    const nodeIds = new Set(nodes.map((node) => String(node.id)));
-    const bySource = new Map([...nodeIds].map((nodeId) => [nodeId, []]));
-    graphRelationships.forEach((relationship) => {
-      if (
-        relationship.scope === "global"
-        || !["GOTO", "MANAGEMENT"].includes(relationship.endUp)
-        || !nodeIds.has(relationship.source)
-        || !nodeIds.has(relationship.target)
-      ) return;
-      bySource.get(relationship.source).push(relationship);
-    });
-    return bySource;
-  }
-
-  function growthStagesFromOrbit(rootId, orderedNodeIds, orbitKinds, orbitParents) {
-    if (!rootId) return orderedNodeIds.length ? [{ kind: "detached", nodeIds: orderedNodeIds }] : [];
-    const stages = [{ kind: "root", nodeIds: [rootId] }];
-    const active = new Set([rootId]);
-    const pending = new Set(orderedNodeIds.filter((nodeId) => nodeId !== rootId));
-
-    while (pending.size) {
-      let grewGoto = false;
-      while (true) {
-        const nextGoto = [...pending].filter((nodeId) => (
-          orbitKinds.get(nodeId) === "GOTO" && active.has(orbitParents.get(nodeId))
-        ));
-        if (!nextGoto.length) break;
-        stages.push({ kind: "goto", nodeIds: nextGoto });
-        nextGoto.forEach((nodeId) => {
-          active.add(nodeId);
-          pending.delete(nodeId);
-        });
-        grewGoto = true;
-      }
-
-      const nextReplace = [...pending].filter((nodeId) => (
-        orbitKinds.get(nodeId) === "MANAGEMENT" && active.has(orbitParents.get(nodeId))
-      ));
-      if (nextReplace.length) {
-        stages.push({ kind: "replace", nodeIds: nextReplace });
-        nextReplace.forEach((nodeId) => {
-          active.add(nodeId);
-          pending.delete(nodeId);
-        });
-        continue;
-      }
-      if (!grewGoto) break;
-    }
-
-    if (pending.size) stages.push({ kind: "detached", nodeIds: [...pending] });
-    return stages;
   }
 
   function descendantMetrics(nodeId, children) {
@@ -310,140 +272,314 @@
   }
 
   function layout(nodes, graphRelationships, rootNodeId = null) {
-    const globalNode = nodes.find((node) => node.isGlobal || String(node.id) === "__global__") || null;
-    const realNodes = nodes.filter((node) => node !== globalNode).sort(compareNodes);
+    const realNodes = nodes
+      .filter((node) => !node.isGlobal && String(node.id) !== "__global__")
+      .sort(compareNodes);
+    const nodeById = new Map(realNodes.map((node) => [String(node.id), node]));
     const requestedRoot = String(rootNodeId || "");
-    const configuredRoot = realNodes.some((node) => String(node.id) === requestedRoot)
-      ? requestedRoot
-      : String(realNodes[0]?.id || "");
-    const orderedNodes = [
-      ...realNodes.filter((node) => String(node.id) === configuredRoot),
-      ...realNodes.filter((node) => String(node.id) !== configuredRoot),
-    ];
-    const count = Math.max(1, realNodes.length);
-    const width = Math.max(1200, Math.ceil(Math.sqrt(count)) * 360);
-    const height = Math.max(820, Math.ceil(Math.sqrt(count)) * 300);
-    const center = { x: width / 2, y: height / 2 };
-    const positions = new Map();
-    const childTargets = hierarchyChildren(nodes, graphRelationships);
-    const hierarchyMetrics = new Map(nodes.map((node) => {
+    const configuredRoot = nodeById.has(requestedRoot) ? requestedRoot : String(realNodes[0]?.id || "");
+    const childTargets = hierarchyChildren(realNodes, graphRelationships);
+    const hierarchyMetrics = new Map(realNodes.map((node) => {
       const nodeId = String(node.id);
       return [nodeId, descendantMetrics(nodeId, childTargets)];
     }));
-    const nodeSizes = new Map(nodes.map((node) => {
+    const nodeSizes = new Map(realNodes.map((node) => {
       const nodeId = String(node.id);
       const directChildCount = childTargets.get(nodeId)?.size || 0;
       const { descendantCount, inheritedLoad } = hierarchyMetrics.get(nodeId);
       const compressedLoad = Math.log2(1 + inheritedLoad);
-      const radius = Math.min(MAX_NODE_RADIUS, BASE_NODE_RADIUS + compressedLoad * 3.25);
-      const chargeScale = Math.min(4.4, 1 + compressedLoad * 0.78);
-      const clusterRadius = BASE_CLUSTER_RADIUS + Math.sqrt(directChildCount) * 34 + compressedLoad * 18;
       return [nodeId, {
-        radius,
+        radius: Math.min(MAX_NODE_RADIUS, BASE_NODE_RADIUS + compressedLoad * 3.25),
         childCount: descendantCount,
         directChildCount,
         descendantCount,
         inheritedLoad,
-        chargeScale,
-        clusterRadius,
       }];
     }));
-    const orbitAngles = new Map();
-    const orbitParents = new Map();
-    const orbitKinds = new Map();
-    const nodeById = new Map(realNodes.map((node) => [String(node.id), node]));
-    const orbitChildren = new Map(realNodes.map((node) => [String(node.id), new Set()]));
-    const hierarchyRelationships = hierarchyRelationshipsBySource(nodes, graphRelationships);
-    const assignedOrbitParent = new Set(configuredRoot ? [configuredRoot] : []);
-    const orbitQueue = configuredRoot ? [configuredRoot] : [];
-    while (orbitQueue.length) {
-      const parentId = orbitQueue.shift();
-      const candidates = [...(hierarchyRelationships.get(parentId) || [])]
-        .filter((relationship) => nodeById.has(relationship.target))
-        .sort((left, right) => (
-          (left.endUp === "GOTO" ? 0 : 1) - (right.endUp === "GOTO" ? 0 : 1)
-          || compareNodes(nodeById.get(left.target), nodeById.get(right.target))
-        ));
-      candidates.forEach((relationship) => {
-        const childId = relationship.target;
-        if (assignedOrbitParent.has(childId)) return;
-        assignedOrbitParent.add(childId);
-        orbitChildren.get(parentId).add(childId);
-        orbitParents.set(childId, parentId);
-        orbitKinds.set(childId, relationship.endUp);
-        orbitQueue.push(childId);
-      });
-    }
-    const placed = new Set();
-    if (configuredRoot) {
-      const rootRadius = nodeSizes.get(configuredRoot).radius;
-      positions.set(configuredRoot, { x: center.x - rootRadius, y: center.y - rootRadius });
-      placed.add(configuredRoot);
-      const queue = [{ nodeId: configuredRoot, entryAngle: -Math.PI / 2 }];
+
+    // REPLACE preserves Stack depth. Collapse every REPLACE family into one
+    // layout unit before assigning GOTO depth, so later routing cannot pull
+    // same-depth alternatives into a misleading parent/child position.
+    const unionParent = new Map(realNodes.map((node) => [String(node.id), String(node.id)]));
+    const find = (nodeId) => {
+      let current = nodeId;
+      while (unionParent.get(current) !== current) current = unionParent.get(current);
+      let cursor = nodeId;
+      while (unionParent.get(cursor) !== current) {
+        const next = unionParent.get(cursor);
+        unionParent.set(cursor, current);
+        cursor = next;
+      }
+      return current;
+    };
+    const unite = (leftId, rightId) => {
+      const left = find(leftId);
+      const right = find(rightId);
+      if (left === right) return;
+      const [parent, child] = left.localeCompare(right) <= 0 ? [left, right] : [right, left];
+      unionParent.set(child, parent);
+    };
+    graphRelationships.forEach((relationship) => {
+      if (
+        relationship.scope !== "global"
+        && relationship.endUp === "REPLACE"
+        && nodeById.has(relationship.source)
+        && nodeById.has(relationship.target)
+      ) unite(relationship.source, relationship.target);
+    });
+
+    const componentMembers = new Map();
+    realNodes.forEach((node) => {
+      const componentId = find(String(node.id));
+      if (!componentMembers.has(componentId)) componentMembers.set(componentId, []);
+      componentMembers.get(componentId).push(String(node.id));
+    });
+    componentMembers.forEach((memberIds) => memberIds.sort((left, right) => (
+      compareNodes(nodeById.get(left), nodeById.get(right))
+    )));
+    const componentForNode = new Map(realNodes.map((node) => [String(node.id), find(String(node.id))]));
+    const gotoRelationships = graphRelationships.filter((relationship) => (
+      relationship.scope !== "global"
+      && relationship.endUp === "GOTO"
+      && nodeById.has(relationship.source)
+      && nodeById.has(relationship.target)
+      && componentForNode.get(relationship.source) !== componentForNode.get(relationship.target)
+    ));
+    const outgoingComponents = new Map([...componentMembers.keys()].map((componentId) => [componentId, []]));
+    gotoRelationships.forEach((relationship) => {
+      outgoingComponents.get(componentForNode.get(relationship.source)).push(relationship);
+    });
+    outgoingComponents.forEach((items) => items.sort((left, right) => (
+      compareNodes(nodeById.get(left.target), nodeById.get(right.target))
+      || relationshipKey(left).localeCompare(relationshipKey(right))
+    )));
+
+    const rootComponent = componentForNode.get(configuredRoot) || null;
+    const componentDepth = new Map();
+    const componentChildren = new Map([...componentMembers.keys()].map((componentId) => [componentId, []]));
+    const componentParent = new Map();
+    const componentEntryNode = new Map(rootComponent ? [[rootComponent, configuredRoot]] : []);
+    const primaryRelationshipKeys = new Set();
+    const reachableComponents = new Set();
+
+    const growTree = (startComponent, reachable) => {
+      if (componentDepth.has(startComponent)) return;
+      componentDepth.set(startComponent, 0);
+      if (reachable) reachableComponents.add(startComponent);
+      const queue = [startComponent];
       while (queue.length) {
-        const current = queue.shift();
-        const parentPosition = positions.get(current.nodeId);
-        const parentSize = nodeSizes.get(current.nodeId);
-        const parentCenter = {
-          x: parentPosition.x + parentSize.radius,
-          y: parentPosition.y + parentSize.radius,
-        };
-        const children = [...(orbitChildren.get(current.nodeId) || [])]
-          .filter((childId) => nodeById.has(childId))
-          .sort((left, right) => compareNodes(nodeById.get(left), nodeById.get(right)));
-        children.forEach((childId, index) => {
-          const angle = current.entryAngle + (Math.PI * 2 * index / Math.max(1, children.length));
-          orbitAngles.set(`${current.nodeId}\u0000${childId}`, angle);
-          if (placed.has(childId)) return;
-          const childRadius = nodeSizes.get(childId).radius;
-          positions.set(childId, {
-            x: parentCenter.x + Math.cos(angle) * parentSize.clusterRadius - childRadius,
-            y: parentCenter.y + Math.sin(angle) * parentSize.clusterRadius - childRadius,
-          });
-          placed.add(childId);
-          queue.push({ nodeId: childId, entryAngle: angle + Math.PI / 2 });
+        const sourceComponent = queue.shift();
+        for (const relationship of outgoingComponents.get(sourceComponent) || []) {
+          const targetComponent = componentForNode.get(relationship.target);
+          if (componentDepth.has(targetComponent)) continue;
+          componentDepth.set(targetComponent, componentDepth.get(sourceComponent) + 1);
+          componentParent.set(targetComponent, sourceComponent);
+          componentEntryNode.set(targetComponent, relationship.target);
+          componentChildren.get(sourceComponent).push(targetComponent);
+          primaryRelationshipKeys.add(relationshipKey(relationship));
+          if (reachable) reachableComponents.add(targetComponent);
+          queue.push(targetComponent);
+        }
+      }
+    };
+    if (rootComponent) growTree(rootComponent, true);
+
+    const orderedComponents = [...componentMembers.keys()].sort((left, right) => (
+      compareNodes(nodeById.get(componentMembers.get(left)[0]), nodeById.get(componentMembers.get(right)[0]))
+    ));
+    const incomingComponents = new Map([...componentMembers.keys()].map((componentId) => [componentId, new Set()]));
+    gotoRelationships.forEach((relationship) => {
+      incomingComponents.get(componentForNode.get(relationship.target)).add(componentForNode.get(relationship.source));
+    });
+    const detachedRoots = [];
+    while (orderedComponents.some((componentId) => !componentDepth.has(componentId))) {
+      const remaining = orderedComponents.filter((componentId) => !componentDepth.has(componentId));
+      const remainingSet = new Set(remaining);
+      const seed = remaining.find((componentId) => (
+        [...incomingComponents.get(componentId)].every((sourceId) => !remainingSet.has(sourceId))
+      )) || remaining[0];
+      detachedRoots.push(seed);
+      componentEntryNode.set(seed, componentMembers.get(seed)[0]);
+      growTree(seed, false);
+    }
+    componentMembers.forEach((memberIds, componentId) => {
+      const entryNodeId = componentEntryNode.get(componentId);
+      if (!entryNodeId) return;
+      memberIds.sort((left, right) => (left === entryNodeId ? -1 : right === entryNodeId ? 1 : 0));
+    });
+    componentChildren.forEach((children) => children.sort((left, right) => (
+      compareNodes(nodeById.get(componentMembers.get(left)[0]), nodeById.get(componentMembers.get(right)[0]))
+    )));
+
+    // A shortest ROOT path can place related GOTO destinations at the same
+    // formal Stack depth. Give those components a bounded local progression
+    // instead of routing every same-depth edge as a large outside return arc.
+    const sameDepthAdjacency = new Map([...componentMembers.keys()].map((componentId) => [componentId, []]));
+    gotoRelationships.forEach((relationship) => {
+      const sourceComponent = componentForNode.get(relationship.source);
+      const targetComponent = componentForNode.get(relationship.target);
+      if (componentDepth.get(sourceComponent) !== componentDepth.get(targetComponent)) return;
+      sameDepthAdjacency.get(sourceComponent).push({ componentId: targetComponent, incoming: false });
+      sameDepthAdjacency.get(targetComponent).push({ componentId: sourceComponent, incoming: true });
+    });
+    sameDepthAdjacency.forEach((adjacent) => adjacent.sort((left, right) => (
+      Number(left.incoming) - Number(right.incoming)
+      || compareNodes(
+        nodeById.get(componentMembers.get(left.componentId)[0]),
+        nodeById.get(componentMembers.get(right.componentId)[0]),
+      )
+    )));
+    const componentMicroRanks = new Map([...componentMembers.keys()].map((componentId) => [componentId, 0]));
+    const componentMicroOffsets = new Map([...componentMembers.keys()].map((componentId) => [componentId, 0]));
+    const microVisited = new Set();
+    orderedComponents.forEach((seedComponent) => {
+      if (microVisited.has(seedComponent) || !sameDepthAdjacency.get(seedComponent).length) return;
+      const group = [];
+      const discoverQueue = [seedComponent];
+      microVisited.add(seedComponent);
+      while (discoverQueue.length) {
+        const componentId = discoverQueue.shift();
+        group.push(componentId);
+        sameDepthAdjacency.get(componentId).forEach(({ componentId: adjacentId }) => {
+          if (microVisited.has(adjacentId)) return;
+          microVisited.add(adjacentId);
+          discoverQueue.push(adjacentId);
         });
       }
-    }
-    const unplaced = orderedNodes.filter((node) => !placed.has(String(node.id)));
-    const detachedRadius = (nodeSizes.get(configuredRoot)?.clusterRadius || BASE_CLUSTER_RADIUS) * 1.7;
-    unplaced.forEach((node, index) => {
-      const nodeId = String(node.id);
-      const radius = nodeSizes.get(nodeId).radius;
-      const angle = -Math.PI / 2 + Math.PI * 2 * index / Math.max(1, unplaced.length);
-      positions.set(nodeId, {
-        x: center.x + Math.cos(angle) * detachedRadius - radius,
-        y: center.y + Math.sin(angle) * detachedRadius - radius,
+      const outgoingCount = (componentId) => sameDepthAdjacency.get(componentId)
+        .filter((item) => !item.incoming).length;
+      const anchor = [...group].sort((left, right) => (
+        outgoingCount(right) - outgoingCount(left)
+        || compareNodes(
+          nodeById.get(componentMembers.get(left)[0]),
+          nodeById.get(componentMembers.get(right)[0]),
+        )
+      ))[0];
+      const rankQueue = [anchor];
+      const ranked = new Set([anchor]);
+      componentMicroRanks.set(anchor, 0);
+      while (rankQueue.length) {
+        const componentId = rankQueue.shift();
+        sameDepthAdjacency.get(componentId).forEach(({ componentId: adjacentId }) => {
+          if (ranked.has(adjacentId)) return;
+          ranked.add(adjacentId);
+          componentMicroRanks.set(adjacentId, componentMicroRanks.get(componentId) + 1);
+          rankQueue.push(adjacentId);
+        });
+      }
+      const maximumRank = Math.max(0, ...group.map((componentId) => componentMicroRanks.get(componentId)));
+      group.forEach((componentId) => {
+        if (!maximumRank) return;
+        const ratio = componentMicroRanks.get(componentId) / maximumRank;
+        componentMicroOffsets.set(componentId, (ratio - 0.5) * COMPONENT_MICRO_SPAN);
       });
     });
-    if (globalNode) {
-      const globalId = String(globalNode.id);
-      const globalRadius = nodeSizes.get(globalId).radius;
-      const globalOffset = (nodeSizes.get(configuredRoot)?.clusterRadius || BASE_CLUSTER_RADIUS) + 210;
-      positions.set(globalId, { x: center.x - globalRadius, y: center.y - globalOffset - globalRadius });
-    }
 
-    const localGoto = graphRelationships.filter((relationship) => (
-      relationship.scope !== "global" && relationship.endUp === "GOTO" && !relationship.cycle
-    ));
-    const levels = new Map();
-    if (configuredRoot && positions.has(configuredRoot)) levels.set(configuredRoot, 0);
-    const primaryRelationshipKeys = new Set();
-    const queue = configuredRoot ? [configuredRoot] : [];
-    while (queue.length) {
-      const source = queue.shift();
-      const nextLevel = (levels.get(source) || 0) + 1;
-      localGoto
-        .filter((relationship) => relationship.source === source)
-        .forEach((relationship) => {
-          if (levels.has(relationship.target)) return;
-          levels.set(relationship.target, nextLevel);
-          primaryRelationshipKeys.add(relationshipKey(relationship));
-          queue.push(relationship.target);
+    const componentSpan = new Map();
+    const measure = (componentId, trail = new Set()) => {
+      if (componentSpan.has(componentId)) return componentSpan.get(componentId);
+      if (trail.has(componentId)) return componentMembers.get(componentId).length * ROW_GAP;
+      const nextTrail = new Set(trail).add(componentId);
+      const ownSpan = Math.max(ROW_GAP, componentMembers.get(componentId).length * ROW_GAP);
+      const childSpans = componentChildren.get(componentId).map((childId) => measure(childId, nextTrail));
+      const childrenSpan = childSpans.length
+        ? childSpans.reduce((total, value) => total + value, 0) + SUBTREE_GAP * (childSpans.length - 1)
+        : 0;
+      const span = Math.max(ownSpan, childrenSpan);
+      componentSpan.set(componentId, span);
+      return span;
+    };
+    const componentCenters = new Map();
+    const placeComponent = (componentId, top) => {
+      const span = measure(componentId);
+      componentCenters.set(componentId, top + span / 2);
+      const children = componentChildren.get(componentId);
+      const childrenSpan = children.reduce((total, childId) => total + measure(childId), 0)
+        + SUBTREE_GAP * Math.max(0, children.length - 1);
+      let childTop = top + (span - childrenSpan) / 2;
+      children.forEach((childId) => {
+        placeComponent(childId, childTop);
+        childTop += measure(childId) + SUBTREE_GAP;
+      });
+      return span;
+    };
+
+    let cursorY = GRAPH_MARGIN_Y;
+    if (rootComponent) cursorY += placeComponent(rootComponent, cursorY);
+    const reachableBottom = cursorY;
+    if (detachedRoots.length) cursorY += DETACHED_GAP;
+    detachedRoots.forEach((componentId, index) => {
+      if (index) cursorY += SUBTREE_GAP;
+      cursorY += placeComponent(componentId, cursorY);
+    });
+
+    const replaceAdjacency = new Map(realNodes.map((node) => [String(node.id), []]));
+    graphRelationships.forEach((relationship) => {
+      if (relationship.scope === "global" || relationship.endUp !== "REPLACE") return;
+      if (!replaceAdjacency.has(relationship.source) || !replaceAdjacency.has(relationship.target)) return;
+      replaceAdjacency.get(relationship.source).push({ nodeId: relationship.target, incoming: false });
+      replaceAdjacency.get(relationship.target).push({
+        nodeId: relationship.source,
+        incoming: !relationship.bidirectional,
+      });
+    });
+    replaceAdjacency.forEach((adjacent) => adjacent.sort((left, right) => (
+      Number(left.incoming) - Number(right.incoming)
+      || compareNodes(nodeById.get(left.nodeId), nodeById.get(right.nodeId))
+    )));
+    const replacementRanks = new Map();
+    const replacementOrder = new Map();
+    componentMembers.forEach((memberIds, componentId) => {
+      const entryNodeId = componentEntryNode.get(componentId) || memberIds[0];
+      const memberSet = new Set(memberIds);
+      const queue = [entryNodeId];
+      const ordered = [];
+      replacementRanks.set(entryNodeId, 0);
+      while (queue.length) {
+        const nodeId = queue.shift();
+        ordered.push(nodeId);
+        (replaceAdjacency.get(nodeId) || []).forEach(({ nodeId: adjacentId }) => {
+          if (!memberSet.has(adjacentId) || replacementRanks.has(adjacentId)) return;
+          replacementRanks.set(adjacentId, replacementRanks.get(nodeId) + 1);
+          queue.push(adjacentId);
         });
-    }
-    realNodes.forEach((node) => {
-      if (!levels.has(String(node.id))) levels.set(String(node.id), 0);
+      }
+      memberIds.forEach((nodeId) => {
+        if (replacementRanks.has(nodeId)) return;
+        replacementRanks.set(nodeId, 0);
+        ordered.push(nodeId);
+      });
+      memberIds.sort((left, right) => (
+        replacementRanks.get(left) - replacementRanks.get(right)
+        || ordered.indexOf(left) - ordered.indexOf(right)
+        || compareNodes(nodeById.get(left), nodeById.get(right))
+      ));
+      replacementOrder.set(componentId, ordered);
+    });
+
+    const positions = new Map();
+    const levels = new Map();
+    componentMembers.forEach((memberIds, componentId) => {
+      const depth = componentDepth.get(componentId) || 0;
+      const centerY = componentCenters.get(componentId) || GRAPH_MARGIN_Y;
+      const hasReplacementFamily = memberIds.length > 1;
+      memberIds.forEach((nodeId, index) => {
+        const radius = nodeSizes.get(nodeId).radius;
+        const memberOffset = (index - (memberIds.length - 1) / 2) * ROW_GAP;
+        const replacementRank = replacementRanks.get(nodeId) || 0;
+        // REPLACE is a same-depth substitution, not forward hierarchy. Place
+        // alternating ranks on opposite sides of the depth baseline so chains
+        // naturally contain both forward and backward arrows.
+        const replacementOffset = !hasReplacementFamily
+          ? 0
+          : replacementRank % 2 === 0 ? -REPLACE_MICRO_SPAN / 2 : REPLACE_MICRO_SPAN / 2;
+        positions.set(nodeId, {
+          x: GRAPH_MARGIN_X + depth * COLUMN_GAP
+            + componentMicroOffsets.get(componentId) + replacementOffset - radius,
+          y: centerY + memberOffset - radius,
+        });
+        levels.set(nodeId, depth);
+      });
     });
 
     const routes = new Map();
@@ -456,31 +592,62 @@
       else if (primaryRelationshipKeys.has(relationshipKey(relationship))) kind = "tree";
       routes.set(relationshipKey(relationship), {
         kind,
-        lane: kind === "cross" ? stableRouteLane(relationship) : 0,
+        lane: ["cross", "goto-cycle"].includes(kind) ? stableRouteLane(relationship) : 0,
       });
     });
-    const growthStages = growthStagesFromOrbit(
-      configuredRoot,
-      orderedNodes.map((node) => String(node.id)),
-      orbitKinds,
-      orbitParents,
-    );
+
+    const maxDepth = Math.max(0, ...levels.values());
+    const rightmostCenter = Math.max(GRAPH_MARGIN_X, ...[...positions].map(([nodeId, position]) => (
+      position.x + nodeSizes.get(nodeId).radius
+    )));
+    const width = Math.max(1200, rightmostCenter + GRAPH_MARGIN_X);
+    const height = Math.max(820, cursorY + GRAPH_MARGIN_Y);
+    const rootRadius = nodeSizes.get(configuredRoot)?.radius || BASE_NODE_RADIUS;
+    const rootPosition = positions.get(configuredRoot);
+    const center = rootPosition
+      ? { x: rootPosition.x + rootRadius, y: rootPosition.y + rootRadius }
+      : { x: GRAPH_MARGIN_X, y: GRAPH_MARGIN_Y };
+    const detachedNodeIds = new Set(realNodes
+      .map((node) => String(node.id))
+      .filter((nodeId) => !reachableComponents.has(componentForNode.get(nodeId))));
+    const revealSteps = new Map();
+    realNodes.forEach((node) => {
+      const nodeId = String(node.id);
+      const componentId = componentForNode.get(nodeId);
+      const formalDepth = levels.get(nodeId) || 0;
+      const detachedOffset = detachedNodeIds.has(nodeId) ? maxDepth + 2 : 0;
+      const localStep = Math.min(2,
+        (componentMicroRanks.get(componentId) || 0) + (replacementRanks.get(nodeId) || 0));
+      revealSteps.set(nodeId, (formalDepth + detachedOffset) * 2 + localStep);
+    });
 
     return {
+      algorithm: "structured-depth",
       nodeWidth: BASE_NODE_RADIUS * 2,
       nodeHeight: BASE_NODE_RADIUS * 2,
       nodeSizes,
       hierarchyChildren: childTargets,
-      orbitChildren,
       hierarchyDepths: new Map([...hierarchyMetrics].map(([nodeId, metrics]) => [nodeId, metrics.depths])),
-      orbitAngles,
-      orbitKinds,
-      orbitParents,
-      growthStages,
+      componentForNode,
+      componentMembers,
+      componentChildren,
+      componentParent,
+      componentEntryNode,
+      componentMicroOffsets,
+      componentMicroRanks,
+      replacementOrder,
+      replacementRanks,
+      detachedNodeIds,
+      detachedStartY: detachedRoots.length ? reachableBottom + DETACHED_GAP / 2 : null,
       positions,
       levels,
       routes,
+      revealSteps,
       primaryRelationshipKeys,
+      columns: Array.from({ length: maxDepth + 1 }, (_, depth) => ({
+        depth,
+        x: GRAPH_MARGIN_X + depth * COLUMN_GAP,
+      })),
       center,
       centerNodeId: configuredRoot,
       width,
@@ -488,278 +655,108 @@
     };
   }
 
-  function createForceSimulation(nodes, graphRelationships, graphLayout, rootNodeId = null) {
-    const globalNodeIds = new Set(nodes
-      .filter((node) => node.isGlobal || String(node.id) === "__global__")
-      .map((node) => String(node.id)));
-    const rootId = String(graphLayout.centerNodeId || rootNodeId || "");
-    const particles = new Map();
-    graphLayout.positions.forEach((position, nodeId) => {
-      const size = graphLayout.nodeSizes.get(nodeId);
-      particles.set(nodeId, {
-        id: nodeId,
-        x: position.x,
-        y: position.y,
-        radius: size.radius,
-        chargeScale: globalNodeIds.has(nodeId) ? Math.min(0.72, size.chargeScale) : size.chargeScale,
-        vx: 0,
-        vy: 0,
-        pinned: null,
-        global: globalNodeIds.has(nodeId),
+  function createLayoutController(nodes, graphRelationships, graphLayout) {
+    const anchors = new Map([...graphLayout.positions].map(([nodeId, position]) => [nodeId, { ...position }]));
+    const particles = new Map([...graphLayout.positions].map(([nodeId, position]) => [nodeId, {
+      id: nodeId,
+      x: position.x,
+      y: position.y,
+      vx: 0,
+      vy: 0,
+      pinned: null,
+    }]));
+    const motionProfiles = new Map([...particles.keys()].map((nodeId) => [nodeId, {
+      phaseX: stableUnit(nodeId, "phase-x") * Math.PI * 2,
+      phaseY: stableUnit(nodeId, "phase-y") * Math.PI * 2,
+      periodX: 3.2 + stableUnit(nodeId, "period-x") * 1.2,
+      periodY: 3.7 + stableUnit(nodeId, "period-y") * 1.1,
+      amplitude: nodeId === String(graphLayout.centerNodeId) ? 0.58 : 0.82 + stableUnit(nodeId, "amplitude") * 0.18,
+      blend: 0,
+      offsetX: 0,
+      offsetY: 0,
+      velocityX: 0,
+      velocityY: 0,
+      forceX: 0,
+      forceY: 0,
+    }]));
+    const connectionKeys = new Set();
+    const connectionPairs = [];
+    // Couple only authored flow. Derived management edges must not feed motion
+    // back into the structural model they merely explain.
+    graphRelationships.forEach((relationship) => {
+      if (relationship.scope === "global" || relationship.endUp === "MANAGEMENT") return;
+      const source = String(relationship.source);
+      const target = String(relationship.target);
+      if (source === target || !particles.has(source) || !particles.has(target)) return;
+      const pair = [source, target].sort();
+      const key = `${pair[0]}\u0000${pair[1]}`;
+      if (connectionKeys.has(key)) return;
+      connectionKeys.add(key);
+      connectionPairs.push(pair);
+    });
+    const anchorCells = new Map();
+    // Anchors never move, so nearby repulsion candidates can be bucketed once
+    // instead of scanning every pair on every animation frame.
+    anchors.forEach((anchor, nodeId) => {
+      const center = nodeCenter(anchor, graphLayout, nodeId);
+      const cellX = Math.floor(center.x / LOCAL_FORCE_RANGE);
+      const cellY = Math.floor(center.y / LOCAL_FORCE_RANGE);
+      const key = `${cellX}:${cellY}`;
+      if (!anchorCells.has(key)) anchorCells.set(key, []);
+      anchorCells.get(key).push({ center, nodeId });
+    });
+    const repulsionKeys = new Set();
+    const repulsionPairs = [];
+    anchorCells.forEach((entries, cellKey) => {
+      const [cellX, cellY] = cellKey.split(":").map(Number);
+      entries.forEach((entry) => {
+        for (let offsetX = -1; offsetX <= 1; offsetX += 1) {
+          for (let offsetY = -1; offsetY <= 1; offsetY += 1) {
+            const neighbors = anchorCells.get(`${cellX + offsetX}:${cellY + offsetY}`) || [];
+            neighbors.forEach((neighbor) => {
+              if (entry.nodeId === neighbor.nodeId) return;
+              const pair = [entry.nodeId, neighbor.nodeId].sort();
+              const key = `${pair[0]}\u0000${pair[1]}`;
+              if (repulsionKeys.has(key)) return;
+              if (Math.hypot(entry.center.x - neighbor.center.x, entry.center.y - neighbor.center.y)
+                >= LOCAL_FORCE_RANGE) return;
+              repulsionKeys.add(key);
+              repulsionPairs.push(pair);
+            });
+          }
+        }
       });
     });
-    const physicalRelationships = graphRelationships.filter((relationship) => (
-      relationship.scope !== "global"
-      && relationship.source !== relationship.target
-      && particles.has(relationship.source)
-      && particles.has(relationship.target)
-    ));
-    const connectedNodeIds = new Set(physicalRelationships.flatMap((relationship) => (
-      [relationship.source, relationship.target]
-    )));
-    let alpha = 1;
-    let tickCount = 0;
-    let activeNodeIds = null;
-    let growthSettled = false;
-
-    const centerOf = (particle) => ({
-      x: particle.x + particle.radius,
-      y: particle.y + particle.radius,
-    });
-    const addForce = (particle, x, y) => {
-      if (particle.pinned) return;
-      particle.vx += x * alpha;
-      particle.vy += y * alpha;
-    };
-    const activeRelationships = () => activeNodeIds === null
-      ? physicalRelationships
-      : physicalRelationships.filter((relationship) => (
-          activeNodeIds.has(relationship.source) && activeNodeIds.has(relationship.target)
-        ));
-
-    const crossingCandidate = (segment, ratio, otherSegment) => {
-      const endpointChoices = ratio <= 0.5
-        ? [
-            { movingId: segment.relationship.source, fixedId: segment.relationship.target, distanceRatio: ratio },
-            { movingId: segment.relationship.target, fixedId: segment.relationship.source, distanceRatio: 1 - ratio },
-          ]
-        : [
-            { movingId: segment.relationship.target, fixedId: segment.relationship.source, distanceRatio: 1 - ratio },
-            { movingId: segment.relationship.source, fixedId: segment.relationship.target, distanceRatio: ratio },
-          ];
-      const choice = endpointChoices.find((item) => !particles.get(item.movingId)?.pinned);
-      if (!choice) return null;
-      const moving = particles.get(choice.movingId);
-      const fixed = particles.get(choice.fixedId);
-      if (!moving || !fixed) return null;
-      const otherVector = {
-        x: otherSegment.end.x - otherSegment.start.x,
-        y: otherSegment.end.y - otherSegment.start.y,
-      };
-      const otherLength = Math.max(1, Math.hypot(otherVector.x, otherVector.y));
-      const fixedCenter = centerOf(fixed);
-      let side = cross(otherVector, {
-        x: fixedCenter.x - otherSegment.start.x,
-        y: fixedCenter.y - otherSegment.start.y,
-      });
-      if (Math.abs(side) < 0.000001) {
-        side = choice.movingId.localeCompare(choice.fixedId) <= 0 ? -1 : 1;
-      }
-      const directionSign = Math.sign(side);
-      const direction = {
-        x: -otherVector.y / otherLength * directionSign,
-        y: otherVector.x / otherLength * directionSign,
-      };
-      const nodeSize = graphLayout.nodeSizes.get(choice.movingId);
-      const structuralCost = choice.movingId === rootId
-        ? 8
-        : 1 + Math.min(2.2, (nodeSize?.directChildCount || 0) * 0.35);
-      return {
-        ...choice,
-        moving,
-        fixed,
-        direction,
-        cost: routePriority(segment.relationship, graphLayout)
-          * (0.22 + choice.distanceRatio)
-          * structuralCost,
-      };
-    };
-
-    const adjustOrbitTarget = (candidate, strength) => {
-      const parentId = graphLayout.orbitParents?.get(candidate.moving.id);
-      if (!parentId) return;
-      const parent = particles.get(parentId);
-      if (!parent) return;
-      const parentCenter = centerOf(parent);
-      const movingCenter = centerOf(candidate.moving);
-      const radialX = movingCenter.x - parentCenter.x;
-      const radialY = movingCenter.y - parentCenter.y;
-      const radius = Math.max(1, Math.hypot(radialX, radialY));
-      const tangent = { x: -radialY / radius, y: radialX / radius };
-      const tangentDirection = candidate.direction.x * tangent.x + candidate.direction.y * tangent.y;
-      if (Math.abs(tangentDirection) < 0.08) return;
-      const angleKey = `${parentId}\u0000${candidate.moving.id}`;
-      const currentAngle = graphLayout.orbitAngles?.get(angleKey);
-      if (!Number.isFinite(currentAngle)) return;
-      graphLayout.orbitAngles.set(angleKey, currentAngle + tangentDirection * strength * 0.012);
-    };
-
-    const applyCrossingPenalties = () => {
-      const crossings = crossingPairs(activeRelationships(), (nodeId) => {
-        const particle = particles.get(nodeId);
-        return particle ? centerOf(particle) : null;
-      });
-      crossings.slice(0, MAX_CROSSINGS_PER_PASS).forEach(({ first, second, intersection }) => {
-        const firstCandidate = crossingCandidate(first, intersection.firstRatio, second);
-        const secondCandidate = crossingCandidate(second, intersection.secondRatio, first);
-        const candidate = !firstCandidate ? secondCandidate
-          : !secondCandidate ? firstCandidate
-            : firstCandidate.cost <= secondCandidate.cost ? firstCandidate : secondCandidate;
-        if (!candidate) return;
-        const strength = CROSSING_FORCE * (0.42 + intersection.angleFactor * 0.58);
-        addForce(candidate.moving, candidate.direction.x * strength, candidate.direction.y * strength);
-        addForce(candidate.fixed, -candidate.direction.x * strength * 0.12, -candidate.direction.y * strength * 0.12);
-        adjustOrbitTarget(candidate, strength);
-      });
-      return crossings.length;
-    };
+    let lastFrameTime = null;
 
     function tick(iterations = 1) {
       let changed = false;
       for (let iteration = 0; iteration < iterations; iteration += 1) {
-        const particleList = [...particles.values()].filter((particle) => (
-          activeNodeIds === null || activeNodeIds.has(particle.id)
-        ));
-        const anyPinned = particleList.some((particle) => particle.pinned);
-        if (!anyPinned && alpha < 0.002) break;
-
-        for (let leftIndex = 0; leftIndex < particleList.length; leftIndex += 1) {
-          const left = particleList[leftIndex];
-          const leftCenter = centerOf(left);
-          for (let rightIndex = leftIndex + 1; rightIndex < particleList.length; rightIndex += 1) {
-            const right = particleList[rightIndex];
-            const rightCenter = centerOf(right);
-            let dx = rightCenter.x - leftCenter.x;
-            let dy = rightCenter.y - leftCenter.y;
-            let distanceSquared = dx * dx + dy * dy;
-            if (distanceSquared < 1) {
-              dx = left.id.localeCompare(right.id) <= 0 ? 1 : -1;
-              dy = 0.35;
-              distanceSquared = dx * dx + dy * dy;
-            }
-            const distance = Math.sqrt(distanceSquared);
-            const hierarchyDepth = graphLayout.hierarchyDepths?.get(left.id)?.get(right.id)
-              || graphLayout.hierarchyDepths?.get(right.id)?.get(left.id)
-              || 0;
-            // Related nodes still need meaningful personal space. A square-root
-            // falloff keeps ROOT from overpowering an entire branch, while no
-            // longer making grandchildren almost invisible to their ancestor.
-            const ancestryFactor = hierarchyDepth
-              ? hierarchyDepth === 1
-                ? 0.34
-                : Math.max(0.24, 0.59 / Math.sqrt(hierarchyDepth))
-              : 1;
-            const leftCharge = hierarchyDepth ? 1 + (left.chargeScale - 1) * 0.2 : left.chargeScale;
-            const rightCharge = hierarchyDepth ? 1 + (right.chargeScale - 1) * 0.2 : right.chargeScale;
-            const repulsion = Math.min(
-              4.2,
-              65000 * Math.sqrt(leftCharge * rightCharge) * ancestryFactor / distanceSquared,
-            );
-            const fx = dx / distance * repulsion;
-            const fy = dy / distance * repulsion;
-            addForce(left, -fx, -fy);
-            addForce(right, fx, fy);
-
-            const minimumDistance = left.radius + right.radius + 64;
-            if (distance < minimumDistance) {
-              const push = (minimumDistance - distance) * 0.075;
-              const pushX = dx / distance * push;
-              const pushY = dy / distance * push;
-              addForce(left, -pushX, -pushY);
-              addForce(right, pushX, pushY);
-            }
-          }
-        }
-
-        activeRelationships().forEach((relationship) => {
-          const source = particles.get(relationship.source);
-          const target = particles.get(relationship.target);
-          const sourceCenter = centerOf(source);
-          const targetCenter = centerOf(target);
-          const dx = targetCenter.x - sourceCenter.x;
-          const dy = targetCenter.y - sourceCenter.y;
-          const distance = Math.max(1, Math.hypot(dx, dy));
-          const sourceSize = graphLayout.nodeSizes.get(relationship.source);
-          const desired = relationship.endUp === "REPLACE"
-            ? REPLACE_DISTANCE
-            : sourceSize?.clusterRadius || BASE_CLUSTER_RADIUS;
-          const strength = relationship.endUp === "REPLACE"
-            ? 0.006
-            : relationship.endUp === "MANAGEMENT" ? 0.0065 : 0.009;
-          const force = (distance - desired) * strength;
-          const fx = dx / distance * force;
-          const fy = dy / distance * force;
-          addForce(source, fx, fy);
-          addForce(target, -fx, -fy);
-
-          if (["GOTO", "MANAGEMENT"].includes(relationship.endUp)) {
-            const targetAngle = graphLayout.orbitAngles?.get(`${relationship.source}\u0000${relationship.target}`);
-            if (Number.isFinite(targetAngle)) {
-              const currentAngle = Math.atan2(dy, dx);
-              let angleDifference = targetAngle - currentAngle;
-              while (angleDifference > Math.PI) angleDifference -= Math.PI * 2;
-              while (angleDifference < -Math.PI) angleDifference += Math.PI * 2;
-              const tangentialForce = Math.max(-2.4, Math.min(2.4, angleDifference * distance * 0.0045));
-              const tangentX = -dy / distance * tangentialForce;
-              const tangentY = dx / distance * tangentialForce;
-              addForce(target, tangentX, tangentY);
-              addForce(source, -tangentX * 0.18, -tangentY * 0.18);
-            }
-          }
-        });
-
-        tickCount += 1;
-        if (tickCount % CROSSING_CHECK_INTERVAL === 0) applyCrossingPenalties();
-
-        particleList.forEach((particle) => {
-          const globalOffset = (graphLayout.nodeSizes.get(rootId)?.clusterRadius || BASE_CLUSTER_RADIUS) + 210;
-          const target = particle.global
-            ? { x: graphLayout.center.x - particle.radius, y: graphLayout.center.y - globalOffset - particle.radius }
-            : { x: graphLayout.center.x - particle.radius, y: graphLayout.center.y - particle.radius };
-          const structurallyConnected = connectedNodeIds.has(particle.id);
-          const anchorStrength = particle.global ? 0.018
-            : particle.id === rootId ? 0.055
-              : structurallyConnected ? 0.00008 : 0.00032;
-          addForce(particle, (target.x - particle.x) * anchorStrength, (target.y - particle.y) * anchorStrength);
-
+        particles.forEach((particle, nodeId) => {
+          const position = graphLayout.positions.get(nodeId);
           if (particle.pinned) {
             particle.x = particle.pinned.x;
             particle.y = particle.pinned.y;
             particle.vx = 0;
             particle.vy = 0;
           } else {
-            particle.vx *= 0.86;
-            particle.vy *= 0.86;
-            const speed = Math.hypot(particle.vx, particle.vy);
-            if (speed > 14) {
-              particle.vx = particle.vx / speed * 14;
-              particle.vy = particle.vy / speed * 14;
-            }
+            const anchor = anchors.get(nodeId);
+            particle.vx = (particle.vx + (anchor.x - particle.x) * 0.16) * 0.72;
+            particle.vy = (particle.vy + (anchor.y - particle.y) * 0.16) * 0.72;
             particle.x += particle.vx;
             particle.y += particle.vy;
+            if (Math.hypot(anchor.x - particle.x, anchor.y - particle.y) < 0.08
+              && Math.hypot(particle.vx, particle.vy) < 0.08) {
+              particle.x = anchor.x;
+              particle.y = anchor.y;
+              particle.vx = 0;
+              particle.vy = 0;
+            }
           }
-          if (!Number.isFinite(particle.x) || !Number.isFinite(particle.y)) {
-            particle.x = target.x;
-            particle.y = target.y;
-            particle.vx = 0;
-            particle.vy = 0;
-          }
-          const position = graphLayout.positions.get(particle.id);
           if (Math.abs(position.x - particle.x) > 0.001 || Math.abs(position.y - particle.y) > 0.001) changed = true;
           position.x = particle.x;
           position.y = particle.y;
         });
-        alpha = anyPinned ? Math.max(alpha * 0.992, 0.22) : alpha * 0.988;
       }
       return changed;
     }
@@ -772,9 +769,15 @@
       particle.y = y;
       particle.vx = 0;
       particle.vy = 0;
-      graphLayout.positions.get(String(nodeId)).x = x;
-      graphLayout.positions.get(String(nodeId)).y = y;
-      alpha = Math.max(alpha, 0.4);
+      const profile = motionProfiles.get(String(nodeId));
+      profile.blend = 0;
+      profile.offsetX = 0;
+      profile.offsetY = 0;
+      profile.velocityX = 0;
+      profile.velocityY = 0;
+      const position = graphLayout.positions.get(String(nodeId));
+      position.x = x;
+      position.y = y;
       return true;
     }
 
@@ -782,73 +785,172 @@
       const particle = particles.get(String(nodeId));
       if (!particle) return false;
       particle.pinned = null;
-      particle.vx = Math.max(-14, Math.min(14, velocityX / 60));
-      particle.vy = Math.max(-14, Math.min(14, velocityY / 60));
-      alpha = Math.max(alpha, 0.52);
+      particle.vx = Math.max(-18, Math.min(18, velocityX / 180));
+      particle.vy = Math.max(-18, Math.min(18, velocityY / 180));
+      const profile = motionProfiles.get(String(nodeId));
+      profile.blend = 0;
+      profile.offsetX = 0;
+      profile.offsetY = 0;
+      profile.velocityX = 0;
+      profile.velocityY = 0;
       return true;
     }
 
-    function reheat(value = 0.7) {
-      alpha = Math.max(alpha, value);
+    function frame(timeMs, motionStrength = 1) {
+      const timestamp = Number.isFinite(timeMs) ? timeMs : 0;
+      const elapsedSeconds = lastFrameTime === null
+        ? 1 / 60
+        : Math.max(0, Math.min(0.05, (timestamp - lastFrameTime) / 1000));
+      lastFrameTime = timestamp;
+      let changed = tick(1);
+      const strength = Math.max(0, Math.min(1, motionStrength));
+      const seconds = timestamp / 1000;
+      const hasPinnedParticle = [...particles.values()].some((particle) => Boolean(particle.pinned));
+      particles.forEach((particle, nodeId) => {
+        const profile = motionProfiles.get(nodeId);
+        if (particle.pinned || strength === 0) {
+          profile.offsetX = 0;
+          profile.offsetY = 0;
+          profile.velocityX = 0;
+          profile.velocityY = 0;
+          return;
+        }
+        profile.blend = Math.min(1, Math.max(
+          hasPinnedParticle ? 0.55 : 0,
+          profile.blend + elapsedSeconds / 0.7,
+        ));
+        const targetX = Math.sin(seconds * Math.PI * 2 / profile.periodX + profile.phaseX)
+          * IDLE_MOTION_X * profile.amplitude * profile.blend * strength;
+        const targetY = Math.cos(seconds * Math.PI * 2 / profile.periodY + profile.phaseY)
+          * IDLE_MOTION_Y * profile.amplitude * profile.blend * strength;
+        profile.forceX = (targetX - profile.offsetX) * MOTION_ANCHOR_SPRING;
+        profile.forceY = (targetY - profile.offsetY) * MOTION_ANCHOR_SPRING;
+      });
+      connectionPairs.forEach(([sourceId, targetId]) => {
+        const sourceParticle = particles.get(sourceId);
+        const targetParticle = particles.get(targetId);
+        const source = motionProfiles.get(sourceId);
+        const target = motionProfiles.get(targetId);
+        if (strength === 0) return;
+        const sourceAnchor = anchors.get(sourceId);
+        const targetAnchor = anchors.get(targetId);
+        const sourceDisplacementX = sourceParticle.x - sourceAnchor.x + source.offsetX;
+        const sourceDisplacementY = sourceParticle.y - sourceAnchor.y + source.offsetY;
+        const targetDisplacementX = targetParticle.x - targetAnchor.x + target.offsetX;
+        const targetDisplacementY = targetParticle.y - targetAnchor.y + target.offsetY;
+        const springX = (targetDisplacementX - sourceDisplacementX) * LINK_OFFSET_SPRING * strength;
+        const springY = (targetDisplacementY - sourceDisplacementY) * LINK_OFFSET_SPRING * strength;
+        if (!sourceParticle.pinned) {
+          source.forceX += springX;
+          source.forceY += springY;
+        }
+        if (!targetParticle.pinned) {
+          target.forceX -= springX;
+          target.forceY -= springY;
+        }
+      });
+      const applyRepulsion = (firstId, secondId) => {
+        const firstParticle = particles.get(firstId);
+        const secondParticle = particles.get(secondId);
+        const first = motionProfiles.get(firstId);
+        const second = motionProfiles.get(secondId);
+        if (strength === 0) return;
+        const firstRadius = nodeRadius(graphLayout, firstId);
+        const secondRadius = nodeRadius(graphLayout, secondId);
+        let deltaX = secondParticle.x + second.offsetX + secondRadius
+          - firstParticle.x - first.offsetX - firstRadius;
+        let deltaY = secondParticle.y + second.offsetY + secondRadius
+          - firstParticle.y - first.offsetY - firstRadius;
+        let distance = Math.hypot(deltaX, deltaY);
+        if (distance < 0.001) {
+          const angle = stableUnit(`${firstId}:${secondId}`, "repulsion") * Math.PI * 2;
+          deltaX = Math.cos(angle);
+          deltaY = Math.sin(angle);
+          distance = 1;
+        }
+        const proximity = Math.max(0, 1 - distance / LOCAL_FORCE_RANGE);
+        if (proximity === 0) return;
+        const force = proximity * proximity * LOCAL_REPULSION * strength;
+        const forceX = deltaX / distance * force;
+        const forceY = deltaY / distance * force;
+        if (!firstParticle.pinned) {
+          first.forceX -= forceX;
+          first.forceY -= forceY;
+        }
+        if (!secondParticle.pinned) {
+          second.forceX += forceX;
+          second.forceY += forceY;
+        }
+      };
+      repulsionPairs.forEach(([firstId, secondId]) => applyRepulsion(firstId, secondId));
+      if (hasPinnedParticle) {
+        const dynamicRepulsionKeys = new Set();
+        particles.forEach((particle, nodeId) => {
+          if (!particle.pinned) return;
+          particles.forEach((otherParticle, otherId) => {
+            if (nodeId === otherId) return;
+            const pair = [nodeId, otherId].sort();
+            const key = `${pair[0]}\u0000${pair[1]}`;
+            if (repulsionKeys.has(key) || dynamicRepulsionKeys.has(key)) return;
+            dynamicRepulsionKeys.add(key);
+            applyRepulsion(pair[0], pair[1]);
+          });
+        });
+      }
+      const damping = Math.exp(-MOTION_DAMPING * elapsedSeconds);
+      particles.forEach((particle, nodeId) => {
+        const profile = motionProfiles.get(nodeId);
+        if (particle.pinned || strength === 0) return;
+        const forceBlend = profile.blend * strength;
+        profile.velocityX = (profile.velocityX + profile.forceX * forceBlend * elapsedSeconds) * damping;
+        profile.velocityY = (profile.velocityY + profile.forceY * forceBlend * elapsedSeconds) * damping;
+        profile.offsetX += profile.velocityX * elapsedSeconds;
+        profile.offsetY += profile.velocityY * elapsedSeconds;
+        const displacement = Math.hypot(profile.offsetX, profile.offsetY);
+        if (displacement > MAX_IDLE_DISPLACEMENT) {
+          const scale = MAX_IDLE_DISPLACEMENT / displacement;
+          profile.offsetX *= scale;
+          profile.offsetY *= scale;
+          const outwardVelocity = profile.velocityX * profile.offsetX + profile.velocityY * profile.offsetY;
+          if (outwardVelocity > 0) {
+            const inverseSquaredLength = 1 / (MAX_IDLE_DISPLACEMENT * MAX_IDLE_DISPLACEMENT);
+            profile.velocityX -= outwardVelocity * profile.offsetX * inverseSquaredLength;
+            profile.velocityY -= outwardVelocity * profile.offsetY * inverseSquaredLength;
+          }
+        }
+        const position = graphLayout.positions.get(nodeId);
+        const nextX = particle.x + profile.offsetX;
+        const nextY = particle.y + profile.offsetY;
+        if (Math.abs(position.x - nextX) > 0.001 || Math.abs(position.y - nextY) > 0.001) changed = true;
+        position.x = nextX;
+        position.y = nextY;
+      });
+      return changed;
     }
 
     function isActive() {
-      return alpha >= 0.002 || [...particles.values()].some((particle) => (
-        particle.pinned && (activeNodeIds === null || activeNodeIds.has(particle.id))
-      ));
-    }
-
-    function settleGrowth(stageBudget = 132, finalTicks = 160) {
-      if (growthSettled) return { stageCount: graphLayout.growthStages?.length || 0 };
-      const stages = graphLayout.growthStages || [];
-      if (!stages.length) {
-        activeNodeIds = null;
-        tick(finalTicks);
-        growthSettled = true;
-        return { stageCount: 0 };
-      }
-
-      activeNodeIds = new Set();
-      const growingStages = Math.max(1, stages.length - 1);
-      const ticksPerStage = Math.max(2, Math.min(24, Math.floor(stageBudget / growingStages)));
-      stages.forEach((stage, stageIndex) => {
-        stage.nodeIds.forEach((nodeId) => {
-          const particle = particles.get(nodeId);
-          if (!particle) return;
-          const parentId = graphLayout.orbitParents?.get(nodeId);
-          const parent = parentId ? particles.get(parentId) : null;
-          if (parent && activeNodeIds.has(parentId)) {
-            const parentCenter = centerOf(parent);
-            const angle = graphLayout.orbitAngles?.get(`${parentId}\u0000${nodeId}`) || 0;
-            const birthDistance = Math.max(78, parent.radius + particle.radius + 34);
-            particle.x = parentCenter.x + Math.cos(angle) * birthDistance - particle.radius;
-            particle.y = parentCenter.y + Math.sin(angle) * birthDistance - particle.radius;
-          }
-          particle.vx = 0;
-          particle.vy = 0;
-          const position = graphLayout.positions.get(nodeId);
-          position.x = particle.x;
-          position.y = particle.y;
-          activeNodeIds.add(nodeId);
-        });
-        if (stageIndex === 0) return;
-        alpha = Math.max(alpha, stage.kind === "replace" ? 0.68 : 0.76);
-        tick(ticksPerStage);
+      return [...particles].some(([nodeId, particle]) => {
+        if (particle.pinned) return true;
+        const anchor = anchors.get(nodeId);
+        return Math.hypot(anchor.x - particle.x, anchor.y - particle.y) >= 0.08
+          || Math.hypot(particle.vx, particle.vy) >= 0.08;
       });
-
-      activeNodeIds = null;
-      alpha = Math.max(alpha, 0.92);
-      tick(finalTicks);
-      growthSettled = true;
-      return { stageCount: stages.length, ticksPerStage };
     }
 
-    const crossingCount = () => crossingPairs(physicalRelationships, (nodeId) => {
-      const particle = particles.get(nodeId);
-      return particle ? centerOf(particle) : null;
-    }).length;
-
-    return { crossingCount, isActive, particles, pin, reheat, release, settleGrowth, tick };
+    const crossingCount = () => countEdgeCrossings(graphRelationships, graphLayout);
+    return {
+      anchors,
+      connectionPairs,
+      crossingCount,
+      frame,
+      isActive,
+      motionProfiles,
+      particles,
+      pin,
+      release,
+      repulsionPairs,
+      tick,
+    };
   }
 
   function nodeRadius(graphLayout, nodeId) {
@@ -870,17 +972,11 @@
       minimumY = Math.min(minimumY, center.y - radius);
       maximumY = Math.max(maximumY, center.y + radius + 30);
     });
-    const centerPosition = graphLayout.positions.get(String(graphLayout.centerNodeId || ""));
-    const viewCenter = centerPosition
-      ? nodeCenter(centerPosition, graphLayout, graphLayout.centerNodeId)
-      : { x: (minimumX + maximumX) / 2, y: (minimumY + maximumY) / 2 };
-    const halfWidth = Math.max(380, viewCenter.x - minimumX, maximumX - viewCenter.x) + padding;
-    const halfHeight = Math.max(240, viewCenter.y - minimumY, maximumY - viewCenter.y) + padding;
     return {
-      x: viewCenter.x - halfWidth,
-      y: viewCenter.y - halfHeight,
-      width: halfWidth * 2,
-      height: halfHeight * 2,
+      x: minimumX - padding,
+      y: minimumY - padding,
+      width: Math.max(760, maximumX - minimumX + padding * 2),
+      height: Math.max(480, maximumY - minimumY + padding * 2),
     };
   }
 
@@ -899,50 +995,53 @@
     const end = targetCenter;
     const route = graphLayout.routes?.get(relationshipKey(relationship));
     const midpoint = { x: (start.x + end.x) / 2, y: (start.y + end.y) / 2 };
-    if (route?.kind === "goto-cycle") {
+    const localCurve = (bend, lane = stablePairLane(relationship)) => {
       const dx = end.x - start.x;
       const dy = end.y - start.y;
       const distance = Math.max(1, Math.hypot(dx, dy));
+      const normal = { x: -dy / distance * lane, y: dx / distance * lane };
       return {
         start,
         end,
-        control: { x: midpoint.x - dy / distance * 96, y: midpoint.y + dx / distance * 96 },
+        control1: {
+          x: start.x + dx * 0.34 + normal.x * bend,
+          y: start.y + dy * 0.34 + normal.y * bend,
+        },
+        control2: {
+          x: start.x + dx * 0.66 + normal.x * bend,
+          y: start.y + dy * 0.66 + normal.y * bend,
+        },
       };
-    }
+    };
     if (route?.kind === "replace-local") {
-      const center = graphLayout.center || { x: 0, y: 0 };
-      let dx = midpoint.x - center.x;
-      let dy = midpoint.y - center.y;
-      let distance = Math.hypot(dx, dy);
-      if (distance < 1) {
-        dx = -(end.y - start.y);
-        dy = end.x - start.x;
-        distance = Math.max(1, Math.hypot(dx, dy));
-      }
-      return {
-        start,
-        end,
-        control: { x: midpoint.x + dx / distance * 38, y: midpoint.y + dy / distance * 38 },
-      };
-    }
-    if (route?.kind === "cross" || route?.kind === "context") {
       const dx = end.x - start.x;
       const dy = end.y - start.y;
       const distance = Math.max(1, Math.hypot(dx, dy));
-      const bend = route.kind === "context" ? 68 : 44;
-      const normal = { x: -dy / distance, y: dx / distance };
-      const center = graphLayout.center || { x: 0, y: 0 };
-      const outwardProjection = (midpoint.x - center.x) * normal.x + (midpoint.y - center.y) * normal.y;
-      const lane = Math.abs(outwardProjection) > 1
-        ? Math.sign(outwardProjection)
-        : route.lane || 1;
+      const bend = Math.min(58, 24 + distance * 0.08);
+      return localCurve(bend);
+    }
+    const sameDepthGoto = relationship.endUp === "GOTO"
+      && graphLayout.levels?.get(relationship.source) === graphLayout.levels?.get(relationship.target);
+    if (sameDepthGoto) {
+      return localCurve(route?.kind === "goto-cycle" ? 72 : 38);
+    }
+    if (route?.kind === "goto-cycle" || end.x <= start.x + 20) {
+      const lane = route?.lane || stableRouteLane(relationship);
+      const outerY = Math.min(start.y, end.y) - 118 - Math.abs(start.x - end.x) * 0.08;
       return {
         start,
         end,
-        control: { x: midpoint.x + normal.x * bend * lane, y: midpoint.y + normal.y * bend * lane },
+        control1: { x: start.x + 84 * lane, y: outerY },
+        control2: { x: end.x - 84 * lane, y: outerY },
       };
     }
-    return { start, end, control: null };
+    const laneOffset = route?.kind === "cross" ? (route.lane || 1) * 46 : 0;
+    return {
+      start,
+      end,
+      control1: { x: midpoint.x, y: start.y + laneOffset },
+      control2: { x: midpoint.x, y: end.y + laneOffset },
+    };
   }
 
   function edgePath(source, target, graphLayout, index, endUp, relationship = null) {
@@ -954,8 +1053,10 @@
       return `M ${center.x} ${center.y} C ${loopX} ${center.y - 70}, ${loopX} ${center.y + 70}, ${center.x} ${center.y}`;
     }
     const geometry = curveGeometry(source, target, graphLayout, currentRelationship);
-    if (!geometry.control) return `M ${geometry.start.x} ${geometry.start.y} L ${geometry.end.x} ${geometry.end.y}`;
-    return `M ${geometry.start.x} ${geometry.start.y} Q ${geometry.control.x} ${geometry.control.y} ${geometry.end.x} ${geometry.end.y}`;
+    if (!geometry.control1 || !geometry.control2) {
+      return `M ${geometry.start.x} ${geometry.start.y} L ${geometry.end.x} ${geometry.end.y}`;
+    }
+    return `M ${geometry.start.x} ${geometry.start.y} C ${geometry.control1.x} ${geometry.control1.y}, ${geometry.control2.x} ${geometry.control2.y}, ${geometry.end.x} ${geometry.end.y}`;
   }
 
   function arrowPolygon(tip, direction) {
@@ -998,12 +1099,12 @@
     const geometry = curveGeometry(source, target, graphLayout, currentRelationship);
     const forwardTangent = atStart
       ? {
-          x: (geometry.control?.x ?? geometry.end.x) - geometry.start.x,
-          y: (geometry.control?.y ?? geometry.end.y) - geometry.start.y,
+          x: (geometry.control1?.x ?? geometry.end.x) - geometry.start.x,
+          y: (geometry.control1?.y ?? geometry.end.y) - geometry.start.y,
         }
       : {
-          x: geometry.end.x - (geometry.control?.x ?? geometry.start.x),
-          y: geometry.end.y - (geometry.control?.y ?? geometry.start.y),
+          x: geometry.end.x - (geometry.control2?.x ?? geometry.start.x),
+          y: geometry.end.y - (geometry.control2?.y ?? geometry.start.y),
         };
     const tangentLength = Math.max(1, Math.hypot(forwardTangent.x, forwardTangent.y));
     const unit = { x: forwardTangent.x / tangentLength, y: forwardTangent.y / tangentLength };
@@ -1022,7 +1123,7 @@
 
   return {
     countEdgeCrossings,
-    createForceSimulation,
+    createLayoutController,
     edgeArrowPoints,
     edgePath,
     layout,

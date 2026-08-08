@@ -185,12 +185,13 @@ Runtime 以獨立 `scene_enabled_options` 保存受控目標，不污染 Stats�
 - CSS 的設計 token 與瀏覽器基礎規則已分離至 `css/tokens.css`、`css/base.css`；其餘工作區樣式仍在 `styles.css` 漸進整理，不在搬移時改變視覺。
 - 節點刪除引用檢查與 `.scene-node-trash/` 可復原區。
 - 專案引用檢查。
-- 依 `GOTO / REPLACE / Next Node` 產生唯讀有向關聯圖，採可互動的階層感知即時力導向布局。只顯示實際 Scene Nodes；GLOBAL 作用域與 Global Event 邊不進入圖面或力場。節點是只顯示 Node Name 的不透明白底圓點，不顯示技術 ID。連線路徑統一為圓心到圓心，手工計算的 SVG polygon 箭頭尖端停在接收端圓周；箭頭隨圖面縮放，Node Name 依 viewBox／viewport 比例反向補償並維持近似固定的螢幕字級。完整 Event／Trigger／End up 保留在 SVG tooltip。
-- 設定的 ROOT 是預設力場中心；GOTO／管理關係提供父節點局部圓環，REPLACE 提供同層柔性關係，多父節點共同拉動共享目標。節點半徑與斥力以 cycle-safe 唯一後代遍歷繼承空間需求，深層後代逐層衰減並以 `log2` 壓縮；半徑增幅係數為 3.25、上限為 32 graph units，使 hub 可辨識但不過度放大。
-- 初始佈局不是把全部節點同時投入力場。`layout()` 以固定名稱／ID 排序建立 `growthStages`：ROOT 先成立，從已啟用節點逐層長出主要 GOTO 骨架，該輪可達的管理節點再以 REPLACE 階段加入；由 REPLACE 節點延伸的 GOTO 分支會在下一輪繼續生長，最後才加入無法從 ROOT 推導的 detached 節點。完整拓撲會預先保留每個父層的 `orbitAngles`，而 `settleGrowth()` 讓新節點從父節點附近起步、以固定 tick budget 局部收斂，最後再啟用全部關係做全局鬆弛。這只是 deterministic warm start；畫面仍直接顯示收斂結果，拖曳後沿用原本可中斷的即時力場。
-- 逐幀兩兩斥力維持 O(n²) 且採距離平方反比。直接父子保留較低祖先係數並由彈簧維持距離；第二層以上改以較慢的平方根衰減且保留 0.24 下限，避免 ROOT 與孫節點幾乎失去斥力，同時不讓 ROOT 把局部群集全推往外側。從 ROOT 做 cycle-safe BFS 建立單一 `orbitChildren` 主樹；GOTO／管理關係只有主要父來源以 `orbitAngles` 施加有上限的弱切向校正，多父來源的其他邊只保留徑向 spring。
-- 線路清晰度採 crossing-aware 弱力而不是全線段互斥：以圓心直線作結構交叉近似，排除共用端點、自環與 Global 邊，先用 bounding-box sweep 刪除不可能相交的組合，每 3 tick 最多處理 96 個實際交叉。處理時依 tree、GOTO Cycle、REPLACE、cross、management 的優先度選擇成本最低的端點，沿另一條線的法向移動並緩慢調整該節點的 `orbitAngles` 目標；ROOT、hub 與拖曳中 pinned 節點有額外保護。非樹狀 cross route 的 quadratic control point 固定彎向圖面中心外側，中央重疊時才使用 stable lane。`countEdgeCrossings()` 與 SVG `data-edge-crossings` 提供測試／診斷值，不影響專案資料。
-- 模擬座標不 clamp 於初始 `width × height`；空白平移不限邊界，縮放寬度安全範圍為 120–250000 graph units，重新置中保留 zoom。節點可用 Pointer Events 直接拖曳並在放開後重新平衡；`prefers-reduced-motion` 使用有限次數靜態收斂。雙向 REPLACE 合成一條雙箭頭虛線，雙向 GOTO 保留兩條高對比反向弧線；管理邊遞迴追蹤完整 REPLACE 鏈且不寫入 Parent Schema。節點 hover／鍵盤 focus、搜尋降噪、縮放、無邊平移與節點切換行為維持不變。
+- 依 `GOTO / REPLACE / Next Node` 產生唯讀有向關聯圖，採 deterministic Stack 深度布局。只顯示實際 Scene Nodes；GLOBAL 作用域與 Global Event 邊不進入圖面。ROOT 位於最左側起點欄，主要 GOTO 每前進一次就進入右側下一個 Stack 深度欄；垂直泳道以穩定 Name／ID 排序及子樹 span 配置，讓父節點對齊其分支範圍。
+- `layout()` 先以 union-find 把 REPLACE 關係折疊成同深度家族，再從 ROOT 對 component graph 做 cycle-safe BFS。正式深度成立後，所有同深度 GOTO 另建立無向局部關係群：以群內 outgoing 數量最多、再依穩定 Name／ID 排序的 component 為 anchor，BFS rank 映射至總寬 140 graph units 的 local progression，讓同深度 cross／Cycle 使用短局部 route。多個 GOTO 父來源只選第一條作為位置的主要樹邊，其餘保留 cross route；跨正式深度的 GOTO Cycle／回邊仍使用外側 cubic route，不會無限增加深度。無法從 ROOT 到達的 components 另放在下方 detached 區並保留自己的局部深度。
+- REPLACE 家族內以 GOTO entry 為 rank 0，沿 REPLACE 無向鄰接做穩定 BFS；rank parity 映射至深度基準左右各 80 graph units 的兩個 micro lanes。鏈式 A → B → C 因而形成後—前—後並同時擁有 forward／backward arrows；奇數循環無法二分時穩定共用一側。component local progression 與 REPLACE micro lanes 的合成偏移仍受正式 `COLUMN_GAP = 360` 約束，不改變 `levels`。
+- 節點半徑仍以 cycle-safe 唯一後代遍歷繼承空間需求，深層後代逐層衰減並以 `log2` 壓縮；半徑增幅係數為 3.25、上限為 32 graph units，使 hub 可辨識但不過度放大。這項 metric 不再參與座標計算，因此相同資料與 ROOT 立即得到相同位置，沒有初始收斂或持續力場。
+- 主幹、cross、REPLACE、management 與 Cycle 使用不同的 deterministic cubic routes；同深度 GOTO／Cycle 與 REPLACE 都依來源—目標向量建立有界局部法向彎曲，只有跨正式深度的回邊才繞向外側。所有路徑仍由來源圓心連到目標圓心，手工 SVG polygon 箭頭尖端停在接收端圓周；箭頭隨圖面縮放，Node Name 依 viewBox／viewport 比例反向補償。背景不渲染深度色帶、欄名或左上圖例。`countEdgeCrossings()` 與 SVG `data-edge-crossings` 保留為診斷值，不再驅動節點移動。
+- 關聯圖開啟時以 deterministic reveal step 從 ROOT 沿正式深度與局部 rank 依序延展連線、彈出節點；任一 pointer／wheel／keyboard 操作可立即完成進場。進場後 `createLayoutController().frame()` 以 Node ID 決定的呼吸偏移作為強錨點目標，只讓真實 GOTO／REPLACE 配對以弱彈簧耦合 offset，並讓結構錨點相距 210 graph units 內的預先計算配對產生對稱斥力；MANAGEMENT／Global 關係不參與。拖曳時 pinned 節點的實際 anchor displacement 會加入彈簧差值，且 pinned 節點會與所有目前靠近的節點動態檢查斥力；力只施加於未 pinned 端，確保被抓節點維持 1:1。每個未拖曳節點的總顯示偏移硬限制為 7 graph units，線段跟隨顯示位置，結構座標與穩定互動命中區不動。`prefers-reduced-motion` 會停用兩者；這不是力導向收斂，也不得重新影響布局、儲存或 crossing 診斷。
+- 空白平移不限邊界，縮放寬度安全範圍為 120–250000 graph units；初始畫面與圓形按鈕改為 fit 完整圖面。節點仍可用 Pointer Events 暫時拖離位置以查看線路；被抓節點緊貼游標，相連或靠近的其他節點只做有界視覺響應，放開後拖曳節點以阻尼控制器回到結構 slot，其他節點回復錨點附近的閒置物理，所有位置都不保存。雙向 REPLACE 合成一條雙箭頭虛線，雙向 GOTO 保留兩條高對比反向弧線；管理邊遞迴追蹤完整 REPLACE 鏈且不寫入 Parent Schema。節點 hover／鍵盤 focus、搜尋降噪、縮放、無邊平移與節點切換行為維持不變。
 - 編輯器快捷鍵與自訂設定。
 - 編輯器設定透過 `/api/editor-settings` 寫入專案根目錄 `.scene-node-editor/settings.json`，不可退回只依賴隨機連接埠來源的 `localStorage`。
 - 安裝到空白 Ren'Py 專案及原地更新。
@@ -296,7 +297,7 @@ EDITOR/static/js/workspaces/state_editor.js
   Stats 群組正規化、工作區分組與 Group → Stat 階層選單資料；不改變平面 Stat ID。
 
 EDITOR/static/js/workspaces/graph_model.js
-  關聯圖 GOTO／REPLACE／遞迴管理關係、雙向關係正規化、可逐幀驅動的力導向模擬、Cycle route 與 SVG edge path 的可測試資料邏輯。
+  關聯圖 GOTO／REPLACE／遞迴管理關係、雙向關係正規化、Stack 深度／同深度 GOTO local progression／REPLACE parity lanes／分支泳道布局、拖曳回位控制器、Cycle route 與 SVG edge path 的可測試資料邏輯。
 
 EDITOR/static/styles.css
   尚待逐步拆分的既有元件、工作區版面、響應式規則與互動狀態。
