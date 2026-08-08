@@ -1,6 +1,6 @@
 # Scene Node Editor 專案交接
 
-最後整理日期：2026-08-03
+最後整理日期：2026-08-08
 
 這份文件提供給新開啟的 Codex 對話。開始修改前，先閱讀本文件及「規格來源」列出的文件，不要重新設計已經定案的遊戲架構。
 
@@ -424,6 +424,8 @@ UI 變更必須用瀏覽器實際操作，不只檢查靜態畫面。至少確�
 - 編輯器 UX 任務不得順便重設遊戲架構。
 - 資料格式改動必須同步考慮 Editor、Runtime、Installer、示範資料與測試。
 - 平行對話使用不同 worktree；同一工作目錄一次只由一個實作對話寫入。
+
+專案的 Codex 角色路由與 Antigravity worktree 交接流程記錄在 `docs/DEVELOPMENT_WORKFLOW.md`；外部實作者必須使用 `.codex/templates/implementation-brief.md`，並把 diff 與測試證據交回主控審查。
 
 ## 11. 尚可繼續進行的方向
 
