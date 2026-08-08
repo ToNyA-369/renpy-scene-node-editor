@@ -11,19 +11,29 @@ test("editor settings expose one canonical tab and shortcut registry", () => {
   assert.equal(settings.DEFAULT_SHORTCUTS.tabGraph, "mod+6");
 });
 
-test("normalization clamps numeric values and preserves custom shortcuts", () => {
+test("normalization clamps numeric values and preserves language and custom shortcuts", () => {
   const result = settings.normalizeEditorSettings({
     version: 8,
+    language: "en",
     autosave: false,
     autosaveDelay: 20,
     gridSize: 999,
     shortcuts: { save: "mod+shift+s" },
   });
   assert.equal(result.version, settings.SETTINGS_VERSION);
+  assert.equal(result.language, "en");
   assert.equal(result.autosave, false);
   assert.equal(result.autosaveDelay, 200);
   assert.equal(result.gridSize, 160);
   assert.equal(result.shortcuts.save, "mod+shift+s");
+});
+
+test("invalid or missing language falls back to zh-Hant", () => {
+  const result1 = settings.normalizeEditorSettings({ language: "invalid-lang" });
+  assert.equal(result1.language, "zh-Hant");
+
+  const result2 = settings.normalizeEditorSettings({});
+  assert.equal(result2.language, "zh-Hant");
 });
 
 test("legacy Screen and Options-only shortcuts are removed", () => {
@@ -46,6 +56,8 @@ test("legacy Screen and Options-only shortcuts are removed", () => {
 
 test("invalid settings fall back to a complete safe value", () => {
   const result = settings.normalizeEditorSettings([]);
+  assert.equal(result.version, 9);
+  assert.equal(result.language, "zh-Hant");
   assert.equal(result.autosave, true);
   assert.equal(result.autosaveDelay, 700);
   assert.deepEqual(result.shortcuts, { ...settings.DEFAULT_SHORTCUTS });

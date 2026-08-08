@@ -186,7 +186,7 @@ GOTO 使用實線，REPLACE 使用同色虛線；所有連線路徑仍由節點�
 
 - Editor 預設自動儲存；較舊的儲存回應不會覆蓋較新的修改，切換節點或分頁前會完成目前待處理寫入。
 - 階層下拉選單可用 `↑`／`↓` 巡覽、`→` 進入子層、`←` 返回父層、Enter 選取及 Esc 關閉。
-- 快捷鍵與 Editor 設定存於專案根目錄 `.scene-node-editor/settings.json`。
+- 快捷鍵與 Editor 設定存於專案根目錄 `.scene-node-editor/settings.json`；支援繁體中文（`zh-Hant`）與英文（`en`）介面語言切換。切換語言時若有未儲存的變更或儲存失敗，系統會予以擋下、保持原語言並提示錯誤，確保創作者內容不會遺失。
 - 重新執行 Installer 只更新受管理 Editor／Runtime。
 - 刪除的節點移至 `.scene-node-trash/`，不會由 Ren'Py 載入。
 

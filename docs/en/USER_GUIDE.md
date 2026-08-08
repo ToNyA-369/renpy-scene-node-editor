@@ -186,7 +186,7 @@ Implement systems that are not data-driven by the editor—such as inventory, ca
 
 - Autosave is enabled by default. Older save responses cannot overwrite newer edits, and the current pending write finishes before node or tab switches.
 - Nested menus support Up/Down navigation, Right to enter a submenu, Left to return, Enter to select, and Escape to close.
-- Shortcuts and editor settings live in `.scene-node-editor/settings.json` at the project root.
+- Shortcuts and editor settings live in `.scene-node-editor/settings.json` at the project root. The UI supports switching between Traditional Chinese (`zh-Hant`) and English (`en`). Changing language flushes pending project changes; if unsaved changes exist while autosave is disabled or if flushing/settings save fails, the language change is blocked and reverted without reloading to preserve project data.
 - Re-running the installer updates only managed Editor / Runtime files.
 - Deleted nodes move to `.scene-node-trash/`, outside Ren'Py's game scan.
 

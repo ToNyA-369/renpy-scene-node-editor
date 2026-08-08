@@ -88,7 +88,7 @@ async function reloadAndWaitForProject(page) {
   ));
   await page.reload();
   await projectResponse;
-  await expect(page.getByRole("status")).toHaveText("已同步");
+  await expect(page.getByRole("status")).toHaveText(/^(已同步|Synced)$/);
 }
 
 test.beforeAll(async () => {
@@ -586,5 +586,207 @@ test("critical editor interactions survive reload without browser errors", async
   await page.getByRole("button", { name: /DATA Options 綜合測試/ }).click();
   await expect(page.locator('select[data-option-path="Availability"]')).toHaveValue("CONTROLLED");
 
+  // Verify English language switch, persistence, and restore Traditional Chinese
+  await page.evaluate(() => document.querySelector("#settingsButton")?.click());
+  await expect(page.locator("#settingsDialog")).toBeVisible();
+  const editorLanguageSelect = page.locator("#editorLanguage");
+  await expect(editorLanguageSelect).toHaveValue("zh-Hant");
+
+  const settingsSaveResponse = page.waitForResponse((candidate) => (
+    candidate.url().endsWith("/api/editor-settings")
+    && candidate.request().method() === "PUT"
+    && candidate.ok()
+  ));
+  await editorLanguageSelect.selectOption("en", { force: true });
+  await settingsSaveResponse;
+  await page.waitForLoadState("networkidle");
+
+  await expect(page.locator("html")).toHaveAttribute("lang", "en");
+  await expect(page.getByRole("button", { name: "Node", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: /^Events / })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Options", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Content", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "State", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Graph", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: /^Validation / })).toBeVisible();
+  await expect(page.locator("#nodeSearch")).toHaveAttribute("placeholder", "Search nodes");
+
+  await reloadAndWaitForProject(page);
+  await expect(page.locator("html")).toHaveAttribute("lang", "en");
+  await expect(page.getByRole("button", { name: "Node", exact: true })).toBeVisible();
+
+  await page.evaluate(() => document.querySelector("#settingsButton")?.click());
+  await expect(page.locator("#settingsDialog")).toBeVisible();
+  const langSelectEn = page.locator("#editorLanguage");
+  await expect(langSelectEn).toHaveValue("en");
+
+  const restoreSaveResponse = page.waitForResponse((candidate) => (
+    candidate.url().endsWith("/api/editor-settings")
+    && candidate.request().method() === "PUT"
+    && candidate.ok()
+  ));
+  await langSelectEn.selectOption("zh-Hant", { force: true });
+  await restoreSaveResponse;
+  await page.waitForLoadState("networkidle");
+
+  await expect(page.locator("html")).toHaveAttribute("lang", "zh-Hant");
+  await expect(page.getByRole("button", { name: "節點", exact: true })).toBeVisible();
+
   expect(browserErrors, browserErrors.join("\n")).toEqual([]);
+});
+
+test("language switch handles failed persistence with atomic rollback and error toast", async ({ page }) => {
+  await page.setViewportSize({ width: 1680, height: 900 });
+  await page.goto(editorUrl);
+  await expect(page.getByRole("navigation", { name: "編輯器分頁" })).toBeVisible();
+  await expect(page.getByRole("status")).toHaveText(/^(已同步|Synced)$/);
+
+  const initialStorage = await page.evaluate(() => localStorage.getItem("scene-node-editor.settings"));
+
+  await page.route("**/api/editor-settings", async (route) => {
+    if (route.request().method() === "PUT") {
+      await route.fulfill({
+        status: 500,
+        contentType: "application/json",
+        body: JSON.stringify({ error: "Server write error" }),
+      });
+    } else {
+      await route.continue();
+    }
+  });
+
+  await page.evaluate(() => document.querySelector("#settingsButton")?.click());
+  await expect(page.locator("#settingsDialog")).toBeVisible();
+  const editorLanguageSelect = page.locator("#editorLanguage");
+  await editorLanguageSelect.selectOption("en", { force: true });
+
+  await expect(page.locator(".toast.error")).toHaveText(/編輯器設定未能儲存/);
+  await expect(editorLanguageSelect).toHaveValue("zh-Hant");
+  await expect(page.locator("html")).toHaveAttribute("lang", "zh-Hant");
+
+  const postFailureStorage = await page.evaluate(() => localStorage.getItem("scene-node-editor.settings"));
+  expect(postFailureStorage).toBe(initialStorage);
+
+  await page.unroute("**/api/editor-settings");
+});
+
+test("language switch refuses an unsaved draft while autosave is disabled", async ({ page }) => {
+  await page.goto(editorUrl);
+  await expect(page.getByRole("status")).toHaveText(/^(已同步|Synced)$/);
+  await page.evaluate(() => { window.__languageSwitchPage = "same-page"; });
+  await page.evaluate(() => document.querySelector("#settingsButton")?.click());
+  const settingsPut = page.waitForResponse((candidate) => (
+    candidate.url().endsWith("/api/editor-settings") && candidate.request().method() === "PUT" && candidate.ok()
+  ));
+  await page.locator("#autosaveEnabled").uncheck({ force: true });
+  await settingsPut;
+  await page.locator("#settingsDialog").evaluate((dialog) => dialog.close());
+
+  await page.locator('#nodeForm [name="Name"]').fill("Unsaved language guard");
+  await page.evaluate(() => document.querySelector("#settingsButton")?.click());
+  await page.locator("#editorLanguage").selectOption("en", { force: true });
+  await expect(page.locator(".toast.error")).toHaveText(/未儲存的變更/);
+  await expect(page.locator("#editorLanguage")).toHaveValue("zh-Hant");
+  await expect(page.locator("html")).toHaveAttribute("lang", "zh-Hant");
+  await expect(page.locator('#nodeForm [name="Name"]')).toHaveValue("Unsaved language guard");
+  await expect.poll(() => page.evaluate(() => window.__languageSwitchPage)).toBe("same-page");
+
+  await page.reload();
+  await expect(page.getByRole("navigation", { name: "編輯器分頁" })).toBeVisible();
+  await page.evaluate(() => document.querySelector("#settingsButton")?.click());
+  const restorePut = page.waitForResponse((candidate) => (
+    candidate.url().endsWith("/api/editor-settings") && candidate.request().method() === "PUT" && candidate.ok()
+  ));
+  await page.locator("#autosaveEnabled").check({ force: true });
+  await restorePut;
+});
+
+test("language switch stays put when flushing the current draft fails", async ({ page }) => {
+  await page.goto(editorUrl);
+  await expect(page.getByRole("status")).toHaveText(/^(已同步|Synced)$/);
+  await page.evaluate(() => { window.__languageSwitchPage = "same-page"; });
+  await page.route("**/api/node", async (route) => {
+    if (route.request().method() === "PUT") {
+      await route.fulfill({
+        status: 500,
+        contentType: "application/json",
+        body: JSON.stringify({ error: "Node write error" }),
+      });
+    } else {
+      await route.continue();
+    }
+  });
+
+  await page.locator('#nodeForm [name="Name"]').fill("Failed flush language guard");
+  await page.evaluate(() => document.querySelector("#settingsButton")?.click());
+  await page.locator("#editorLanguage").selectOption("en", { force: true });
+
+  await expect(page.locator(".toast.error").last()).toBeVisible();
+  await expect(page.locator("#editorLanguage")).toHaveValue("zh-Hant");
+  await expect(page.locator("html")).toHaveAttribute("lang", "zh-Hant");
+  await expect.poll(() => page.evaluate(() => window.__languageSwitchPage)).toBe("same-page");
+
+  await page.unroute("**/api/node");
+  await page.reload();
+});
+
+test("dynamic English surfaces render localized strings correctly across all workspaces", async ({ page }) => {
+  await page.setViewportSize({ width: 1680, height: 900 });
+  await page.goto(editorUrl);
+  await expect(page.getByRole("navigation", { name: "編輯器分頁" })).toBeVisible();
+  await expect(page.getByRole("status")).toHaveText(/^(已同步|Synced)$/);
+
+  await page.evaluate(() => document.querySelector("#settingsButton")?.click());
+  const editorLanguageSelect = page.locator("#editorLanguage");
+  const settingsSaveResponse = page.waitForResponse((candidate) => (
+    candidate.url().endsWith("/api/editor-settings") && candidate.request().method() === "PUT" && candidate.ok()
+  ));
+  await editorLanguageSelect.selectOption("en", { force: true });
+  await settingsSaveResponse;
+  await page.waitForLoadState("networkidle");
+
+  await page.getByRole("button", { name: "Node", exact: true }).click();
+  await expect(page.locator(".node-overview")).toBeVisible();
+  await expect(page.getByText("Node Connections")).toBeVisible();
+  await expect(page.getByText("Event Phases")).toBeVisible();
+
+  await page.getByRole("button", { name: /^Events/ }).click();
+  await expect(page.locator("#newEventButton")).toHaveAttribute("aria-label", "Add Event");
+  await expect(page.getByText("返回 DATA Options", { exact: true }).first()).toBeVisible();
+
+  await page.getByRole("button", { name: "Options", exact: true }).click();
+  await expect(page.locator(".option-element-sidebar")).toBeVisible();
+  await expect(page.locator('[data-add-option-element="TEXTBOX"]')).toHaveText("Text Box");
+  await expect(page.locator("#optionsPanel")).not.toContainText("不透明度");
+
+  await page.getByRole("button", { name: "Content", exact: true }).click();
+  await expect(page.locator(".content-workspace")).toBeVisible();
+  await expect(page.locator("#newContentButton")).toHaveAttribute("aria-label", "Add Content");
+
+  await page.getByRole("button", { name: "State", exact: true }).click();
+  await expect(page.locator("#addStatGroupButton")).toHaveAttribute("aria-label", "Add Stat Group");
+  await expect(page.locator("#addMemoryButton")).toHaveAttribute("aria-label", "Add Memory Bank");
+  await expect(page.locator('input[name="statName"][value="測試點數"]')).toBeVisible();
+
+  await page.getByRole("button", { name: "Graph", exact: true }).click();
+  await expect(page.locator("#graphSearch")).toHaveAttribute("placeholder", "Search nodes");
+  await expect(page.locator("#resetGraphView")).toHaveAttribute("aria-label", "Show full graph");
+
+  await page.getByRole("button", { name: /^Validation/ }).click();
+  await expect(page.getByRole("heading", { name: "Project Validation" })).toBeVisible();
+  await expect(page.locator("#runValidationButton")).toHaveText("Re-check");
+
+  await page.evaluate(() => document.querySelector("#newNodeButton")?.click());
+  await expect(page.locator("#nodeDialog")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Add Scene Node" })).toBeVisible();
+  await page.locator("#nodeDialog").evaluate((dialog) => dialog.close());
+
+  await page.evaluate(() => document.querySelector("#settingsButton")?.click());
+  const langSelectEn = page.locator("#editorLanguage");
+  const restoreSaveResponse = page.waitForResponse((candidate) => (
+    candidate.url().endsWith("/api/editor-settings") && candidate.request().method() === "PUT" && candidate.ok()
+  ));
+  await langSelectEn.selectOption("zh-Hant", { force: true });
+  await restoreSaveResponse;
+  await page.waitForLoadState("networkidle");
 });

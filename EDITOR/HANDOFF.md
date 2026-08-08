@@ -272,6 +272,9 @@ EDITOR/static/index.html
 EDITOR/static/app.js
   前端 composition root：狀態、各工作區渲染、Content 專用選單、跨模組協調、表單接線及 Options 畫布互動。
 
+EDITOR/static/js/core/i18n.js
+  前端國際化（i18n）字典與 `t()` 格式化函式，支援 `zh-Hant`（繁體中文）與 `en`（英文）雙語切換。
+
 EDITOR/static/js/core/api_client.js
   HTTP payload 序列化、NETWORK_ERROR／HTTP_ERROR 分類。
 

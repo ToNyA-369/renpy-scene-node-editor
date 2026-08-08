@@ -5,7 +5,7 @@
   if (typeof module === "object" && module.exports) module.exports = api;
   if (root) root.SceneEditorSettings = api;
 })(typeof globalThis !== "undefined" ? globalThis : this, () => {
-  const SETTINGS_VERSION = 8;
+  const SETTINGS_VERSION = 9;
   const DEFAULT_SHORTCUTS = Object.freeze({
     save: "mod+s", create: "mod+enter", sidebar: "mod+\\",
     cyclePrevious: "mod+shift+left", cycleNext: "mod+shift+right",
@@ -34,9 +34,15 @@
     return Number.isFinite(parsed) ? parsed : fallback;
   }
 
+  function normalizeLanguage(value) {
+    if (value === "en" || value === "zh-Hant") return value;
+    return "zh-Hant";
+  }
+
   function normalizeEditorSettings(saved = {}) {
     const fallback = {
       version: SETTINGS_VERSION,
+      language: "zh-Hant",
       autosave: true,
       autosaveDelay: 700,
       gridSize: 24,
@@ -80,6 +86,7 @@
       });
       return {
         version: SETTINGS_VERSION,
+        language: normalizeLanguage(saved.language),
         autosave: saved.autosave !== false,
         autosaveDelay: Math.max(200, numberValue(saved.autosaveDelay, fallback.autosaveDelay)),
         gridSize: Math.max(4, Math.min(160, numberValue(saved.gridSize, fallback.gridSize))),

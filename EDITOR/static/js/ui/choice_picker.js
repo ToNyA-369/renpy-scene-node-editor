@@ -114,7 +114,7 @@
     function selectedOptionLabel(select) {
       return select.selectedOptions?.[0]?.textContent?.trim()
         || select.options?.[select.selectedIndex]?.textContent?.trim()
-        || "尚未選擇";
+        || (typeof SceneI18n !== "undefined" ? SceneI18n.t("尚未選擇") : "尚未選擇");
     }
 
     function populateMenu(select, picker) {
@@ -262,7 +262,7 @@
       const menuId = generateId("select_menu");
       const fieldLabel = select.closest("label")?.querySelector("span")?.textContent?.trim();
       const settingLabel = select.closest(".setting-row")?.querySelector("strong")?.textContent?.trim();
-      const label = select.getAttribute("aria-label") || select.title || settingLabel || fieldLabel || "選擇項目";
+      const label = select.getAttribute("aria-label") || select.title || settingLabel || fieldLabel || (typeof SceneI18n !== "undefined" ? SceneI18n.t("選擇項目") : "選擇項目");
       const trigger = document.createElement("button");
       trigger.type = "button";
       trigger.className = "content-choice-trigger select-choice-trigger";

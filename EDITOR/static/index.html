@@ -14,22 +14,22 @@
     <aside class="sidebar" id="sidebar">
       <div class="sidebar-tools">
         <label class="search-field">
-          <span class="visually-hidden">搜尋節點</span>
-          <input id="nodeSearch" type="search" placeholder="搜尋節點">
+          <span class="visually-hidden" data-i18n="搜尋節點">搜尋節點</span>
+          <input id="nodeSearch" type="search" placeholder="搜尋節點" data-i18n-placeholder="搜尋節點">
         </label>
-        <button class="node-add-button" id="newNodeButton" type="button" title="新增節點" aria-label="新增節點">＋</button>
+        <button class="node-add-button" id="newNodeButton" type="button" title="新增節點" aria-label="新增節點" data-i18n-title="新增節點" data-i18n-aria-label="新增節點">＋</button>
       </div>
 
-      <nav class="node-list" id="nodeList" aria-label="Scene Node 列表"></nav>
+      <nav class="node-list" id="nodeList" aria-label="Scene Node 列表" data-i18n-aria-label="Scene Node 列表"></nav>
 
       <div class="sidebar-footer">
         <div class="project-identity">
-          <strong id="projectName">讀取專案中</strong>
-          <span id="projectSummary">0 個節點</span>
+          <strong id="projectName" data-i18n="讀取專案中">讀取專案中</strong>
+          <span id="projectSummary" data-i18n="0 個節點">0 個節點</span>
         </div>
         <div class="sidebar-footer-actions">
-          <button class="icon-button" id="refreshProject" type="button" title="重新掃描專案" aria-label="重新掃描專案">↻</button>
-          <button class="icon-button" id="settingsButton" type="button" title="編輯器設定" aria-label="編輯器設定">⚙</button>
+          <button class="icon-button" id="refreshProject" type="button" title="重新掃描專案" aria-label="重新掃描專案" data-i18n-title="重新掃描專案" data-i18n-aria-label="重新掃描專案">↻</button>
+          <button class="icon-button" id="settingsButton" type="button" title="編輯器設定" aria-label="編輯器設定" data-i18n-title="編輯器設定" data-i18n-aria-label="編輯器設定">⚙</button>
         </div>
       </div>
     </aside>
@@ -38,28 +38,28 @@
 
     <main class="main-area">
       <header class="topbar">
-        <button class="context-title" id="openSidebar" type="button" title="切換節點列表" aria-label="切換節點列表">
-          <span class="context-kicker" id="nodePath">尚未選擇節點</span>
+        <button class="context-title" id="openSidebar" type="button" title="切換節點列表" aria-label="切換節點列表" data-i18n-title="切換節點列表" data-i18n-aria-label="切換節點列表">
+          <span class="context-kicker" id="nodePath" data-i18n="尚未選擇節點">尚未選擇節點</span>
           <h1 id="nodeTitle">Scene Node Editor</h1>
         </button>
-        <span class="save-state" id="saveState" role="status">已同步</span>
-        <nav class="tabbar" id="tabbar" aria-label="編輯器分頁">
+        <span class="save-state" id="saveState" role="status" data-i18n="已同步">已同步</span>
+        <nav class="tabbar" id="tabbar" aria-label="編輯器分頁" data-i18n-aria-label="編輯器分頁">
           <span class="tab-focus-indicator" id="tabFocusIndicator" aria-hidden="true"></span>
-          <button class="tab active" type="button" data-tab="node">節點</button>
-          <button class="tab" type="button" data-tab="events">事件 <span class="tab-count" id="eventCount">0</span></button>
-          <button class="tab" type="button" data-tab="options">選項</button>
-          <button class="tab" type="button" data-tab="content">演出</button>
-          <button class="tab" type="button" data-tab="stats">狀態</button>
-          <button class="tab" type="button" data-tab="graph">關聯圖</button>
-          <button class="tab" type="button" data-tab="validation">檢查 <span class="tab-count issue-count" id="issueCount">0</span></button>
+          <button class="tab active" type="button" data-tab="node" data-i18n="節點">節點</button>
+          <button class="tab" type="button" data-tab="events"><span data-i18n="事件">事件</span> <span class="tab-count" id="eventCount">0</span></button>
+          <button class="tab" type="button" data-tab="options" data-i18n="選項">選項</button>
+          <button class="tab" type="button" data-tab="content" data-i18n="演出">演出</button>
+          <button class="tab" type="button" data-tab="stats" data-i18n="狀態">狀態</button>
+          <button class="tab" type="button" data-tab="graph" data-i18n="關聯圖">關聯圖</button>
+          <button class="tab" type="button" data-tab="validation"><span data-i18n="檢查">檢查</span> <span class="tab-count issue-count" id="issueCount">0</span></button>
         </nav>
       </header>
 
       <section class="workspace" id="workspace">
         <div class="empty-state" id="emptyState">
           <div class="empty-symbol" aria-hidden="true">＋</div>
-          <h2>建立第一個 Scene Node</h2>
-          <button class="primary-button" id="emptyNewNodeButton" type="button">新增節點</button>
+          <h2 data-i18n="建立第一個 Scene Node">建立第一個 Scene Node</h2>
+          <button class="primary-button" id="emptyNewNodeButton" type="button" data-i18n="新增節點">新增節點</button>
         </div>
 
         <section class="tab-panel active" data-panel="node" id="nodePanel"></section>
@@ -78,19 +78,19 @@
       <div class="dialog-header">
         <div>
           <span class="section-kicker">SCENENODE</span>
-          <h2>新增 Scene Node</h2>
+          <h2 data-i18n="新增 Scene Node">新增 Scene Node</h2>
         </div>
-        <button class="icon-button" type="button" data-close-dialog="nodeDialog" title="關閉" aria-label="關閉">×</button>
+        <button class="icon-button" type="button" data-close-dialog="nodeDialog" title="關閉" aria-label="關閉" data-i18n-title="關閉" data-i18n-aria-label="關閉">×</button>
       </div>
       <div class="dialog-body form-stack">
         <label class="field">
-          <span>節點名稱</span>
-          <input name="name" required placeholder="請輸入節點顯示名稱">
+          <span data-i18n="節點名稱">節點名稱</span>
+          <input name="name" required placeholder="請輸入節點顯示名稱" data-i18n-placeholder="請輸入節點顯示名稱">
         </label>
       </div>
       <div class="dialog-actions">
-        <button class="quiet-button" type="button" data-close-dialog="nodeDialog">取消</button>
-        <button class="primary-button" id="createNodeConfirm" type="submit" value="default">建立節點</button>
+        <button class="quiet-button" type="button" data-close-dialog="nodeDialog" data-i18n="取消">取消</button>
+        <button class="primary-button" id="createNodeConfirm" type="submit" value="default" data-i18n="建立節點">建立節點</button>
       </div>
     </form>
   </dialog>
@@ -100,19 +100,19 @@
       <div class="dialog-header">
         <div>
           <span class="section-kicker">CONTENT</span>
-          <h2>新增 Content</h2>
+          <h2 data-i18n="新增 Content">新增 Content</h2>
         </div>
-        <button class="icon-button" type="button" data-close-dialog="nameDialog" title="關閉" aria-label="關閉">×</button>
+        <button class="icon-button" type="button" data-close-dialog="nameDialog" title="關閉" aria-label="關閉" data-i18n-title="關閉" data-i18n-aria-label="關閉">×</button>
       </div>
       <div class="dialog-body">
         <label class="field">
-          <span>檔名與 Label</span>
+          <span data-i18n="檔名與 Label">檔名與 Label</span>
           <input id="nameDialogInput" name="name" required autocomplete="off" placeholder="buyWaterNormal">
         </label>
       </div>
       <div class="dialog-actions">
-        <button class="quiet-button" type="button" data-close-dialog="nameDialog">取消</button>
-        <button class="primary-button" id="nameDialogConfirm" type="submit" value="default">建立</button>
+        <button class="quiet-button" type="button" data-close-dialog="nameDialog" data-i18n="取消">取消</button>
+        <button class="primary-button" id="nameDialogConfirm" type="submit" value="default" data-i18n="建立">建立</button>
       </div>
     </form>
   </dialog>
@@ -122,44 +122,57 @@
       <div class="dialog-header">
         <div>
           <span class="section-kicker">EDITOR</span>
-          <h2>編輯器設定</h2>
+          <h2 data-i18n="編輯器設定">編輯器設定</h2>
         </div>
-        <button class="icon-button" type="button" data-close-dialog="settingsDialog" title="關閉" aria-label="關閉">×</button>
+        <button class="icon-button" type="button" data-close-dialog="settingsDialog" title="關閉" aria-label="關閉" data-i18n-title="關閉" data-i18n-aria-label="關閉">×</button>
       </div>
       <div class="dialog-body settings-body">
         <section class="settings-section">
           <div class="settings-section-heading">
-            <strong>儲存與畫布</strong>
+            <strong data-i18n="顯示與語言">顯示與語言</strong>
           </div>
           <label class="setting-row">
-            <span><strong>自動儲存</strong><small>停止輸入後自動寫入專案</small></span>
+            <span><strong data-i18n="介面語言">介面語言</strong><small data-i18n="選擇編輯器顯示語言">選擇編輯器顯示語言</small></span>
+            <select id="editorLanguage">
+              <option value="zh-Hant">繁體中文</option>
+              <option value="en">English</option>
+            </select>
+          </label>
+        </section>
+
+        <section class="settings-section">
+          <div class="settings-section-heading">
+            <strong data-i18n="儲存與畫布">儲存與畫布</strong>
+          </div>
+          <label class="setting-row">
+            <span><strong data-i18n="自動儲存">自動儲存</strong><small data-i18n="停止輸入後自動寫入專案">停止輸入後自動寫入專案</small></span>
             <input id="autosaveEnabled" type="checkbox">
           </label>
           <label class="setting-row">
-            <span><strong>儲存延遲</strong><small>連續輸入時等待多久再儲存</small></span>
+            <span><strong data-i18n="儲存延遲">儲存延遲</strong><small data-i18n="連續輸入時等待多久再儲存">連續輸入時等待多久再儲存</small></span>
             <select id="autosaveDelay">
-              <option value="400">0.4 秒</option>
-              <option value="700">0.7 秒</option>
-              <option value="1200">1.2 秒</option>
-              <option value="2000">2 秒</option>
+              <option value="400" data-i18n="0.4 秒">0.4 秒</option>
+              <option value="700" data-i18n="0.7 秒">0.7 秒</option>
+              <option value="1200" data-i18n="1.2 秒">1.2 秒</option>
+              <option value="2000" data-i18n="2 秒">2 秒</option>
             </select>
           </label>
           <label class="setting-row">
-            <span><strong>格線尺寸</strong><small>選項畫布的吸附間距</small></span>
+            <span><strong data-i18n="格線尺寸">格線尺寸</strong><small data-i18n="選項畫布的吸附間距">選項畫布的吸附間距</small></span>
             <input id="gridSize" type="number" min="4" max="160" step="2">
           </label>
         </section>
 
         <section class="settings-section">
           <div class="settings-section-heading">
-            <strong>快捷鍵</strong>
-            <button class="quiet-button compact" id="resetShortcuts" type="button">恢復預設</button>
+            <strong data-i18n="快捷鍵">快捷鍵</strong>
+            <button class="quiet-button compact" id="resetShortcuts" type="button" data-i18n="恢復預設">恢復預設</button>
           </div>
           <div class="shortcut-list" id="shortcutList"></div>
         </section>
       </div>
       <div class="dialog-actions">
-        <button class="primary-button" type="submit" value="default">完成</button>
+        <button class="primary-button" type="submit" value="default" data-i18n="完成">完成</button>
       </div>
     </form>
   </dialog>
@@ -171,6 +184,7 @@
 
   <div class="toast-region" id="toastRegion" aria-live="polite"></div>
 
+  <script src="/js/core/i18n.js" defer></script>
   <script src="/js/core/api_client.js" defer></script>
   <script src="/js/core/editor_settings.js" defer></script>
   <script src="/js/core/event_contract.js" defer></script>
