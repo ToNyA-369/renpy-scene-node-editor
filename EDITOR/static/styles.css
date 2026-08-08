@@ -5330,6 +5330,21 @@ textarea:hover {
   cursor: grabbing;
 }
 
+.graph-detached-guide text {
+  fill: var(--muted);
+  font-size: 12px;
+  font-weight: 680;
+  letter-spacing: 0.04em;
+  pointer-events: none;
+}
+
+.graph-detached-guide line {
+  stroke: var(--line-strong);
+  stroke-width: 1;
+  stroke-dasharray: 9 8;
+  vector-effect: non-scaling-stroke;
+}
+
 .graph-edge path {
   fill: none;
   stroke: currentColor;
@@ -5343,6 +5358,12 @@ textarea:hover {
   color: rgba(70, 70, 70, 0.3);
   opacity: 1;
   transition: opacity 120ms ease-out;
+}
+
+.graph-canvas.is-revealing .graph-edge {
+  animation: graph-edge-grow 300ms cubic-bezier(0.2, 0.75, 0.3, 1) both;
+  animation-delay: var(--graph-reveal-delay, 0ms);
+  will-change: clip-path, opacity;
 }
 
 .graph-edge-arrow {
@@ -5471,6 +5492,61 @@ textarea:hover {
   transition: opacity 120ms ease-out;
 }
 
+.graph-node-content {
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+.graph-node-hit-target {
+  fill: transparent;
+  pointer-events: all;
+}
+
+.graph-canvas.is-revealing .graph-node-content {
+  animation: graph-node-grow 380ms cubic-bezier(0.2, 0.78, 0.25, 1) both;
+  animation-delay: var(--graph-reveal-delay, 0ms);
+  will-change: opacity, transform;
+}
+
+.graph-canvas.is-revealing .graph-detached-guide {
+  animation: graph-guide-reveal 260ms ease-out both;
+  animation-delay: var(--graph-reveal-delay, 0ms);
+}
+
+@keyframes graph-edge-grow {
+  0% {
+    opacity: 0;
+    clip-path: inset(0 100% 0 0);
+  }
+
+  100% {
+    opacity: 1;
+    clip-path: inset(-12% -12% -12% -12%);
+  }
+}
+
+@keyframes graph-node-grow {
+  0% {
+    opacity: 0;
+    transform: scale(0.56);
+  }
+
+  72% {
+    opacity: 1;
+    transform: scale(1.035);
+  }
+
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes graph-guide-reveal {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
 .graph-node.is-dragging {
   cursor: grabbing;
 }
@@ -5546,6 +5622,12 @@ textarea:hover {
   .graph-node,
   .graph-node-dot {
     transition: none;
+  }
+
+  .graph-canvas.is-revealing .graph-edge,
+  .graph-canvas.is-revealing .graph-node-content,
+  .graph-canvas.is-revealing .graph-detached-guide {
+    animation: none;
   }
 }
 

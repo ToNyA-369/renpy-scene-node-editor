@@ -311,8 +311,19 @@ test("critical editor interactions survive reload without browser errors", async
 
   await page.getByRole("button", { name: "關聯圖" }).click();
   await expect(page.locator("#projectGraphSvg")).toBeVisible();
-  await expect(page.locator("#projectGraphSvg")).toHaveAttribute("data-growth-stages", /^\d+$/);
+  await expect(page.locator(".graph-canvas")).toHaveClass(/is-revealing/);
+  const revealDelays = await page.evaluate(() => ({
+    root: getComputedStyle(document.querySelector('.graph-node[data-node-id="root"] .graph-node-content'))
+      .animationDelay,
+    outcome: getComputedStyle(document.querySelector('.graph-node[data-node-id="outcome_success"] .graph-node-content'))
+      .animationDelay,
+  }));
+  expect(parseFloat(revealDelays.root)).toBe(0);
+  expect(parseFloat(revealDelays.outcome)).toBeGreaterThan(parseFloat(revealDelays.root));
+  await expect(page.locator("#projectGraphSvg")).toHaveAttribute("data-layout-algorithm", "structured-depth");
+  await expect(page.locator("#projectGraphSvg")).toHaveAttribute("data-depth-columns", /^[2-9]\d*$/);
   await expect(page.locator("#projectGraphSvg")).toHaveAttribute("data-edge-crossings", /^\d+$/);
+  await expect(page.locator(".graph-structure-legend, .graph-depth-column")).toHaveCount(0);
   await expect(page.locator(".graph-edge.is-replace")).toHaveCount(2);
   await expect(page.locator(".graph-edge.is-replace.is-bidirectional")).toHaveCount(1);
   await expect(page.locator(".graph-edge.is-management")).toHaveCount(2);
@@ -322,10 +333,25 @@ test("critical editor interactions survive reload without browser errors", async
   await expect(page.locator(".graph-node .graph-node-dot")).toHaveCount(9);
   await expect(page.locator('.graph-node[data-node-id="__global__"], .graph-edge[data-scope="global"]')).toHaveCount(0);
   await expect(page.locator(".graph-node .graph-node-dot").first()).toHaveCSS("fill-opacity", "1");
+  await expect(page.locator(".graph-canvas")).not.toHaveClass(/is-revealing/);
+  const idleBefore = await page.evaluate(() => {
+    const node = document.querySelector('.graph-node[data-node-id="root"] .graph-node-content');
+    const matrix = node.transform.baseVal.consolidate()?.matrix;
+    return { x: matrix.e, y: matrix.f };
+  });
+  await page.waitForTimeout(240);
+  const idleAfter = await page.evaluate(() => {
+    const node = document.querySelector('.graph-node[data-node-id="root"] .graph-node-content');
+    const matrix = node.transform.baseVal.consolidate()?.matrix;
+    return { x: matrix.e, y: matrix.f };
+  });
+  const idleDistance = Math.hypot(idleAfter.x - idleBefore.x, idleAfter.y - idleBefore.y);
+  expect(idleDistance).toBeGreaterThan(0.005);
+  expect(idleDistance).toBeLessThan(3);
   expect(await page.locator(".graph-edge.is-tree").count()).toBeGreaterThan(0);
   expect(await page.locator(".graph-edge.is-secondary").count()).toBeGreaterThan(0);
   await expect(page.locator('.graph-edge.is-cross[data-source="branch_lab"][data-target="outcome_fallback"] path'))
-    .toHaveAttribute("d", / Q /);
+    .toHaveAttribute("d", / C /);
   await expect(page.locator('.graph-edge.is-replace-local[data-source="replace_child_a"][data-target="replace_child_b"]'))
     .toHaveCount(1);
   await expect(page.locator('.graph-edge.is-management[data-source="replace_parent"][data-target="replace_child_b"]'))
@@ -349,6 +375,7 @@ test("critical editor interactions survive reload without browser errors", async
     const chainedManagement = path('.graph-edge.is-management[data-source="replace_parent"][data-target="replace_child_c"] path');
     const parent = document.querySelector('.graph-node[data-node-id="replace_parent"]');
     const parentMatrix = parent.transform.baseVal.consolidate().matrix;
+    const parentContentMatrix = parent.querySelector(".graph-node-content").transform.baseVal.consolidate().matrix;
     const parentRadius = Number(parent.querySelector(".graph-node-dot").getAttribute("r"));
     return {
       replace,
@@ -358,10 +385,13 @@ test("critical editor interactions survive reload without browser errors", async
       gotoStart: start(goto),
       managementStart: start(management),
       chainedManagementStart: start(chainedManagement),
-      parentCenter: [parentMatrix.e + parentRadius, parentMatrix.f + parentRadius],
+      parentCenter: [
+        parentMatrix.e + parentContentMatrix.e + parentRadius,
+        parentMatrix.f + parentContentMatrix.f + parentRadius,
+      ],
     };
   });
-  expect(replacePorts.replace).toMatch(/ Q /);
+  expect(replacePorts.replace).toMatch(/ C /);
   expect(replacePorts.replaceStartArrows).toBe(1);
   expect(replacePorts.replaceEndArrows).toBe(1);
   expect(replacePorts.replaceUsesMarkers).toBe(false);
@@ -374,17 +404,74 @@ test("critical editor interactions survive reload without browser errors", async
     const view = svg.viewBox.baseVal;
     return { x: view.x, y: view.y, width: view.width, height: view.height };
   });
-  await page.getByRole("button", { name: "重新置中" }).click();
+  await page.getByRole("button", { name: "顯示全圖" }).click();
   const fittedView = await graphView();
-  const rootCenter = await page.evaluate(() => {
-    const root = document.querySelector('.graph-node[data-node-id="root"]');
-    const rootMatrix = root.transform.baseVal.consolidate().matrix;
-    const rootCircle = root.querySelector(".graph-node-dot");
-    const rootRadius = Number(rootCircle.getAttribute("r"));
-    return { x: rootMatrix.e + rootRadius, y: rootMatrix.f + rootRadius };
+  const structuredPositions = await page.evaluate(() => {
+    const center = (nodeId) => {
+      const node = document.querySelector(`.graph-node[data-node-id="${nodeId}"]`);
+      const matrix = node.transform.baseVal.consolidate().matrix;
+      const radius = Number(node.querySelector(".graph-node-dot").getAttribute("r"));
+      return { x: matrix.e + radius, y: matrix.f + radius };
+    };
+    return {
+      root: center("root"),
+      options: center("options_lab"),
+      branch: center("branch_lab"),
+      outcome: center("outcome_success"),
+      fallback: center("outcome_fallback"),
+      replaceA: center("replace_child_a"),
+      replaceB: center("replace_child_b"),
+      replaceC: center("replace_child_c"),
+      all: [...document.querySelectorAll(".graph-node")].map((node) => {
+        const matrix = node.transform.baseVal.consolidate().matrix;
+        const radius = Number(node.querySelector(".graph-node-dot").getAttribute("r"));
+        return { x: matrix.e + radius, y: matrix.f + radius };
+      }),
+    };
   });
-  expect(Math.abs(rootCenter.x - (fittedView.x + fittedView.width / 2))).toBeLessThan(1);
-  expect(Math.abs(rootCenter.y - (fittedView.y + fittedView.height / 2))).toBeLessThan(1);
+  expect(structuredPositions.options.x).toBeGreaterThan(structuredPositions.root.x);
+  expect(structuredPositions.branch.x).toBeGreaterThan(structuredPositions.options.x);
+  expect(structuredPositions.outcome.x).toBeGreaterThan(structuredPositions.branch.x);
+  expect(structuredPositions.fallback.x).toBeGreaterThan(structuredPositions.branch.x);
+  expect(structuredPositions.replaceB.x).toBeGreaterThan(structuredPositions.replaceA.x);
+  expect(structuredPositions.replaceC.x).toBeLessThan(structuredPositions.replaceB.x);
+  expect(Math.abs(structuredPositions.replaceC.x - structuredPositions.replaceA.x)).toBeLessThan(5);
+  expect(Math.abs(structuredPositions.replaceB.x - structuredPositions.replaceA.x)).toBeLessThanOrEqual(166);
+  const localCycleBounds = await page.evaluate(() => {
+    const center = (nodeId) => {
+      const node = document.querySelector(`.graph-node[data-node-id="${nodeId}"]`);
+      const matrix = node.transform.baseVal.consolidate().matrix;
+      const radius = Number(node.querySelector(".graph-node-dot").getAttribute("r"));
+      return { x: matrix.e + radius, y: matrix.f + radius };
+    };
+    const endpoints = [center("branch_lab"), center("outcome_success")];
+    return {
+      minimumX: Math.min(...endpoints.map((point) => point.x)),
+      maximumX: Math.max(...endpoints.map((point) => point.x)),
+      minimumY: Math.min(...endpoints.map((point) => point.y)),
+      maximumY: Math.max(...endpoints.map((point) => point.y)),
+      paths: [...document.querySelectorAll(
+        '.graph-edge.is-goto-cycle[data-source="branch_lab"][data-target="outcome_success"] path, '
+        + '.graph-edge.is-goto-cycle[data-source="outcome_success"][data-target="branch_lab"] path',
+      )].map((path) => {
+        const box = path.getBBox();
+        return { x: box.x, y: box.y, right: box.x + box.width, bottom: box.y + box.height };
+      }),
+    };
+  });
+  expect(localCycleBounds.paths).toHaveLength(2);
+  localCycleBounds.paths.forEach((box) => {
+    expect(box.x).toBeGreaterThan(localCycleBounds.minimumX - 120);
+    expect(box.right).toBeLessThan(localCycleBounds.maximumX + 120);
+    expect(box.y).toBeGreaterThan(localCycleBounds.minimumY - 120);
+    expect(box.bottom).toBeLessThan(localCycleBounds.maximumY + 120);
+  });
+  structuredPositions.all.forEach((position) => {
+    expect(position.x).toBeGreaterThan(fittedView.x);
+    expect(position.x).toBeLessThan(fittedView.x + fittedView.width);
+    expect(position.y).toBeGreaterThan(fittedView.y);
+    expect(position.y).toBeLessThan(fittedView.y + fittedView.height);
+  });
 
   const graphBox = await page.locator("#projectGraphSvg").boundingBox();
   const visualMetrics = async () => page.evaluate(() => {
@@ -432,7 +519,7 @@ test("critical editor interactions survive reload without browser errors", async
   await page.mouse.up();
   const pannedView = await graphView();
   expect(Math.hypot(pannedView.x - fittedView.x, pannedView.y - fittedView.y)).toBeGreaterThan(50);
-  await page.getByRole("button", { name: "重新置中" }).click();
+  await page.getByRole("button", { name: "顯示全圖" }).click();
   const resetView = await graphView();
   expect(Math.abs(resetView.x - fittedView.x)).toBeLessThan(2);
   expect(Math.abs(resetView.y - fittedView.y)).toBeLessThan(2);
@@ -442,14 +529,26 @@ test("critical editor interactions survive reload without browser errors", async
     const matrix = element.transform.baseVal.consolidate().matrix;
     return { x: matrix.e, y: matrix.f };
   });
+  const connectedGraphNode = page.locator('.graph-node[data-node-id="options_lab"] .graph-node-content');
+  const connectedMotionPosition = async () => connectedGraphNode.evaluate((element) => {
+    const matrix = element.transform.baseVal.consolidate().matrix;
+    return { x: matrix.e, y: matrix.f };
+  });
   const beforeDrag = await graphPosition();
+  const connectedBeforeDrag = await connectedMotionPosition();
   const dragBox = await draggableGraphNode.locator(".graph-node-dot").boundingBox();
   await page.mouse.move(dragBox.x + dragBox.width / 2, dragBox.y + dragBox.height / 2);
   await page.mouse.down();
   await page.mouse.move(dragBox.x + dragBox.width / 2 + 110, dragBox.y + dragBox.height / 2 - 55, { steps: 8 });
   await expect(draggableGraphNode).toHaveAttribute("aria-grabbed", "true");
+  await page.waitForTimeout(180);
   const duringDrag = await graphPosition();
+  const connectedDuringDrag = await connectedMotionPosition();
   expect(Math.hypot(duringDrag.x - beforeDrag.x, duringDrag.y - beforeDrag.y)).toBeGreaterThan(70);
+  expect(Math.hypot(
+    connectedDuringDrag.x - connectedBeforeDrag.x,
+    connectedDuringDrag.y - connectedBeforeDrag.y,
+  )).toBeGreaterThan(0.5);
   await page.mouse.up();
   await expect(draggableGraphNode).toHaveAttribute("aria-grabbed", "false");
   await page.waitForTimeout(450);

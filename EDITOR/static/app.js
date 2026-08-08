@@ -45,7 +45,7 @@ const state = {
   graphViewBox: null,
   graphLayoutSignature: "",
   graphSearch: "",
-  graphStopSimulation: null,
+  graphStopLayoutAnimation: null,
   images: [],
   audio: [],
   optionTargets: [],
@@ -3130,25 +3130,26 @@ function updateGraphNameScale(svg = dom.graphPanel.querySelector("#projectGraphS
   });
 }
 
-function centeredGraphViewBox(layout, svg = null, currentView = null) {
-  const centerNodeId = String(layout.centerNodeId || "");
-  const centerPosition = layout.positions.get(centerNodeId);
-  const centerRadius = layout.nodeSizes.get(centerNodeId)?.radius || 0;
-  const center = centerPosition
-    ? { x: centerPosition.x + centerRadius, y: centerPosition.y + centerRadius }
-    : layout.center;
+function fittedGraphViewBox(layout, svg = null) {
+  const bounds = SceneGraphModel.viewBounds(layout, 110);
   const rect = svg?.getBoundingClientRect();
   const viewportRatio = rect?.width && rect?.height ? rect.width / rect.height : 1.6;
-  const rootClusterRadius = layout.nodeSizes.get(centerNodeId)?.clusterRadius || 300;
-  const width = currentView?.width || Math.max(1800, Math.min(3400, rootClusterRadius * 8));
-  const height = width / viewportRatio;
-  return { x: center.x - width / 2, y: center.y - height / 2, width, height };
+  let width = Math.max(1200, bounds.width);
+  let height = Math.max(720, bounds.height);
+  if (width / height < viewportRatio) width = height * viewportRatio;
+  else height = width / viewportRatio;
+  return {
+    x: bounds.x + bounds.width / 2 - width / 2,
+    y: bounds.y + bounds.height / 2 - height / 2,
+    width,
+    height,
+  };
 }
 
 function resetGraphView(layout) {
   const svg = dom.graphPanel.querySelector("#projectGraphSvg");
   if (!svg || !layout) return;
-  state.graphViewBox = centeredGraphViewBox(layout, svg, state.graphViewBox);
+  state.graphViewBox = fittedGraphViewBox(layout, svg);
   applyGraphViewBox();
 }
 
@@ -3168,37 +3169,71 @@ function updateGraphSearch() {
   });
 }
 
-function updateGraphGeometry(layout, relationships) {
+function graphGeometryCache(relationships) {
+  return {
+    edges: relationships.map((relationship, index) => {
+      const group = dom.graphPanel.querySelector(`.graph-edge[data-edge-index="${index}"]`);
+      return {
+        group,
+        path: group?.querySelector("path"),
+        endArrow: group?.querySelector(".graph-edge-arrow.is-end"),
+        startArrow: group?.querySelector(".graph-edge-arrow.is-start"),
+      };
+    }),
+    nodes: new Map([...dom.graphPanel.querySelectorAll(".graph-node[data-node-id]")]
+      .map((node) => [node.dataset.nodeId, {
+        group: node,
+        content: node.querySelector(".graph-node-content"),
+      }])),
+    svg: dom.graphPanel.querySelector("#projectGraphSvg"),
+  };
+}
+
+function updateGraphGeometry(
+  layout,
+  relationships,
+  geometry = null,
+  controller = null,
+  updateDiagnostics = false,
+) {
+  const elements = geometry || graphGeometryCache(relationships);
   relationships.forEach((relationship, index) => {
     const source = layout.positions.get(relationship.source);
     const target = layout.positions.get(relationship.target);
-    const edge = dom.graphPanel.querySelector(`.graph-edge[data-edge-index="${index}"]`);
-    if (!source || !target || !edge) return;
-    edge.querySelector("path")?.setAttribute(
+    const edge = elements.edges[index];
+    if (!source || !target || !edge?.group) return;
+    edge.path?.setAttribute(
       "d",
       SceneGraphModel.edgePath(source, target, layout, index, relationship.endUp, relationship),
     );
-    edge.querySelector(".graph-edge-arrow.is-end")?.setAttribute(
+    edge.endArrow?.setAttribute(
       "points",
       SceneGraphModel.edgeArrowPoints(source, target, layout, index, relationship.endUp, relationship),
     );
-    edge.querySelector(".graph-edge-arrow.is-start")?.setAttribute(
+    edge.startArrow?.setAttribute(
       "points",
       SceneGraphModel.edgeArrowPoints(source, target, layout, index, relationship.endUp, relationship, "start"),
     );
   });
-  dom.graphPanel.querySelectorAll(".graph-node[data-node-id]").forEach((node) => {
-    const position = layout.positions.get(node.dataset.nodeId);
-    if (position) node.setAttribute("transform", `translate(${position.x} ${position.y})`);
+  elements.nodes.forEach((node, nodeId) => {
+    const position = layout.positions.get(nodeId);
+    if (!position) return;
+    const particle = controller?.particles.get(nodeId);
+    const baseX = particle?.x ?? position.x;
+    const baseY = particle?.y ?? position.y;
+    node.group.setAttribute("transform", `translate(${baseX} ${baseY})`);
+    node.content?.setAttribute("transform", `translate(${position.x - baseX} ${position.y - baseY})`);
   });
-  const svg = dom.graphPanel.querySelector("#projectGraphSvg");
-  if (svg) svg.dataset.edgeCrossings = String(SceneGraphModel.countEdgeCrossings(relationships, layout));
+  if (updateDiagnostics && elements.svg) {
+    elements.svg.dataset.edgeCrossings = String(SceneGraphModel.countEdgeCrossings(relationships, layout));
+  }
 }
 
-function bindGraphPanel(layout, relationships, simulation) {
+function bindGraphPanel(layout, relationships, controller, revealDurationMs = 0) {
   const svg = dom.graphPanel.querySelector("#projectGraphSvg");
   const canvas = dom.graphPanel.querySelector(".graph-canvas");
   const search = dom.graphPanel.querySelector("#graphSearch");
+  const geometry = graphGeometryCache(relationships);
   dom.graphPanel.querySelector("#resetGraphView")?.addEventListener("click", () => resetGraphView(layout));
   search?.addEventListener("input", (event) => {
     state.graphSearch = event.target.value;
@@ -3222,26 +3257,53 @@ function bindGraphPanel(layout, relationships, simulation) {
     });
   };
   const reducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches;
-  let simulationFrame = null;
+  let layoutAnimationFrame = null;
+  let revealTimer = null;
+  let idleMotionEnabled = false;
   const refreshGraphNameScale = () => updateGraphNameScale(svg);
   window.addEventListener("resize", refreshGraphNameScale);
-  const drawSimulation = () => {
-    simulationFrame = null;
+  const drawLayoutAnimation = (timeMs) => {
+    layoutAnimationFrame = null;
     if (!svg?.isConnected) return;
-    const changed = simulation.tick();
-    if (changed) updateGraphGeometry(layout, relationships);
-    if (simulation.isActive()) simulationFrame = window.requestAnimationFrame(drawSimulation);
+    const changed = controller.frame(timeMs, idleMotionEnabled ? 1 : 0);
+    if (changed) updateGraphGeometry(layout, relationships, geometry, controller);
+    if (idleMotionEnabled || controller.isActive()) {
+      layoutAnimationFrame = window.requestAnimationFrame(drawLayoutAnimation);
+    }
   };
-  const requestSimulationFrame = () => {
-    if (reducedMotion || simulationFrame !== null) return;
-    simulationFrame = window.requestAnimationFrame(drawSimulation);
+  const requestLayoutAnimationFrame = () => {
+    if (reducedMotion || layoutAnimationFrame !== null) return;
+    layoutAnimationFrame = window.requestAnimationFrame(drawLayoutAnimation);
   };
-  state.graphStopSimulation?.();
-  state.graphStopSimulation = () => {
-    if (simulationFrame !== null) window.cancelAnimationFrame(simulationFrame);
-    simulationFrame = null;
+  state.graphStopLayoutAnimation?.();
+  state.graphStopLayoutAnimation = () => {
+    if (layoutAnimationFrame !== null) window.cancelAnimationFrame(layoutAnimationFrame);
+    if (revealTimer !== null) window.clearTimeout(revealTimer);
+    layoutAnimationFrame = null;
+    revealTimer = null;
     window.removeEventListener("resize", refreshGraphNameScale);
   };
+
+  const finishGraphReveal = () => {
+    if (!canvas || !canvas.classList.contains("is-revealing")) return;
+    canvas.classList.remove("is-revealing");
+    if (revealTimer !== null) window.clearTimeout(revealTimer);
+    revealTimer = null;
+    if (!reducedMotion) {
+      idleMotionEnabled = true;
+      requestLayoutAnimationFrame();
+    }
+  };
+  if (canvas?.classList.contains("is-revealing")) {
+    if (reducedMotion) finishGraphReveal();
+    else revealTimer = window.setTimeout(finishGraphReveal, revealDurationMs);
+    canvas.addEventListener("pointerdown", finishGraphReveal, { capture: true, once: true });
+    canvas.addEventListener("wheel", finishGraphReveal, { capture: true, once: true });
+    canvas.addEventListener("keydown", finishGraphReveal, { capture: true, once: true });
+  } else if (!reducedMotion) {
+    idleMotionEnabled = true;
+    requestLayoutAnimationFrame();
+  }
 
   dom.graphPanel.querySelectorAll(".graph-node").forEach((node) => {
     const openNode = () => selectNode(node.dataset.nodePath, { preserveTab: true });
@@ -3264,13 +3326,13 @@ function bindGraphPanel(layout, relationships, simulation) {
         const seconds = Math.max(0.016, (last.time - first.time) / 1000);
         const velocityX = cancelled ? 0 : (last.x - first.x) / seconds;
         const velocityY = cancelled ? 0 : (last.y - first.y) / seconds;
-        simulation.release(node.dataset.nodeId, velocityX, velocityY);
+        controller.release(node.dataset.nodeId, velocityX, velocityY);
         suppressClick = true;
         if (reducedMotion) {
-          simulation.tick(90);
-          updateGraphGeometry(layout, relationships);
+          controller.tick(90);
+          updateGraphGeometry(layout, relationships, geometry, controller);
         } else {
-          requestSimulationFrame();
+          requestLayoutAnimationFrame();
         }
       }
       node.classList.remove("is-dragging");
@@ -3311,11 +3373,11 @@ function bindGraphPanel(layout, relationships, simulation) {
         node.setAttribute("aria-grabbed", "true");
       }
       const point = graphPoint(event);
-      simulation.pin(node.dataset.nodeId, point.x - nodeDrag.offsetX, point.y - nodeDrag.offsetY);
+      controller.pin(node.dataset.nodeId, point.x - nodeDrag.offsetX, point.y - nodeDrag.offsetY);
       nodeDrag.samples.push({ x: point.x, y: point.y, time: event.timeStamp });
       nodeDrag.samples = nodeDrag.samples.filter((sample) => event.timeStamp - sample.time <= 120);
-      updateGraphGeometry(layout, relationships);
-      requestSimulationFrame();
+      updateGraphGeometry(layout, relationships, geometry, controller);
+      requestLayoutAnimationFrame();
     });
     node.addEventListener("pointerup", (event) => finishNodeDrag(event));
     node.addEventListener("pointercancel", (event) => finishNodeDrag(event, true));
@@ -3408,17 +3470,19 @@ function bindGraphPanel(layout, relationships, simulation) {
   svg.addEventListener("pointercancel", stopPanning);
   updateGraphSearch();
   updateGraphNameScale(svg);
-  requestSimulationFrame();
 }
 
 function renderGraphPanel() {
-  state.graphStopSimulation?.();
-  state.graphStopSimulation = null;
+  state.graphStopLayoutAnimation?.();
+  state.graphStopLayoutAnimation = null;
   // GLOBAL is an authoring scope rather than a place in the game's node
   // structure, so neither it nor its contextual Event edges belong in this map.
-  const nodes = (state.nodes || []).filter(Boolean);
+  const nodes = (state.nodes || []).filter((node) => (
+    node && !node.isGlobal && String(node.id) !== "__global__"
+  ));
   const relationships = SceneGraphModel.relationships(nodes, state.graph?.edges || []);
   const signature = JSON.stringify({
+    algorithm: "structured-depth-v3",
     nodes: nodes.map((node) => [node.id, node.path, node.name]),
     edges: relationships.map((edge) => [
       edge.source,
@@ -3431,17 +3495,21 @@ function renderGraphPanel() {
     ]),
   });
   const layout = SceneGraphModel.layout(nodes, relationships, state.rootNodeId);
-  const simulation = SceneGraphModel.createForceSimulation(nodes, relationships, layout, state.rootNodeId);
-  simulation.settleGrowth();
+  const controller = SceneGraphModel.createLayoutController(nodes, relationships, layout);
   if (signature !== state.graphLayoutSignature) {
     state.graphLayoutSignature = signature;
-    state.graphViewBox = centeredGraphViewBox(layout);
+    state.graphViewBox = fittedGraphViewBox(layout);
   }
   if (!nodes.length) {
     dom.graphPanel.innerHTML = '<div class="panel-page wide"><div class="success-state">建立 Scene Node 後，關聯圖會顯示 GOTO／REPLACE 關係。</div></div>';
     return;
   }
   const nodeNames = new Map(nodes.map((node) => [String(node.id), String(node.name || node.id)]));
+  const revealStepMs = 110;
+  const revealSteps = layout.revealSteps || new Map();
+  const revealStepFor = (nodeId) => revealSteps.get(String(nodeId)) || 0;
+  const maximumRevealStep = Math.max(0, ...nodes.map((node) => revealStepFor(node.id)));
+  const revealDurationMs = maximumRevealStep * revealStepMs + 440;
   const edgesHtml = relationships.map((relationship, index) => {
     const source = layout.positions.get(relationship.source);
     const target = layout.positions.get(relationship.target);
@@ -3470,8 +3538,12 @@ function renderGraphPanel() {
           source, target, layout, index, relationship.endUp, relationship, "start",
         )
       : "";
+    const revealDelay = Math.min(
+      revealStepFor(relationship.source),
+      revealStepFor(relationship.target),
+    ) * revealStepMs + 70;
     return `
-      <g class="graph-edge is-${relationship.endUp.toLocaleLowerCase()} is-${route.kind} ${secondary ? "is-secondary" : ""} ${relationship.bidirectional ? "is-bidirectional" : ""} ${relationship.cycle ? "is-cycle" : ""} ${relationship.scope === "global" ? "is-global" : ""} ${selected ? "is-related" : ""}" data-edge-index="${index}" data-end-up="${relationship.endUp}" data-scope="${relationship.scope}" data-source="${escapeHtml(relationship.source)}" data-target="${escapeHtml(relationship.target)}">
+      <g class="graph-edge is-${relationship.endUp.toLocaleLowerCase()} is-${route.kind} ${secondary ? "is-secondary" : ""} ${relationship.bidirectional ? "is-bidirectional" : ""} ${relationship.cycle ? "is-cycle" : ""} ${relationship.scope === "global" ? "is-global" : ""} ${selected ? "is-related" : ""}" style="--graph-reveal-delay: ${revealDelay}ms" data-edge-index="${index}" data-end-up="${relationship.endUp}" data-scope="${relationship.scope}" data-source="${escapeHtml(relationship.source)}" data-target="${escapeHtml(relationship.target)}">
         <path d="${SceneGraphModel.edgePath(source, target, layout, index, relationship.endUp, relationship)}"><title>${escapeHtml(descriptions.join("\n"))}</title></path>
         ${startArrow ? `<polygon class="graph-edge-arrow is-start" points="${startArrow}"></polygon>` : ""}
         <polygon class="graph-edge-arrow is-end" points="${endArrow}"></polygon>
@@ -3487,29 +3559,40 @@ function renderGraphPanel() {
     const shortName = name.length > 18 ? `${name.slice(0, 17)}…` : name;
     const radius = layout.nodeSizes.get(String(node.id)).radius;
     const searchText = `${name} ${node.id} ${node.path}`.toLocaleLowerCase();
+    const revealDelay = revealStepFor(node.id) * revealStepMs;
     return `
       <g class="graph-node ${selected ? "is-selected" : ""} ${root ? "is-root" : ""} ${global ? "is-global" : ""}" transform="translate(${position.x} ${position.y})" role="button" tabindex="0" data-node-id="${escapeHtml(String(node.id))}" data-node-path="${escapeHtml(node.path)}" data-search-text="${escapeHtml(searchText)}" aria-label="開啟節點 ${escapeHtml(name)}" aria-grabbed="false">
-        <circle class="graph-node-dot" cx="${radius}" cy="${radius}" r="${radius}"></circle>
-        <text class="graph-node-name" x="${radius}" y="${radius * 2 + 18}" text-anchor="middle">${escapeHtml(shortName)}</text>
+        <rect class="graph-node-hit-target" x="${radius - 120}" y="-10" width="240" height="${radius * 2 + 50}" rx="10"></rect>
+        <g class="graph-node-content" style="--graph-reveal-delay: ${revealDelay}ms">
+          <circle class="graph-node-dot" cx="${radius}" cy="${radius}" r="${radius}"></circle>
+          <text class="graph-node-name" x="${radius}" y="${radius * 2 + 18}" text-anchor="middle">${escapeHtml(shortName)}</text>
+        </g>
         <title>${escapeHtml(name)}</title>
       </g>
     `;
   }).join("");
+  const detachedGuideHtml = Number.isFinite(layout.detachedStartY) ? `
+    <g class="graph-detached-guide" style="--graph-reveal-delay: ${maximumRevealStep * revealStepMs}ms">
+      <line x1="60" y1="${layout.detachedStartY}" x2="${Math.max(60, layout.width - 60)}" y2="${layout.detachedStartY}"></line>
+      <text x="78" y="${layout.detachedStartY - 14}">未連結至 ROOT 的節點</text>
+    </g>
+  ` : "";
   dom.graphPanel.innerHTML = `
     <div class="graph-workspace">
-      <div class="graph-canvas">
+      <div class="graph-canvas is-revealing">
         <label class="search-field graph-search"><span class="visually-hidden">搜尋關聯圖節點</span><input id="graphSearch" type="search" value="${escapeHtml(state.graphSearch)}" placeholder="搜尋節點"></label>
-        <button class="graph-reset-button" id="resetGraphView" type="button" title="重新置中" aria-label="重新置中">
+        <button class="graph-reset-button" id="resetGraphView" type="button" title="顯示全圖" aria-label="顯示全圖">
           <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"></circle><path d="M12 3v3M12 18v3M3 12h3M18 12h3"></path></svg>
         </button>
-        <svg id="projectGraphSvg" role="img" aria-label="Scene Node GOTO 與 REPLACE 有向關聯圖" viewBox="${graphViewBoxValue()}" data-graph-width="${layout.width}" data-graph-height="${layout.height}" data-growth-stages="${layout.growthStages.length}" data-edge-crossings="${SceneGraphModel.countEdgeCrossings(relationships, layout)}">
+        <svg id="projectGraphSvg" role="img" aria-label="依 Stack 深度排列的 Scene Node GOTO 與 REPLACE 有向關聯圖" viewBox="${graphViewBoxValue()}" data-graph-width="${layout.width}" data-graph-height="${layout.height}" data-layout-algorithm="${layout.algorithm}" data-depth-columns="${layout.columns.length}" data-edge-crossings="${SceneGraphModel.countEdgeCrossings(relationships, layout)}">
+          ${detachedGuideHtml}
           <g class="graph-edges">${edgesHtml}</g>
           <g class="graph-nodes">${nodesHtml}</g>
         </svg>
       </div>
     </div>
   `;
-  bindGraphPanel(layout, relationships, simulation);
+  bindGraphPanel(layout, relationships, controller, revealDurationMs);
 }
 
 function renderValidationPanel() {

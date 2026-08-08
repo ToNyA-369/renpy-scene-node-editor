@@ -16,6 +16,14 @@ The primary agent is the single requirements and integration owner. It may decid
 
 The primary agent remains responsible for architecture decisions, user communication, conflict resolution, integration review, complete verification, and final delivery. Sub-agents must not require the user to repeat project context. Any agents writing in parallel must use separate branches and worktrees; multiple agents must never write concurrently in the same working directory.
 
+Project-local agent roles live in `.codex/agents/`. Route work by uncertainty rather than by file count:
+
+- `explorer`: fast, read-only repository mapping for a bounded question.
+- `implementer`: one well-specified implementation in one branch/worktree.
+- `reviewer`: read-only contract, regression, and test-gap review.
+
+The primary agent should start with targeted inspection and tests, then run the complete suite once the integrated change is ready. Do not dispatch multiple agents to rediscover the same context. External implementation agents, including Antigravity, must receive `.codex/templates/implementation-brief.md`, work in a dedicated branch/worktree, and return a diff plus test evidence for primary-agent review.
+
 ## Frontend module boundaries
 
 `EDITOR/static/app.js` is the composition root. New reusable behavior belongs in a focused module and receives dependencies explicitly; do not add another large unrelated block to `app.js`.

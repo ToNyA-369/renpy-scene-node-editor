@@ -17,6 +17,8 @@ docs/                                User, reference, and AI documentation
 
 See the maintenance and extension guide in [English](docs/MAINTENANCE.en.md) or [Traditional Chinese](docs/MAINTENANCE.md) for the frontend module map and the required surfaces for new Triggers, End up modes, Conditions, Effects, and workspaces. Repository-wide agent rules live in `AGENTS.md`.
 
+AI-assisted work uses the versioned routing, worktree, and external-agent handoff process documented in [English](docs/DEVELOPMENT_WORKFLOW.en.md) and [Traditional Chinese](docs/DEVELOPMENT_WORKFLOW.md).
+
 `INTEGRATION/TestGame/FRAMEWORK/` is the canonical runtime source. Do not treat ignored local files under `INTEGRATION/TestGame/` as disposable repository data.
 
 ## Before changing behavior

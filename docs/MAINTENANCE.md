@@ -72,7 +72,9 @@ npx playwright install chromium
 python3 tools/verify.py --browser
 ```
 
-測試只使用 `tools/create_editor_test_unit.py` 建立的系統暫存專案，不得指向正式遊戲或 `INTEGRATION/TestGame` 的創作者資料。目前固定覆蓋 Editor 載入、Content 父子選單、Event Condition／Effect 新增刪除、Global Options 與同作用域 Effect、Stat／Memory 類型切換、Memory clear、GOTO／REPLACE 切換、自動儲存與重新載入、關聯圖排除 GLOBAL／不透明節點／階層力導向收斂／GOTO 優先的漸進播種與 deterministic warm start／深度衰減與非線性斥力繼承／ROOT—孫節點間距／實際交叉偵測與弱懲罰／ROOT 與局部圓形群集／圓心路徑與圓周箭頭／箭頭及名稱的相反縮放策略／ROOT 置中與無邊平移／無行內連線文字／節點拖曳與放開回復／雙向 REPLACE／GOTO Cycle／聚焦降噪／鏈式管理邊，以及瀏覽器 Console 錯誤。CI 在獨立的 Chromium job 執行這套測試。
+測試只使用 `tools/create_editor_test_unit.py` 建立的系統暫存專案，不得指向正式遊戲或 `INTEGRATION/TestGame` 的創作者資料。目前固定覆蓋 Editor 載入、Content 父子選單、Event Condition／Effect 新增刪除、Global Options 與同作用域 Effect、Stat／Memory 類型切換、Memory clear、GOTO／REPLACE 切換、自動儲存與重新載入、關聯圖排除 GLOBAL／不透明節點／deterministic Stack 深度／由 ROOT 分段進場／錨點附近確定性微動與穩定命中區／無深度背景或圖例／同深度 GOTO local progression／REPLACE parity lanes／穩定分支泳道／detached 區／多父來源主要樹與 cross route／圓心路徑與圓周箭頭／箭頭及名稱的相反縮放策略／完整圖面 fit 與無邊平移／無行內連線文字／節點暫時拖曳與回到結構 slot／雙向 REPLACE／GOTO Cycle／聚焦降噪／鏈式管理邊，以及瀏覽器 Console 錯誤。CI 在獨立的 Chromium job 執行這套測試。
+
+關聯圖模型測試也必須保護局部物理邊界：只有真實 GOTO／REPLACE 可形成弱彈簧、只有錨點附近配對可斥開、MANAGEMENT 不參與，而且未拖曳節點的總顯示偏移不得超過 7 graph units。拖曳測試需另外確認 pinned 節點維持 1:1、其實際位移傳入連線彈簧，並會對拖近的任意節點動態產生斥力。
 
 Event 表單的純資料轉換由 `tests/js/event_editor.test.js` 驗證；Editor API 寫入後再讀回的穩定 JSON 形狀由 `tests/test_event_api_round_trip.py` 保存為 golden cases。調整表單時應先擴充這兩層，再視互動風險更新瀏覽器 smoke test。
 
