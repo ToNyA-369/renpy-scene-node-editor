@@ -23,4 +23,10 @@
   --tabbar-height: 44px;
   --radius: 7px;
   --shadow: 0 14px 38px rgba(41, 45, 44, 0.14);
+  --focus-ring: 0 0 0 3px rgba(92, 114, 101, 0.2);
+  --motion-instant: 90ms;
+  --motion-fast: 140ms;
+  --motion-medium: 220ms;
+  --ease-out: cubic-bezier(0.2, 0.72, 0.2, 1);
+  --ease-settle: cubic-bezier(0.24, 0.82, 0.24, 1);
 }

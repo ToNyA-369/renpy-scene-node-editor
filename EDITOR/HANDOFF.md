@@ -228,6 +228,8 @@ Runtime 以獨立 `scene_enabled_options` 保存受控目標，不污染 Stats�
 
 其餘可見色彩應由這五色調整透明度取得。紅色主要用於刪除或危險操作。
 
+互動細節沿用同一套紙質視覺，不另造一套仿原生平台外觀：按鈕在 pointer down 時提供短促位移／縮放回饋，表單與鍵盤操作使用一致的綠色 focus ring，Dialog、Toast 與階層選單只使用 90–220ms 的無彈跳進場。時間與 easing 集中在 `css/tokens.css`；`prefers-reduced-motion` 必須停用非必要動畫，`prefers-reduced-transparency` 移除模糊材質，`prefers-contrast: more` 加強邊框與焦點，不得藉此改變資料或工作區操作。
+
 ### 7.2 整體布局
 
 - 上方左側顯示目前節點名稱與儲存狀態。

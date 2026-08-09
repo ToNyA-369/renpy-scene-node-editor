@@ -6,7 +6,8 @@
 - Owner:
 - Branch/worktree:
 - Classification: architecture contract / Editor feature / Editor UI/UX / Ren'Py Runtime / release-maintenance
-- Risk: low / medium / high
+- Workflow tier: small / medium / high / exploratory
+- Why this task is independently delegable:
 
 ## Objective
 
@@ -16,6 +17,8 @@ State the observable outcome in one paragraph.
 
 1.
 2.
+
+Prefer observable or executable criteria. Include at least one important failure path when state or persistence is involved.
 
 ## Contract and context
 
@@ -29,6 +32,7 @@ State the observable outcome in one paragraph.
 - Allowed write paths:
 - Explicit non-goals:
 - Creator-owned or unrelated paths to preserve:
+- Single owned change surface; interfaces supplied by the primary:
 
 ## Verification
 
@@ -42,6 +46,8 @@ State the observable outcome in one paragraph.
 - Work only in the named dedicated branch/worktree; never share a writable worktree with another agent.
 - Read `AGENTS.md`, `EDITOR/HANDOFF.md`, and relevant bilingual specifications before editing.
 - Do not change architecture or broaden scope without returning the issue to the primary agent.
+- Run focused checks during implementation; do not repeatedly run the complete suite unless this brief explicitly requires it.
+- Complete one main implementation pass and at most one bounded correction pass. If acceptance still requires architecture changes or broad repair, stop and return findings to the primary.
 - Do not push, publish, tag, release, or use destructive Git operations.
 - When using Antigravity, use the official `agy` CLI with `--sandbox`; never use `--dangerously-skip-permissions`.
 
@@ -51,4 +57,5 @@ State the observable outcome in one paragraph.
 - Changed files and why.
 - Commands run and exact results.
 - Remaining risks, assumptions, or blocked items.
+- Exact delivery state: implemented / verified / committed (never claim merged or pushed unless the primary performed it).
 - Branch, commit, and working-tree status; provide the diff for primary-agent review.

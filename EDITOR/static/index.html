@@ -127,43 +127,45 @@
         <button class="icon-button" type="button" data-close-dialog="settingsDialog" title="關閉" aria-label="關閉" data-i18n-title="關閉" data-i18n-aria-label="關閉">×</button>
       </div>
       <div class="dialog-body settings-body">
-        <section class="settings-section">
-          <div class="settings-section-heading">
-            <strong data-i18n="顯示與語言">顯示與語言</strong>
-          </div>
-          <label class="setting-row">
-            <span><strong data-i18n="介面語言">介面語言</strong><small data-i18n="選擇編輯器顯示語言">選擇編輯器顯示語言</small></span>
-            <select id="editorLanguage">
-              <option value="zh-Hant">繁體中文</option>
-              <option value="en">English</option>
-            </select>
-          </label>
-        </section>
+        <div class="settings-column settings-primary-column">
+          <section class="settings-section">
+            <div class="settings-section-heading">
+              <strong data-i18n="顯示與語言">顯示與語言</strong>
+            </div>
+            <label class="setting-row">
+              <span><strong data-i18n="介面語言">介面語言</strong></span>
+              <select id="editorLanguage">
+                <option value="zh-Hant">繁體中文</option>
+                <option value="en">English</option>
+              </select>
+            </label>
+          </section>
 
-        <section class="settings-section">
-          <div class="settings-section-heading">
-            <strong data-i18n="儲存與畫布">儲存與畫布</strong>
-          </div>
-          <label class="setting-row">
-            <span><strong data-i18n="自動儲存">自動儲存</strong><small data-i18n="停止輸入後自動寫入專案">停止輸入後自動寫入專案</small></span>
-            <input id="autosaveEnabled" type="checkbox">
-          </label>
-          <label class="setting-row">
-            <span><strong data-i18n="儲存延遲">儲存延遲</strong><small data-i18n="連續輸入時等待多久再儲存">連續輸入時等待多久再儲存</small></span>
-            <select id="autosaveDelay">
-              <option value="400" data-i18n="0.4 秒">0.4 秒</option>
-              <option value="700" data-i18n="0.7 秒">0.7 秒</option>
-              <option value="1200" data-i18n="1.2 秒">1.2 秒</option>
-              <option value="2000" data-i18n="2 秒">2 秒</option>
-            </select>
-          </label>
-          <label class="setting-row">
-            <span><strong data-i18n="格線尺寸">格線尺寸</strong><small data-i18n="選項畫布的吸附間距">選項畫布的吸附間距</small></span>
-            <input id="gridSize" type="number" min="4" max="160" step="2">
-          </label>
-        </section>
+          <section class="settings-section">
+            <div class="settings-section-heading">
+              <strong data-i18n="儲存與畫布">儲存與畫布</strong>
+            </div>
+            <label class="setting-row">
+              <span><strong data-i18n="自動儲存">自動儲存</strong></span>
+              <input id="autosaveEnabled" type="checkbox">
+            </label>
+            <label class="setting-row">
+              <span><strong data-i18n="儲存延遲">儲存延遲</strong></span>
+              <select id="autosaveDelay">
+                <option value="400" data-i18n="0.4 秒">0.4 秒</option>
+                <option value="700" data-i18n="0.7 秒">0.7 秒</option>
+                <option value="1200" data-i18n="1.2 秒">1.2 秒</option>
+                <option value="2000" data-i18n="2 秒">2 秒</option>
+              </select>
+            </label>
+            <label class="setting-row">
+              <span><strong data-i18n="格線尺寸">格線尺寸</strong></span>
+              <input id="gridSize" type="number" min="4" max="160" step="2">
+            </label>
+          </section>
+        </div>
 
-        <section class="settings-section">
+        <section class="settings-section settings-shortcuts-section">
           <div class="settings-section-heading">
             <strong data-i18n="快捷鍵">快捷鍵</strong>
             <button class="quiet-button compact" id="resetShortcuts" type="button" data-i18n="恢復預設">恢復預設</button>

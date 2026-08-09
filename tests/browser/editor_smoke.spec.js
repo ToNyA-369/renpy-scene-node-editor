@@ -589,6 +589,14 @@ test("critical editor interactions survive reload without browser errors", async
   // Verify English language switch, persistence, and restore Traditional Chinese
   await page.evaluate(() => document.querySelector("#settingsButton")?.click());
   await expect(page.locator("#settingsDialog")).toBeVisible();
+  await expect(page.locator(".settings-primary-column > .settings-section")).toHaveCount(2);
+  await expect(page.locator(".settings-primary-column small")).toHaveCount(0);
+  const settingsColumns = await page.locator(".settings-body").evaluate((body) => {
+    const primary = body.querySelector(".settings-primary-column").getBoundingClientRect();
+    const shortcuts = body.querySelector(".settings-shortcuts-section").getBoundingClientRect();
+    return { primaryLeft: primary.left, shortcutsLeft: shortcuts.left };
+  });
+  expect(settingsColumns.primaryLeft).toBeLessThan(settingsColumns.shortcutsLeft);
   const editorLanguageSelect = page.locator("#editorLanguage");
   await expect(editorLanguageSelect).toHaveValue("zh-Hant");
 
@@ -789,4 +797,38 @@ test("dynamic English surfaces render localized strings correctly across all wor
   await langSelectEn.selectOption("zh-Hant", { force: true });
   await restoreSaveResponse;
   await page.waitForLoadState("networkidle");
+});
+
+test("interaction details expose keyboard focus and honor reduced motion", async ({ page }) => {
+  const browserErrors = [];
+  page.on("console", (message) => {
+    if (message.type() === "error") browserErrors.push(`${message.type()}: ${message.text()}`);
+  });
+  page.on("pageerror", (error) => browserErrors.push(`pageerror: ${error.message}`));
+
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto(editorUrl);
+  await expect(page.getByRole("navigation", { name: "編輯器分頁" })).toBeVisible();
+
+  const nameField = page.locator('#nodeForm [name="Name"]');
+  await nameField.focus();
+  await expect.poll(() => nameField.evaluate((field) => getComputedStyle(field).borderColor))
+    .toBe("rgb(92, 114, 101)");
+  await expect.poll(() => nameField.evaluate((field) => getComputedStyle(field).boxShadow))
+    .not.toBe("none");
+
+  await page.evaluate(() => document.querySelector("#settingsButton")?.click());
+  const settingsDialog = page.locator("#settingsDialog");
+  await expect(settingsDialog).toBeVisible();
+  await expect.poll(() => settingsDialog.evaluate((dialog) => getComputedStyle(dialog).animationName))
+    .toContain("dialog-present");
+  await settingsDialog.evaluate((dialog) => dialog.close());
+
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.evaluate(() => document.querySelector("#settingsButton")?.click());
+  await expect(settingsDialog).toBeVisible();
+  await expect.poll(() => settingsDialog.evaluate((dialog) => getComputedStyle(dialog).animationName))
+    .toBe("none");
+
+  expect(browserErrors, browserErrors.join("\n")).toEqual([]);
 });
