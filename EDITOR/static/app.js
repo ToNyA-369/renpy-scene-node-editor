@@ -6,6 +6,17 @@ const SNAP_ENABLED_KEY = "scene-node-editor.option-snap-enabled";
 const GLOBAL_NODE_ID = "__global__";
 const GLOBAL_NODE_PATH = "@global";
 const {
+  DEFAULT_LOCALE,
+  EN_DICTIONARY,
+  SUPPORTED_LOCALES,
+  getLocale,
+  interpolate,
+  normalizeLocale,
+  setLocale,
+  t,
+  translateDocument,
+} = SceneI18n;
+const {
   DEFAULT_SHORTCUTS,
   SHORTCUT_LABELS,
   TAB_ORDER,
@@ -108,6 +119,7 @@ const dom = {
   settingsForm: document.querySelector("#settingsForm"),
   autosaveEnabled: document.querySelector("#autosaveEnabled"),
   autosaveDelay: document.querySelector("#autosaveDelay"),
+  editorLanguage: document.querySelector("#editorLanguage"),
   gridSize: document.querySelector("#gridSize"),
   shortcutList: document.querySelector("#shortcutList"),
   statNames: document.querySelector("#statNames"),
@@ -142,7 +154,7 @@ function numberValue(value, fallback = 0) {
 }
 
 function setSaveState(message, kind = "", detail = "") {
-  dom.saveState.textContent = message;
+  dom.saveState.textContent = t(message);
   dom.saveState.className = `save-state ${kind}`.trim();
   dom.saveState.title = detail;
 }
@@ -153,20 +165,26 @@ const autosaveCoordinator = SceneAutosave.createAutosaveCoordinator({
   setTimer: (callback, delay) => window.setTimeout(callback, delay),
   clearTimer: (timer) => window.clearTimeout(timer),
   onState: setSaveState,
-  onFailure: (label, error) => toast(`${label}：${error.message}`, "error"),
+  onFailure: (label, error) => toast(t("{label}：{message}", { label: t(label), message: error.message }), "error"),
 });
 
 function writeEditorSettings({ notifyFailure = true } = {}) {
   const snapshot = clone(state.editorSettings);
-  localStorage.setItem(SETTINGS_KEY, JSON.stringify(snapshot));
   editorSettingsSave = editorSettingsSave.then(async () => {
+    const previousLocalStorage = localStorage.getItem(SETTINGS_KEY);
     try {
       await api("/api/editor-settings", { method: "PUT", body: snapshot });
+      localStorage.setItem(SETTINGS_KEY, JSON.stringify(snapshot));
       editorSettingsSaveFailureNotified = false;
       return true;
     } catch (error) {
+      if (previousLocalStorage !== null) {
+        localStorage.setItem(SETTINGS_KEY, previousLocalStorage);
+      } else {
+        localStorage.removeItem(SETTINGS_KEY);
+      }
       if (notifyFailure && !editorSettingsSaveFailureNotified) {
-        toast(`編輯器設定未能儲存：${error.message}`, "error");
+        toast(t("編輯器設定未能儲存：{message}", { message: error.message }), "error");
         editorSettingsSaveFailureNotified = true;
       }
       return false;
@@ -210,7 +228,7 @@ async function flushAutosave() {
 function toast(message, kind = "") {
   const item = document.createElement("div");
   item.className = `toast ${kind}`.trim();
-  item.textContent = message;
+  item.textContent = t(message);
   dom.toastRegion.append(item);
   window.setTimeout(() => item.remove(), 3200);
 }
@@ -225,14 +243,14 @@ function optionTags(items, current, label = (item) => item, value = (item) => it
   }).join("");
 }
 
-function namedOptionTags(items, current, { includeNone = false } = {}) {
+function namedOptionTags(items, current, { includeNone = false, translateLabels = false } = {}) {
   const normalized = items.map((item) => ({
     id: String(item.id),
-    name: String(item.name || item.id),
+    name: translateLabels ? t(String(item.name || item.id)) : String(item.name || item.id),
     pickerPath: item.pickerPath ? String(item.pickerPath) : "",
   }));
   const known = new Set(normalized.map((item) => item.id));
-  if (current && !known.has(String(current))) normalized.push({ id: String(current), name: `${current}（未找到）` });
+  if (current && !known.has(String(current))) normalized.push({ id: String(current), name: t("{name}（未找到）", { name: current }) });
   const none = includeNone ? '<option value="">None</option>' : "";
   return none + normalized.map((item) => {
     const selected = item.id === String(current || "") ? " selected" : "";
@@ -262,7 +280,7 @@ function assetOptionTags(paths, current = "", directory = "", leading = []) {
     return `<option value="${escapeHtml(value)}" data-picker-path="${escapeHtml(relative)}"${selected}>${escapeHtml(leafName(value))}</option>`;
   }).join("");
   const missing = current && !known.has(String(current))
-    ? `<option value="${escapeHtml(current)}" selected>${escapeHtml(leafName(current))}（未找到）</option>`
+    ? `<option value="${escapeHtml(current)}" selected>${escapeHtml(t("{name}（未找到）", { name: leafName(current) }))}</option>`
     : "";
   return leadingTags + assetTags + missing;
 }
@@ -300,11 +318,11 @@ function memoryChoices() {
 }
 
 function warnMissingStat(kind) {
-  toast(`目前專案沒有任何 Stat。請先到「狀態」建立 Stat，再新增 Stat ${kind}。`, "error");
+  toast(t("目前專案沒有任何 Stat。請先到「狀態」建立 Stat，再新增 Stat {kind}。", { kind: t(kind) }), "error");
 }
 
 function warnMissingOptionTarget() {
-  toast("目前作用域沒有 CONTROLLED Option。請先在「選項」把 Element 或 Item 的 Availability 設為 CONTROLLED。", "error");
+  toast(t("目前作用域沒有 CONTROLLED Option。請先在「選項」把 Element 或 Item 的 Availability 設為 CONTROLLED。"), "error");
 }
 
 function nodeChoices() {
@@ -343,7 +361,7 @@ function optionEffectChoices() {
       const elementName = String(entry.elementName || entry.elementId).replaceAll("/", "／");
       const leaf = entry.target === "item"
         ? String(entry.itemName || entry.itemId).replaceAll("/", "／")
-        : entry.elementType === "TEXTBOX" ? "整個選項列" : elementName;
+        : entry.elementType === "TEXTBOX" ? t("整個選項列") : elementName;
       const pickerPath = entry.target === "item" || entry.elementType === "TEXTBOX"
         ? `${elementName}/${leaf}`
         : leaf;
@@ -367,7 +385,7 @@ function optionEffectOptionTags(effect) {
   }).join("");
   if (known || !effect.node) return tags;
   const missingName = [effect.node, effect.element, effect.item].filter(Boolean).join(" / ");
-  return tags + `<option value="${escapeHtml(current)}" selected>${escapeHtml(missingName)}（未找到）</option>`;
+  return tags + `<option value="${escapeHtml(current)}" selected>${escapeHtml(t("{name}（未找到）", { name: missingName }))}</option>`;
 }
 
 function contentChoices() {
@@ -387,7 +405,7 @@ function contentFileDisplayName(file) {
 function contentLabelDisplayName(file, label) {
   const labels = file?.labels || [];
   if (labels.length === 1) return contentFileDisplayName(file);
-  return String(label || "尚未選擇");
+  return String(label || t("尚未選擇"));
 }
 
 function contentLabelFile(label) {
@@ -431,13 +449,13 @@ function contentPickerHtml(label, index) {
   const selectedFile = contentLabelFile(label);
   const selectedName = selectedFile
     ? contentLabelDisplayName(selectedFile, label)
-    : (label ? `${leafName(label)}（未找到）` : "尚未選擇");
+    : (label ? t("{name}（未找到）", { name: leafName(label) }) : t("尚未選擇"));
   const files = state.nodeDetail?.contents || [];
   const fileRows = files.map((file) => {
     const fileName = contentFileDisplayName(file);
     const labels = file.labels || [];
     if (!labels.length) {
-      return `<button class="content-file-choice is-disabled" type="button" disabled><span>${escapeHtml(fileName)}</span><small>沒有 label</small></button>`;
+      return `<button class="content-file-choice is-disabled" type="button" disabled><span>${escapeHtml(fileName)}</span><small>${escapeHtml(t("沒有 label"))}</small></button>`;
     }
     if (labels.length === 1) {
       return `
@@ -468,7 +486,7 @@ function contentPickerHtml(label, index) {
           <span><strong>${escapeHtml(selectedName)}</strong></span><i aria-hidden="true">⌄</i>
         </button>
         <div class="content-choice-menu" role="menu">
-          ${fileRows || '<div class="content-choice-empty">目前節點沒有 Content 文件。</div>'}
+          ${fileRows || `<div class="content-choice-empty">${escapeHtml(t("目前節點沒有 Content 文件。"))}</div>`}
         </div>
       </div>
     </div>
@@ -564,13 +582,13 @@ function updateDatalists() {
 function updateHeader() {
   const node = state.nodeDetail?.node;
   dom.projectName.textContent = state.projectName || "Scene Node Editor";
-  dom.projectSummary.textContent = `${state.nodes.length} 個節點`;
+  dom.projectSummary.textContent = t("{count} 個節點", { count: state.nodes.length });
   dom.nodeTitle.textContent = node?.Name || node?.ID || "Scene Node Editor";
   dom.nodePath.textContent = isGlobalNode()
     ? "GLOBALNODE"
     : state.selectedNodePath
       ? `SCENENODE/${state.selectedNodePath}`
-      : state.projectPath || "尚未選擇節點";
+      : state.projectPath || t("尚未選擇節點");
   dom.eventCount.textContent = state.nodeDetail?.events?.length || 0;
   dom.issueCount.textContent = state.issues.length;
   dom.issueCount.classList.toggle("has-errors", state.issues.length > 0);
@@ -594,7 +612,7 @@ function renderNodeList() {
     return !query || haystack.includes(query);
   });
   if (!nodes.length && !globalMatches) {
-    dom.nodeList.innerHTML = `<div class="node-list-empty">${state.nodes.length ? "沒有符合的節點" : "尚未建立 Scene Node"}</div>`;
+    dom.nodeList.innerHTML = `<div class="node-list-empty">${state.nodes.length ? escapeHtml(t("沒有符合的節點")) : escapeHtml(t("尚未建立 Scene Node"))}</div>`;
     return;
   }
   const globalHtml = globalMatches ? `
@@ -602,9 +620,9 @@ function renderNodeList() {
       <button class="node-item global-node-item ${globalNode.path === state.selectedNodePath ? "active" : ""}" type="button" data-node-path="${escapeHtml(globalNode.path)}">
         <span class="node-item-copy">
           <strong>${escapeHtml(globalNode.name || "GLOBAL")}<span class="global-node-badge">GLOBAL</span></strong>
-          <span>所有 Scene Node 的事件與選項作用域</span>
+          <span>${escapeHtml(t("所有 Scene Node 的事件與選項作用域"))}</span>
         </span>
-        <span class="node-event-count" title="Global Event 數量">${globalNode.eventCount}</span>
+        <span class="node-event-count" title="${escapeHtml(t("Global Event 數量"))}">${globalNode.eventCount}</span>
       </button>
     </div>
   ` : "";
@@ -615,7 +633,7 @@ function renderNodeList() {
         <strong>${escapeHtml(node.name || node.id)}${node.isRoot ? '<span class="root-node-badge is-compact">ROOT</span>' : ""}</strong>
         <span>${escapeHtml(node.path)}</span>
       </span>
-      <span class="node-event-count" title="Event 數量">${node.eventCount}</span>
+      <span class="node-event-count" title="${escapeHtml(t("Event 數量"))}">${node.eventCount}</span>
     </button>
   `).join("");
   dom.nodeList.innerHTML = globalHtml + nodesHtml;
@@ -802,9 +820,9 @@ function renderNodePanel() {
         <div class="node-root-row">
           <div>
             <span class="root-node-badge ${isGlobal ? "is-global" : ""}">${isGlobal ? "GLOBAL" : isRoot ? "ROOT" : "NODE"}</span>
-            <span>${isGlobal ? "套用至所有 Scene Node 的全域事件與選項作用域" : isRoot ? "目前的遊戲起始節點" : "可設為遊戲起始節點"}</span>
+            <span>${escapeHtml(isGlobal ? t("套用至所有 Scene Node 的全域事件與選項作用域") : isRoot ? t("目前的遊戲起始節點") : t("可設為遊戲起始節點"))}</span>
           </div>
-          ${isGlobal || isRoot ? "" : '<button class="quiet-button compact" id="setRootNodeButton" type="button">設為起始節點</button>'}
+          ${isGlobal || isRoot ? "" : `<button class="quiet-button compact" id="setRootNodeButton" type="button">${escapeHtml(t("設為起始節點"))}</button>`}
         </div>
         <form id="nodeForm" class="bento-form">
           <div class="form-section node-form-section node-identity-section">
@@ -853,7 +871,7 @@ function renderNodePanel() {
         </section>
 
         ${isGlobal ? "" : `<div class="editor-danger-zone">
-          <button class="danger-button" id="deleteNodeButton" type="button" ${isRoot ? 'disabled title="請先將其他節點設為起始節點"' : ""}>刪除節點</button>
+          <button class="danger-button" id="deleteNodeButton" type="button" ${isRoot ? `disabled title="${escapeHtml(t("請先將其他節點設為起始節點"))}"` : ""}>${escapeHtml(t("刪除節點"))}</button>
         </div>`}
       </div>
     </div>
@@ -869,11 +887,11 @@ function renderNodePanel() {
 async function setSelectedNodeAsRoot() {
   if (!state.nodeDetail || !await flushAutosave()) return;
   if (isGlobalNode()) {
-    toast("Global Node 不可設為起始節點。", "error");
+    toast(t("Global Node 不可設為起始節點。"), "error");
     return;
   }
   const nodeId = state.nodeDetail.node.ID;
-  setSaveState("設定起始節點中", "saving");
+  setSaveState(t("儲存中..."), "saving");
   try {
     const result = await api("/api/project/root", { method: "PUT", body: { nodeId } });
     state.rootNodeId = result.rootNodeId;
@@ -883,10 +901,10 @@ async function setSelectedNodeAsRoot() {
     renderNodePanel();
     renderValidationPanel();
     updateHeader();
-    setSaveState("已同步");
-    toast(`${state.nodeDetail.node.Name || nodeId} 已設為起始節點`);
+    setSaveState(t("已同步"));
+    toast(t("{name} 已設為起始節點", { name: state.nodeDetail.node.Name || nodeId }));
   } catch (error) {
-    setSaveState("設定失敗", "error");
+    setSaveState(t("儲存失敗"), "error");
     toast(error.message, "error");
   }
 }
@@ -922,20 +940,20 @@ async function persistNodeSnapshot(snapshot, task = null) {
 
 function scheduleNodeAutosave() {
   const snapshot = readNodeForm();
-  if (snapshot) scheduleAutosave("節點設定未能儲存", (task) => persistNodeSnapshot(snapshot, task));
+  if (snapshot) scheduleAutosave(t("編輯器設定未能儲存"), (task) => persistNodeSnapshot(snapshot, task));
 }
 
 async function saveNode(event) {
   event.preventDefault();
   const snapshot = readNodeForm(event.currentTarget);
   await cancelAutosaveAndWait();
-  setSaveState("儲存中", "saving");
+  setSaveState(t("儲存中..."), "saving");
   try {
     await persistNodeSnapshot(snapshot);
     await refreshAfterSave();
-    toast("節點設定已儲存");
+    toast(t("節點設定已儲存"));
   } catch (error) {
-    setSaveState("儲存失敗", "error");
+    setSaveState(t("儲存失敗"), "error");
     toast(error.message, "error");
   }
 }
@@ -944,28 +962,28 @@ async function deleteNode() {
   const node = state.nodeDetail?.node;
   if (!node) return;
   if (isGlobalNode()) {
-    toast("Global Node 不可刪除。", "error");
+    toast(t("Global Node 不可刪除。"), "error");
     return;
   }
   try {
     const check = await api(`/api/node/references?path=${encodeURIComponent(state.selectedNodePath)}`);
     if (check.references.length) {
       const lines = check.references.slice(0, 8).map((reference) => `• ${reference.nodeName} / ${reference.eventName}`);
-      window.alert(`目前仍有 ${check.references.length} 個 Event 指向「${node.Name || node.ID}」：\n\n${lines.join("\n")}\n\n請先修改這些 Next Node。`);
+      window.alert(t("目前仍有 {count} 個 Event 指向「{name}」：\n\n{lines}\n\n請先修改這些 Next Node。", { count: check.references.length, name: node.Name || node.ID, lines: lines.join("\n") }));
       return;
     }
     const eventCount = state.nodeDetail.events.length;
     const contentCount = state.nodeDetail.contents.length;
-    const confirmed = window.confirm(`確定刪除「${node.Name || node.ID}」？\n\n${eventCount} 個 Event、${contentCount} 個 Content 將移至可復原區。`);
+    const confirmed = window.confirm(t("確定刪除「{name}」？\n\n{events} 個 Event、{contents} 個 Content 將移至可復原區。", { name: node.Name || node.ID, events: eventCount, contents: contentCount }));
     if (!confirmed) return;
     await cancelAutosaveAndWait();
     const result = await api(`/api/nodes?path=${encodeURIComponent(state.selectedNodePath)}`, { method: "DELETE" });
     state.selectedNodePath = null;
     state.nodeDetail = null;
     await loadProject({ preserveNode: false });
-    toast(`節點已移至可復原區：${result.backup}`);
+    toast(t("節點已移至可復原區：{id}", { id: result.backup }));
   } catch (error) {
-    setSaveState("儲存失敗", "error");
+    setSaveState(t("儲存失敗"), "error");
     toast(error.message, "error");
   }
 }
@@ -989,7 +1007,7 @@ function eventActionChoices(current = "") {
   });
   const currentValue = String(current || "").trim();
   if (currentValue && !currentValue.startsWith("Auto:") && !seen.has(currentValue)) {
-    choices.push({ id: currentValue, name: `${actionTriggerName(currentValue)}（未找到）` });
+    choices.push({ id: currentValue, name: t("{name}（未找到）", { name: actionTriggerName(currentValue) }) });
   }
   return choices;
 }
@@ -1012,7 +1030,7 @@ function defaultEvent(id = generateId("event")) {
 
 function eventListHtml() {
   const events = state.nodeDetail?.events || [];
-  if (!events.length) return `<div class="node-list-empty">尚未建立 Event</div>`;
+  if (!events.length) return `<div class="node-list-empty">${escapeHtml(t("尚未建立 Event"))}</div>`;
   return events.map((entry) => {
     const event = entry.data.ID === state.selectedEventId && state.eventDraft ? state.eventDraft : entry.data;
     return `
@@ -1076,7 +1094,7 @@ function renderEventsPanel({ preserveView = false } = {}) {
       <aside class="subnav">
         <div class="subnav-header">
           <div class="subnav-header-actions">
-            <button class="icon-button add-button" id="newEventButton" type="button" title="新增 Event" aria-label="新增 Event">＋</button>
+            <button class="icon-button add-button" id="newEventButton" type="button" title="${escapeHtml(t("新增 Event"))}" aria-label="${escapeHtml(t("新增 Event"))}">＋</button>
           </div>
         </div>
         <div class="subnav-list">${eventListHtml()}</div>
@@ -1085,8 +1103,8 @@ function renderEventsPanel({ preserveView = false } = {}) {
         ${state.eventDraft ? eventEditorHtml(state.eventDraft) : `
           <div class="editor-empty">
             <div>
-              <p>這個節點還沒有 Event。</p>
-              <button class="primary-button add-button" id="emptyNewEventButton" type="button">新增 Event</button>
+              <p>${escapeHtml(t("這個節點還沒有 Event。"))}</p>
+              <button class="primary-button add-button" id="emptyNewEventButton" type="button">${escapeHtml(t("新增 Event"))}</button>
             </div>
           </div>
         `}
@@ -1102,13 +1120,13 @@ function eventEditorHtml(event) {
   const triggerMode = eventTriggerMode(event.Trigger);
   const lifecycle = isLifecycleTrigger(event.Trigger);
   const triggerInput = triggerMode === "Action"
-    ? `<select name="Trigger" aria-label="Option 選項" required>${namedOptionTags(eventActionChoices(event.Trigger), event.Trigger)}</select>`
+    ? `<select name="Trigger" aria-label="${escapeHtml(t("Option 選項"))}" required>${namedOptionTags(eventActionChoices(event.Trigger), event.Trigger)}</select>`
     : triggerMode === "Keyboard"
-      ? `<input class="keyboard-trigger-recorder" data-keyboard-trigger readonly aria-label="Keyboard 按鍵" value="${escapeHtml(keyboardKeysymDisplay(keyboardTriggerKeysym(event.Trigger)))}" title="聚焦後直接按下按鍵或按鍵組合">
+      ? `<input class="keyboard-trigger-recorder" data-keyboard-trigger readonly aria-label="${escapeHtml(t("Keyboard 按鍵"))}" value="${escapeHtml(keyboardKeysymDisplay(keyboardTriggerKeysym(event.Trigger)))}" title="${escapeHtml(t("聚焦後直接按下按鍵或按鍵組合"))}">
          <input name="Trigger" type="hidden" value="${escapeHtml(event.Trigger)}">`
       : triggerMode === "Mouse"
-        ? `<select name="Trigger" aria-label="Mouse 按鍵" required>${namedOptionTags(MOUSE_TRIGGER_CHOICES, event.Trigger)}</select>`
-        : `<select name="Trigger" aria-label="Auto 時機" required>${namedOptionTags(AUTO_TRIGGER_CHOICES, event.Trigger)}</select>`;
+        ? `<select name="Trigger" aria-label="${escapeHtml(t("Mouse 按鍵"))}" required>${namedOptionTags(MOUSE_TRIGGER_CHOICES, event.Trigger, { translateLabels: true })}</select>`
+        : `<select name="Trigger" aria-label="${escapeHtml(t("Auto 時機"))}" required>${namedOptionTags(AUTO_TRIGGER_CHOICES, event.Trigger, { translateLabels: true })}</select>`;
   return `
     <form class="editor-page" id="eventForm">
       <div class="form-section event-primary-section">
@@ -1117,7 +1135,7 @@ function eventEditorHtml(event) {
           <div class="field event-trigger-field">
             <span>Trigger</span>
             <div class="event-trigger-control is-${triggerMode.toLocaleLowerCase()}">
-              <select name="TriggerMode" aria-label="Trigger 模式">${namedOptionTags(eventTriggerModeChoices(), triggerMode)}</select>
+              <select name="TriggerMode" aria-label="${escapeHtml(t("Trigger 模式"))}">${namedOptionTags(eventTriggerModeChoices(), triggerMode, { translateLabels: true })}</select>
               ${triggerInput}
             </div>
           </div>
@@ -1138,24 +1156,24 @@ function eventEditorHtml(event) {
 
       <details class="form-section collapsible-section" open>
         <summary class="form-section-header">
-          <div><h3>Conditions</h3><span>${event.Conditions?.length || 0} 個條件</span></div>
-          <button class="icon-button section-add-button add-button" id="addConditionButton" type="button" title="新增條件" aria-label="新增條件">＋</button>
+          <div><h3>Conditions</h3><span>${escapeHtml(t("{count} 個條件", { count: event.Conditions?.length || 0 }))}</span></div>
+          <button class="icon-button section-add-button add-button" id="addConditionButton" type="button" title="${escapeHtml(t("新增條件"))}" aria-label="${escapeHtml(t("新增條件"))}">＋</button>
         </summary>
         <div class="collapsible-section-body"><div class="repeat-list" id="conditionList">${conditionRowsHtml(event.Conditions || [])}</div></div>
       </details>
 
       <details class="form-section collapsible-section" open>
         <summary class="form-section-header">
-          <div><h3>Effects</h3><span>${event.Effects?.length || 0} 個效果</span></div>
-          <button class="icon-button section-add-button add-button" id="addEffectButton" type="button" title="新增 Effect" aria-label="新增 Effect">＋</button>
+          <div><h3>Effects</h3><span>${escapeHtml(t("{count} 個效果", { count: event.Effects?.length || 0 }))}</span></div>
+          <button class="icon-button section-add-button add-button" id="addEffectButton" type="button" title="${escapeHtml(t("新增 Effect"))}" aria-label="${escapeHtml(t("新增 Effect"))}">＋</button>
         </summary>
         <div class="collapsible-section-body"><div class="repeat-list" id="effectList">${effectRowsHtml(event.Effects || [])}</div></div>
       </details>
 
       <details class="form-section collapsible-section event-choice-section" open>
         <summary class="form-section-header">
-          <div><h3>Content</h3><span>${choiceEntries(event.Content).length} 個演出</span></div>
-          <button class="icon-button section-add-button add-button" type="button" data-add-weighted="content" title="新增演出" aria-label="新增演出">＋</button>
+          <div><h3>Content</h3><span>${escapeHtml(t("{count} 個演出", { count: choiceEntries(event.Content).length }))}</span></div>
+          <button class="icon-button section-add-button add-button" type="button" data-add-weighted="content" title="${escapeHtml(t("新增演出"))}" aria-label="${escapeHtml(t("新增演出"))}">＋</button>
         </summary>
         <div class="collapsible-section-body">${choiceBlockHtml(event.Content, "content")}</div>
       </details>
@@ -1163,7 +1181,7 @@ function eventEditorHtml(event) {
       ${lifecycle ? "" : `<details class="form-section collapsible-section event-choice-section" open>
         <summary class="form-section-header">
           <div><h3>End up</h3><span>${escapeHtml(event["End up"] || "REDO")}</span></div>
-          ${endUpUsesNextNode(event["End up"]) ? '<button class="icon-button section-add-button add-button" type="button" data-add-weighted="next" title="新增節點" aria-label="新增節點">＋</button>' : ""}
+          ${endUpUsesNextNode(event["End up"]) ? `<button class="icon-button section-add-button add-button" type="button" data-add-weighted="next" title="${escapeHtml(t("新增節點"))}" aria-label="${escapeHtml(t("新增節點"))}">＋</button>` : ""}
         </summary>
         <div class="collapsible-section-body">
           <div class="end-up-control">
@@ -1173,7 +1191,7 @@ function eventEditorHtml(event) {
         </div>
       </details>`}
 
-      ${state.eventOriginalId ? '<div class="editor-danger-zone"><button class="danger-button" id="deleteEventButton" type="button">刪除事件</button></div>' : ""}
+      ${state.eventOriginalId ? `<div class="editor-danger-zone"><button class="danger-button" id="deleteEventButton" type="button">${escapeHtml(t("刪除事件"))}</button></div>` : ""}
     </form>
   `;
 }
@@ -1356,7 +1374,7 @@ function bindEventPanel() {
       const key = addWeighted === "content" ? "Content" : "Next Node";
       const available = addWeighted === "content" ? contentChoices() : nodeChoices();
       if (!available.length) {
-        toast(addWeighted === "content" ? "目前節點沒有可用的 Content label。" : "目前專案沒有 Scene Node。", "error");
+        toast(addWeighted === "content" ? t("目前節點沒有可用的 Content label。") : t("目前專案沒有 Scene Node。"), "error");
         return;
       }
       state.eventDraft[key] = addWeightedChoice(
@@ -1383,7 +1401,7 @@ function bindEventPanel() {
           state.eventDraft = draft;
           scheduleEventAutosave({ useDraft: true });
           renderEventsPanel({ preserveView: true });
-          toast("目前節點尚未建立可供 Event 使用的選項。", "error");
+          toast(t("目前節點尚未建立可供 Event 使用的選項。"), "error");
           return;
         }
         draft.Trigger = action;
@@ -1510,7 +1528,7 @@ function scheduleEventAutosave({ useDraft = false } = {}) {
     event: clone(state.eventDraft),
   };
   if (!state.eventOriginalId) state.eventOriginalId = snapshot.event.ID;
-  scheduleAutosave("Event 未能儲存", (task) => persistEventSnapshot(snapshot, task));
+  scheduleAutosave(t("Event 未能儲存"), (task) => persistEventSnapshot(snapshot, task));
 }
 
 async function saveEvent(event) {
@@ -1518,22 +1536,22 @@ async function saveEvent(event) {
   const draft = readEventForm();
   const snapshot = { node: state.selectedNodePath, originalId: state.eventOriginalId, event: clone(draft) };
   await cancelAutosaveAndWait();
-  setSaveState("儲存中", "saving");
+  setSaveState(t("儲存中..."), "saving");
   try {
     const saved = await persistEventSnapshot(snapshot);
     state.selectedEventId = saved.ID;
     state.eventOriginalId = saved.ID;
     await refreshAfterSave();
     selectEvent(saved.ID);
-    toast("Event 已儲存");
+    toast(t("Event 已儲存"));
   } catch (error) {
-    setSaveState("儲存失敗", "error");
+    setSaveState(t("儲存失敗"), "error");
     toast(error.message, "error");
   }
 }
 
 async function deleteEvent() {
-  if (!state.eventOriginalId || !window.confirm(`確定刪除 Event「${state.eventOriginalId}」？`)) return;
+  if (!state.eventOriginalId || !window.confirm(t("確定刪除 Event「{id}」？", { id: state.eventOriginalId }))) return;
   try {
     await cancelAutosaveAndWait();
     await api(`/api/events?node=${encodeURIComponent(state.selectedNodePath)}&id=${encodeURIComponent(state.eventOriginalId)}`, { method: "DELETE" });
@@ -1541,9 +1559,9 @@ async function deleteEvent() {
     state.eventOriginalId = null;
     state.eventDraft = null;
     await refreshAfterSave();
-    toast("Event 已刪除");
+    toast(t("Event 已刪除"));
   } catch (error) {
-    setSaveState("儲存失敗", "error");
+    setSaveState(t("儲存失敗"), "error");
     toast(error.message, "error");
   }
 }
@@ -1660,22 +1678,23 @@ function formatSliderValue(value, format = "", suffix = "") {
   return `${rounded}${suffix}`;
 }
 
-function rangeField(label, path, value, { min, max, step = 1, suffix = "", format = "", itemField = false } = {}) {
-  const pathAttribute = itemField ? "data-option-item-path" : "data-option-path";
-  const current = numberValue(value, min);
+function rangeField(label, path, value, { min = 0, max = 100, step = 1, format = "number", suffix = "", itemField = false } = {}) {
+  const displayLabel = t(label);
+  const rawNumber = numberValue(value, min);
   const scale = format === "percent" ? 100 : 1;
-  const controlValue = Number((current * scale).toFixed(4));
-  const controlMin = Number((min * scale).toFixed(4));
-  const controlMax = Number((max * scale).toFixed(4));
-  const controlStep = Number((step * scale).toFixed(4));
-  const display = formatSliderValue(current, format, suffix);
+  const controlMin = min * scale;
+  const controlMax = max * scale;
+  const controlStep = step * scale;
+  const controlValue = Math.round(rawNumber * scale);
+  const display = format === "percent" ? `${controlValue}%` : `${rawNumber}${suffix}`;
+  const pathAttribute = itemField ? "data-option-item-path" : "data-option-path";
   const metadata = `data-range-format="${escapeHtml(format)}" data-range-suffix="${escapeHtml(suffix)}" data-range-scale="${scale}"`;
   return `
     <div class="field slider-field">
-      <span class="slider-field-heading"><span>${escapeHtml(label)}</span><output>${escapeHtml(display)}</output></span>
+      <span class="slider-field-heading"><span>${escapeHtml(displayLabel)}</span><output>${escapeHtml(display)}</output></span>
       <span class="slider-control">
-        <input ${pathAttribute}="${escapeHtml(path)}" ${metadata} type="range" min="${controlMin}" max="${controlMax}" step="${controlStep}" value="${escapeHtml(controlValue)}" aria-label="${escapeHtml(label)}">
-        <input ${pathAttribute}="${escapeHtml(path)}" ${metadata} class="slider-number" type="number" min="${controlMin}" max="${controlMax}" step="${controlStep}" value="${escapeHtml(controlValue)}" aria-label="${escapeHtml(label)}精確值">
+        <input ${pathAttribute}="${escapeHtml(path)}" ${metadata} type="range" min="${controlMin}" max="${controlMax}" step="${controlStep}" value="${escapeHtml(controlValue)}" aria-label="${escapeHtml(displayLabel)}">
+        <input ${pathAttribute}="${escapeHtml(path)}" ${metadata} class="slider-number" type="number" min="${controlMin}" max="${controlMax}" step="${controlStep}" value="${escapeHtml(controlValue)}" aria-label="${escapeHtml(`${displayLabel} ${t("精確值")}`)}">
       </span>
     </div>
   `;
@@ -1690,10 +1709,10 @@ function transparentColorField(label, path, value, fallback, itemField = false) 
     <div class="field transparent-color-field">
       <span>${escapeHtml(label)}</span>
       <span class="transparent-color-control">
-        <input ${colorPath}="${escapeHtml(path)}" type="color" value="${escapeHtml(opaqueColor)}" aria-label="${escapeHtml(label)}顏色">
+        <input ${colorPath}="${escapeHtml(path)}" type="color" value="${escapeHtml(opaqueColor)}" aria-label="${escapeHtml(`${label} ${t("顏色")}`)}">
         <span class="color-opacity-control">
-          <span class="color-opacity-heading"><span>不透明度</span><output>${opacity}%</output></span>
-          <input ${colorPath}="${escapeHtml(path)}" type="range" min="0" max="100" step="1" value="${opacity}" aria-label="${escapeHtml(label)}不透明度">
+          <span class="color-opacity-heading"><span>${escapeHtml(t("不透明度"))}</span><output>${opacity}%</output></span>
+          <input ${colorPath}="${escapeHtml(path)}" type="range" min="0" max="100" step="1" value="${opacity}" aria-label="${escapeHtml(`${label} ${t("不透明度")}`)}">
         </span>
       </span>
     </div>
@@ -1722,12 +1741,12 @@ function markOptionsDirty() {
 
 function optionElementListHtml() {
   const elements = state.optionsDraft?.Elements || [];
-  if (!elements.length) return `<div class="node-list-empty">尚未建立選項</div>`;
+  if (!elements.length) return `<div class="node-list-empty">${escapeHtml(t("尚未建立選項"))}</div>`;
   return elements.map((element) => `
     <button class="subnav-item option-element-list-item ${element.ID === state.selectedOptionElementId ? "active" : ""}" type="button" data-option-element-select="${escapeHtml(element.ID)}">
       <span class="subnav-item-copy">
         <strong>${escapeHtml(element.Name || element.ID)}</strong>
-        <span>${escapeHtml(optionTypeLabel(element.Type))}${element.Type === "TEXTBOX" ? ` · ${element.Items?.length || 0} 項` : ""}${element.Availability === "CONTROLLED" ? " · Controlled" : ""}</span>
+        <span>${escapeHtml(optionTypeLabel(element.Type))}${element.Type === "TEXTBOX" ? ` · ${escapeHtml(t("{count} 項", { count: element.Items?.length || 0 }))}` : ""}${element.Availability === "CONTROLLED" ? " · Controlled" : ""}</span>
       </span>
     </button>
   `).join("");
@@ -1758,7 +1777,7 @@ function optionStageElementHtml(element) {
             <button class="option-text-item ${hoverClass} ${item.ID === state.selectedOptionItemId ? "selected" : ""}" type="button" data-option-item-select="${escapeHtml(item.ID)}" style="height:${metrics.itemHeight}px;--option-item-background:${safeColor(style["Item Background"])};--option-hover-color:${safeColor(hover.Color, "#ffffff18")};background:var(--option-item-background);color:${safeColor(style["Text Color"], "#ffffff")};font-size:${numberValue(style["Text Size"], 30)}px;text-align:${numberValue(style["Text Align"], 0.5) === 0 ? "left" : numberValue(style["Text Align"], 0.5) === 1 ? "right" : "center"}">
               ${escapeHtml(item.Text || item.Name || item.ID)}${item.Availability === "CONTROLLED" ? '<span class="visually-hidden">（Controlled）</span>' : ""}
             </button>
-          `).join("") : `<div class="option-empty-row" style="height:${metrics.itemHeight}px">尚未建立 Item</div>`}
+          `).join("") : `<div class="option-empty-row" style="height:${metrics.itemHeight}px">${escapeHtml(t("尚未建立 Item"))}</div>`}
         </div>
       </div>
     `;
@@ -1774,7 +1793,7 @@ function optionStageElementHtml(element) {
           ${hoverImage ? `<img class="option-picture-hover" src="${escapeHtml(assetUrl(hoverImage))}" alt="" draggable="false" style="object-fit:${fit}">` : ""}
           <span class="option-picture-hover-color"></span>
         </div>`
-      : `<div class="option-picture-placeholder"><span>PICTURE</span><small>選擇 Idle 圖片</small></div>`;
+      : `<div class="option-picture-placeholder"><span>PICTURE</span><small>${escapeHtml(t("選擇 Idle 圖片"))}</small></div>`;
   } else {
     const hitbox = element.Hitbox || {};
     const hover = element.Hover || {};
@@ -1817,14 +1836,14 @@ function textBoxItemsHtml(element) {
         <div class="option-item-row">
           <div class="option-item-entry ${item.ID === state.selectedOptionItemId ? "active" : ""}">
             <button type="button" data-option-item-select="${escapeHtml(item.ID)}"><strong>${escapeHtml(item.Name || item.Text || item.ID)}</strong><span>${escapeHtml(actionTriggerName(item.Trigger))}${item.Availability === "CONTROLLED" ? " · Controlled" : ""}</span></button>
-            <button class="option-item-delete" type="button" data-delete-option-item="${escapeHtml(item.ID)}" title="刪除選項" aria-label="刪除選項">×</button>
+            <button class="option-item-delete" type="button" data-delete-option-item="${escapeHtml(item.ID)}" title="${escapeHtml(t("刪除選項"))}" aria-label="${escapeHtml(t("刪除選項"))}">×</button>
           </div>
           <div class="option-item-order">
-            <button type="button" data-move-option-item="${index}:-1" title="上移" aria-label="上移" ${index === 0 ? "disabled" : ""}>↑</button>
-            <button type="button" data-move-option-item="${index}:1" title="下移" aria-label="下移" ${index === items.length - 1 ? "disabled" : ""}>↓</button>
+            <button type="button" data-move-option-item="${index}:-1" title="${escapeHtml(t("上移"))}" aria-label="${escapeHtml(t("上移"))}" ${index === 0 ? "disabled" : ""}>↑</button>
+            <button type="button" data-move-option-item="${index}:1" title="${escapeHtml(t("下移"))}" aria-label="${escapeHtml(t("下移"))}" ${index === items.length - 1 ? "disabled" : ""}>↓</button>
           </div>
         </div>
-      `).join("") || `<div class="row-empty compact-empty">尚未建立 Item</div>`}
+      `).join("") || `<div class="row-empty compact-empty">${escapeHtml(t("尚未建立 Item"))}</div>`}
     </div>
   `;
 }
@@ -1846,10 +1865,10 @@ function optionHoverFields(element, { picture = false } = {}) {
   const hoverEnabled = hover.Enabled !== false;
   const pictureData = element.Picture || {};
   return `
-    ${optionBooleanField("Hover 效果", 'data-option-path="Hover.Enabled"', hoverEnabled)}
+    ${optionBooleanField(t("Hover 效果"), 'data-option-path="Hover.Enabled"', hoverEnabled)}
     ${hoverEnabled ? `
-      ${transparentColorField("Hover 顏色", "Hover.Color", hover.Color, "#ffffff18")}
-      ${picture ? `<label class="field"><span>Hover 圖片</span><select data-option-path="Picture.Hover" aria-label="Hover 圖片">${imageOptionTags(pictureData.Hover || "", [{ id: "", name: "None" }])}</select></label>` : ""}
+      ${transparentColorField(t("Hover 顏色"), "Hover.Color", hover.Color, "#ffffff18")}
+      ${picture ? `<label class="field"><span>${escapeHtml(t("Hover 圖片"))}</span><select data-option-path="Picture.Hover" aria-label="${escapeHtml(t("Hover 圖片"))}">${imageOptionTags(pictureData.Hover || "", [{ id: "", name: "None" }])}</select></label>` : ""}
     ` : ""}
   `;
 }
@@ -1866,10 +1885,12 @@ function optionSoundSection(element) {
 }
 
 function optionCollapsibleSection(title, summary, body, extraClass = "") {
+  const displayTitle = t(title);
+  const displaySummary = summary ? t(summary) : "";
   return `
     <details class="form-section collapsible-section option-collapsible-section ${extraClass}" data-option-section="${escapeHtml(title)}">
       <summary class="form-section-header">
-        <div><h3>${escapeHtml(title)}</h3>${summary ? `<span>${escapeHtml(summary)}</span>` : ""}</div>
+        <div><h3>${escapeHtml(displayTitle)}</h3>${displaySummary ? `<span>${escapeHtml(displaySummary)}</span>` : ""}</div>
       </summary>
       <div class="collapsible-section-body">${body}</div>
     </details>
@@ -1881,8 +1902,8 @@ function optionInspectorHtml() {
   if (!element) {
     return `
       <div class="option-inspector-empty">
-        <strong>${state.optionWorkspaceMode === "canvas" ? "畫布上尚無可調整的選項" : "選擇或新增選項"}</strong>
-        ${state.optionWorkspaceMode === "canvas" ? '<span>向左拖曳分隔把手即可回到表單新增。</span>' : ""}
+        <strong>${escapeHtml(state.optionWorkspaceMode === "canvas" ? t("畫布上尚無可調整的選項") : t("選擇或新增選項"))}</strong>
+        ${state.optionWorkspaceMode === "canvas" ? `<span>${escapeHtml(t("向左拖曳分隔把手即可回到表單新增。"))}</span>` : ""}
       </div>
     `;
   }
@@ -1894,11 +1915,11 @@ function optionInspectorHtml() {
       <label class="field"><span>Y</span><input data-option-path="Layout.Y" type="number" value="${escapeHtml(layout.Y ?? 0)}"></label>
     </div>
     <div class="form-grid ${element.Type === "TEXTBOX" ? "" : "two-columns"} option-field-grid">
-      <label class="field"><span>寬度</span><input data-option-path="Layout.Width" type="number" min="24" value="${escapeHtml(layout.Width ?? 100)}"></label>
-      ${element.Type === "TEXTBOX" ? "" : `<label class="field"><span>高度</span><input data-option-path="Layout.Height" type="number" min="24" value="${escapeHtml(layout.Height ?? 100)}"></label>`}
+      <label class="field"><span>${escapeHtml(t("寬度"))}</span><input data-option-path="Layout.Width" type="number" min="24" value="${escapeHtml(layout.Width ?? 100)}"></label>
+      ${element.Type === "TEXTBOX" ? "" : `<label class="field"><span>${escapeHtml(t("高度"))}</span><input data-option-path="Layout.Height" type="number" min="24" value="${escapeHtml(layout.Height ?? 100)}"></label>`}
     </div>
   `;
-  const zOrderField = `<label class="field"><span>圖層順序</span><input data-option-path="Layout.Z Order" type="number" value="${escapeHtml(layout["Z Order"] ?? 10)}"></label>`;
+  const zOrderField = `<label class="field"><span>${escapeHtml(t("圖層順序"))}</span><input data-option-path="Layout.Z Order" type="number" value="${escapeHtml(layout["Z Order"] ?? 10)}"></label>`;
   let primary = "";
   let sections = "";
 
@@ -1918,8 +1939,8 @@ function optionInspectorHtml() {
       sections += `
         <div class="form-section option-textbox-items-section selected-item-editor">
           <div class="form-section-header option-static-header">
-            <div><h3>Items</h3><span>${element.Items?.length || 0} 個選項</span></div>
-            <button class="icon-button section-add-button add-button" id="addOptionItem" type="button" title="新增選項" aria-label="新增選項">＋</button>
+            <div><h3>Items</h3><span>${escapeHtml(t("{count} 個選項", { count: element.Items?.length || 0 }))}</span></div>
+            <button class="icon-button section-add-button add-button" id="addOptionItem" type="button" title="${escapeHtml(t("新增選項"))}" aria-label="${escapeHtml(t("新增選項"))}">＋</button>
           </div>
           ${textBoxItemsHtml(element)}
           ${item ? `<div class="option-primary-block option-item-fields">
@@ -1938,42 +1959,42 @@ function optionInspectorHtml() {
       sections += optionCollapsibleSection("版面細節", "", `
         ${zOrderField}
         <div class="option-section-group">
-          ${rangeField("最多顯示", "List.Max Visible Items", list["Max Visible Items"] ?? 4, { min: 1, max: 20 })}
-          ${rangeField("Item 高度", "List.Item Height", list["Item Height"] ?? 72, { min: 24, max: 240, suffix: " px" })}
-          ${rangeField("Item 間距", "List.Item Spacing", list["Item Spacing"] ?? 12, { min: 0, max: 120, suffix: " px" })}
-          ${rangeField("Padding", "List.Padding", list.Padding ?? 16, { min: 0, max: 160, suffix: " px" })}
+          ${rangeField(t("最多顯示"), "List.Max Visible Items", list["Max Visible Items"] ?? 4, { min: 1, max: 20 })}
+          ${rangeField(t("Item 高度"), "List.Item Height", list["Item Height"] ?? 72, { min: 24, max: 240, suffix: " px" })}
+          ${rangeField(t("Item 間距"), "List.Item Spacing", list["Item Spacing"] ?? 12, { min: 0, max: 120, suffix: " px" })}
+          ${rangeField(t("Padding"), "List.Padding", list.Padding ?? 16, { min: 0, max: 160, suffix: " px" })}
         </div>
-        ${optionBooleanField("內容超出時顯示滑桿", 'data-option-path="List.Show Scrollbar"', list["Show Scrollbar"] !== false)}
+        ${optionBooleanField(t("內容超出時顯示滑桿"), 'data-option-path="List.Show Scrollbar"', list["Show Scrollbar"] !== false)}
       `);
       sections += optionCollapsibleSection("外觀", "", `
         <div class="option-section-group">
           ${optionHoverFields(element)}
         </div>
         <div class="option-section-group">
-          <h4>背景</h4>
+          <h4>${escapeHtml(t("背景"))}</h4>
           <div class="form-grid compact-grid color-grid option-opacity-colors">
-            ${transparentColorField("容器", "Style.Background", style.Background, "#0b1118")}
-            ${transparentColorField("Item", "Style.Item Background", style["Item Background"], "#20302a")}
+            ${transparentColorField(t("容器"), "Style.Background", style.Background, "#0b1118")}
+            ${transparentColorField(t("Item"), "Style.Item Background", style["Item Background"], "#20302a")}
           </div>
         </div>
         <div class="option-section-group">
-          <h4>文字</h4>
+          <h4>${escapeHtml(t("文字"))}</h4>
           <div class="form-grid two-columns compact-grid color-grid">
-            <label class="field"><span>一般</span><input data-option-path="Style.Text Color" type="color" value="${safeColor(style["Text Color"], "#ffffff").slice(0, 7)}"></label>
+            <label class="field"><span>${escapeHtml(t("一般"))}</span><input data-option-path="Style.Text Color" type="color" value="${safeColor(style["Text Color"], "#ffffff").slice(0, 7)}"></label>
           </div>
-          ${rangeField("字體大小", "Style.Text Size", style["Text Size"] ?? 30, { min: 8, max: 160, suffix: " px" })}
-          <label class="field"><span>文字對齊</span><select data-option-path="Style.Text Align">${optionTags([0, 0.5, 1], style["Text Align"] ?? 0.5, (value) => ({ 0: "靠左", 0.5: "置中", 1: "靠右" })[value])}</select></label>
+          ${rangeField(t("字體大小"), "Style.Text Size", style["Text Size"] ?? 30, { min: 8, max: 160, suffix: " px" })}
+          <label class="field"><span>${escapeHtml(t("文字對齊"))}</span><select data-option-path="Style.Text Align">${optionTags([0, 0.5, 1], style["Text Align"] ?? 0.5, (value) => ({ 0: t("靠左"), 0.5: t("置中"), 1: t("靠右") })[value])}</select></label>
         </div>
         ${item ? `
           <div class="option-section-group">
-            ${optionBooleanField("使用獨立樣式", 'id="itemStyleOverrideEnabled"', hasItemOverride)}
+            ${optionBooleanField(t("使用獨立樣式"), 'id="itemStyleOverrideEnabled"', hasItemOverride)}
             ${hasItemOverride ? `
               <div class="form-grid compact-grid color-grid option-opacity-colors">
-                ${transparentColorField("背景", "Style Override.Item Background", itemOverride["Item Background"], style["Item Background"] || "#20302a", true)}
-                <label class="field"><span>文字</span><input data-option-item-path="Style Override.Text Color" type="color" value="${safeColor(itemOverride["Text Color"], style["Text Color"]).slice(0, 7)}"></label>
+                ${transparentColorField(t("背景"), "Style Override.Item Background", itemOverride["Item Background"], style["Item Background"] || "#20302a", true)}
+                <label class="field"><span>${escapeHtml(t("文字"))}</span><input data-option-item-path="Style Override.Text Color" type="color" value="${safeColor(itemOverride["Text Color"], style["Text Color"]).slice(0, 7)}"></label>
               </div>
-              ${rangeField("字體大小", "Style Override.Text Size", itemOverride["Text Size"] ?? style["Text Size"] ?? 30, { min: 8, max: 160, suffix: " px", itemField: true })}
-              <label class="field"><span>文字對齊</span><select data-option-item-path="Style Override.Text Align">${optionTags([0, 0.5, 1], itemOverride["Text Align"] ?? style["Text Align"] ?? 0.5, (value) => ({ 0: "靠左", 0.5: "置中", 1: "靠右" })[value])}</select></label>
+              ${rangeField(t("字體大小"), "Style Override.Text Size", itemOverride["Text Size"] ?? style["Text Size"] ?? 30, { min: 8, max: 160, suffix: " px", itemField: true })}
+              <label class="field"><span>${escapeHtml(t("文字對齊"))}</span><select data-option-item-path="Style Override.Text Align">${optionTags([0, 0.5, 1], itemOverride["Text Align"] ?? style["Text Align"] ?? 0.5, (value) => ({ 0: t("靠左"), 0.5: t("置中"), 1: t("靠右") })[value])}</select></label>
             ` : ""}
           </div>
         ` : ""}
@@ -1992,8 +2013,8 @@ function optionInspectorHtml() {
       sections += `
         <div class="form-section option-picture-source-section">
           <div class="form-grid two-columns option-field-grid">
-            <label class="field"><span>Idle 圖片</span><select data-option-path="Picture.Idle" aria-label="Idle 圖片">${imageOptionTags(picture.Idle || "", [{ id: "", name: "None" }])}</select></label>
-            ${optionBooleanField("只讓不透明部分可點擊", 'data-option-path="Picture.Alpha Hit Test"', Boolean(picture["Alpha Hit Test"]))}
+            <label class="field"><span>${escapeHtml(t("Idle 圖片"))}</span><select data-option-path="Picture.Idle" aria-label="${escapeHtml(t("Idle 圖片"))}">${imageOptionTags(picture.Idle || "", [{ id: "", name: "None" }])}</select></label>
+            ${optionBooleanField(t("只讓不透明部分可點擊"), 'data-option-path="Picture.Alpha Hit Test"', Boolean(picture["Alpha Hit Test"]))}
           </div>
         </div>
       `;
@@ -2002,16 +2023,16 @@ function optionInspectorHtml() {
       primary = positionFields;
       sections += optionCollapsibleSection("版面細節", "", `
         ${zOrderField}
-        <label class="field"><span>填充方式</span><select data-option-path="Picture.Fit">${optionTags(["CONTAIN", "COVER", "STRETCH"], picture.Fit || "CONTAIN")}</select></label>
-        ${optionBooleanField("保持長寬比", 'data-option-path="Picture.Keep Aspect"', picture["Keep Aspect"] !== false)}
+        <label class="field"><span>${escapeHtml(t("填充方式"))}</span><select data-option-path="Picture.Fit">${optionTags(["CONTAIN", "COVER", "STRETCH"], picture.Fit || "CONTAIN")}</select></label>
+        ${optionBooleanField(t("保持長寬比"), 'data-option-path="Picture.Keep Aspect"', picture["Keep Aspect"] !== false)}
       `);
       sections += optionCollapsibleSection("外觀", "", `
         <div class="option-section-group">
           ${optionHoverFields(element, { picture: true })}
         </div>
         <div class="option-section-group">
-          <h4>顯示效果</h4>
-          ${rangeField("不透明度", "Picture.Opacity", picture.Opacity ?? 1, { min: 0, max: 1, step: 0.01, format: "percent" })}
+          <h4>${escapeHtml(t("顯示效果"))}</h4>
+          ${rangeField(t("不透明度"), "Picture.Opacity", picture.Opacity ?? 1, { min: 0, max: 1, step: 0.01, format: "percent" })}
           <label class="field"><span>Tint</span><input data-option-path="Picture.Tint" type="color" value="${safeColor(picture.Tint, "#ffffff").slice(0, 7)}"></label>
         </div>
       `);
@@ -2035,8 +2056,8 @@ function optionInspectorHtml() {
           ${optionHoverFields(element)}
         </div>
         <div class="option-section-group">
-          <label class="field"><span>顏色</span><input data-option-path="Hitbox.Editor Color" type="color" value="${safeColor(hitbox["Editor Color"], "#28a47d").slice(0, 7)}"></label>
-          ${rangeField("不透明度", "Hitbox.Editor Opacity", hitbox["Editor Opacity"] ?? 0.24, { min: 0, max: 1, step: 0.01, format: "percent" })}
+          <label class="field"><span>${escapeHtml(t("顏色"))}</span><input data-option-path="Hitbox.Editor Color" type="color" value="${safeColor(hitbox["Editor Color"], "#28a47d").slice(0, 7)}"></label>
+          ${rangeField(t("不透明度"), "Hitbox.Editor Opacity", hitbox["Editor Opacity"] ?? 0.24, { min: 0, max: 1, step: 0.01, format: "percent" })}
         </div>
       `);
     }
@@ -2046,7 +2067,7 @@ function optionInspectorHtml() {
     <div class="editor-page option-editor-page option-editor-${isCanvas ? "canvas" : "form"}">
       <div class="form-section option-primary-section">${primary}</div>
       ${sections}
-      ${isCanvas ? "" : `<div class="editor-danger-zone"><button class="danger-button" id="deleteOptionElement" type="button">刪除</button></div>`}
+      ${isCanvas ? "" : `<div class="editor-danger-zone"><button class="danger-button" id="deleteOptionElement" type="button">${escapeHtml(t("刪除"))}</button></div>`}
     </div>
   `;
 }
@@ -2100,7 +2121,7 @@ function renderOptionsPanel() {
   const isFormMode = state.optionWorkspaceMode === "form";
   const elementSidebar = `
     <aside class="option-element-sidebar">
-      <div class="option-add-buttons" aria-label="新增選項">
+      <div class="option-add-buttons" aria-label="${escapeHtml(t("新增選項"))}">
         <button class="quiet-button compact add-button" type="button" data-add-option-element="TEXTBOX">Text Box</button>
         <button class="quiet-button compact add-button" type="button" data-add-option-element="PICTURE">Picture</button>
         <button class="quiet-button compact add-button" type="button" data-add-option-element="HITBOX">Hitbox</button>
@@ -2109,18 +2130,18 @@ function renderOptionsPanel() {
     </aside>
   `;
   const divider = `
-    <button class="option-workspace-divider" type="button" role="separator" aria-orientation="vertical" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${isFormMode ? 0 : 100}" aria-label="拖曳切換表單與畫布" title="拖曳切換表單與畫布；也可按 Enter 或方向鍵">
+    <button class="option-workspace-divider" type="button" role="separator" aria-orientation="vertical" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${isFormMode ? 0 : 100}" aria-label="${escapeHtml(t("拖曳切換表單與畫布"))}" title="${escapeHtml(t("拖曳切換表單與畫布；也可按 Enter 或方向鍵"))}">
       <span aria-hidden="true"></span><span aria-hidden="true"></span><span aria-hidden="true"></span>
     </button>
   `;
   const canvasColumn = `
     <section class="option-canvas-column">
       <div class="option-builder-toolbar">
-        <div class="option-view-controls" aria-label="畫布設定">
-          <button class="toggle-button ${state.optionGridVisible ? "active" : ""}" id="toggleOptionGrid" type="button" title="顯示或隱藏格線（${shortcutDisplay(state.editorSettings.shortcuts.grid)}）">格線</button>
-          <button class="toggle-button ${state.optionSnapEnabled ? "active" : ""}" id="toggleOptionSnap" type="button" title="開啟或關閉吸附（${shortcutDisplay(state.editorSettings.shortcuts.snap)}）">吸附</button>
+        <div class="option-view-controls" aria-label="${escapeHtml(t("畫布設定"))}">
+          <button class="toggle-button ${state.optionGridVisible ? "active" : ""}" id="toggleOptionGrid" type="button" title="${escapeHtml(t("顯示或隱藏格線（{shortcut}）", { shortcut: shortcutDisplay(state.editorSettings.shortcuts.grid) }))}">${escapeHtml(t("格線"))}</button>
+          <button class="toggle-button ${state.optionSnapEnabled ? "active" : ""}" id="toggleOptionSnap" type="button" title="${escapeHtml(t("開啟或關閉吸附（{shortcut}）", { shortcut: shortcutDisplay(state.editorSettings.shortcuts.snap) }))}">${escapeHtml(t("吸附"))}</button>
         </div>
-        <label class="field inline-field canvas-path-field"><select data-canvas-path="Preview Background" aria-label="預覽底圖">${canvasBackgroundOptionTags(canvas["Preview Background"] || "")}</select></label>
+        <label class="field inline-field canvas-path-field"><select data-canvas-path="Preview Background" aria-label="${escapeHtml(t("預覽底圖"))}">${canvasBackgroundOptionTags(canvas["Preview Background"] || "")}</select></label>
         <span class="canvas-size-label">${escapeHtml(canvas.Width || 1920)} × ${escapeHtml(canvas.Height || 1080)}</span>
       </div>
       <div class="option-canvas-scroll">${optionStageHtml()}</div>
@@ -2443,14 +2464,14 @@ async function deleteOptionElement() {
   try {
     const data = await api(`/api/options/references?node=${encodeURIComponent(state.selectedNodePath)}&element=${encodeURIComponent(element.ID)}`);
     if (data.references?.length) {
-      toast(`無法刪除「${element.Name}」：仍被 ${data.references.length} 個 Event Effect 引用。`, "error");
+      toast(t("無法刪除「{name}」：仍被 {count} 個 Event Effect 引用。", { name: element.Name, count: data.references.length }), "error");
       return;
     }
   } catch (error) {
     toast(error.message, "error");
     return;
   }
-  if (!window.confirm(`確定刪除「${element.Name}」？`)) return;
+  if (!window.confirm(t("確定刪除「{name}」？", { name: element.Name }))) return;
   const index = state.optionsDraft.Elements.findIndex((item) => item.ID === element.ID);
   state.optionsDraft.Elements.splice(index, 1);
   const next = state.optionsDraft.Elements[Math.min(index, state.optionsDraft.Elements.length - 1)] || null;
@@ -2477,14 +2498,14 @@ async function deleteOptionItem(itemId = state.selectedOptionItemId) {
   try {
     const data = await api(`/api/options/references?node=${encodeURIComponent(state.selectedNodePath)}&element=${encodeURIComponent(element.ID)}&item=${encodeURIComponent(item.ID)}`);
     if (data.references?.length) {
-      toast(`無法刪除「${item.Name}」：仍被 ${data.references.length} 個 Event Effect 引用。`, "error");
+      toast(t("無法刪除「{name}」：仍被 {count} 個 Event Effect 引用。", { name: item.Name, count: data.references.length }), "error");
       return;
     }
   } catch (error) {
     toast(error.message, "error");
     return;
   }
-  if (!window.confirm(`確定刪除「${item.Name}」？`)) return;
+  if (!window.confirm(t("確定刪除「{name}」？", { name: item.Name }))) return;
   const index = element.Items.findIndex((entry) => entry.ID === item.ID);
   element.Items.splice(index, 1);
   state.selectedOptionItemId = element.Items[Math.min(index, element.Items.length - 1)]?.ID || null;
@@ -2733,36 +2754,36 @@ async function persistOptionsSnapshot(snapshot, task = null) {
 function scheduleOptionsAutosave() {
   if (!state.nodeDetail || !state.optionsDraft) return;
   const snapshot = optionsSnapshot();
-  scheduleAutosave("選項設定未能儲存", (task) => persistOptionsSnapshot(snapshot, task));
+  scheduleAutosave(t("選項設定未能儲存"), (task) => persistOptionsSnapshot(snapshot, task));
 }
 
 async function saveOptions() {
   const snapshot = optionsSnapshot();
   await cancelAutosaveAndWait();
-  setSaveState("儲存中", "saving");
+  setSaveState(t("儲存中..."), "saving");
   try {
     const saved = await persistOptionsSnapshot(snapshot);
     state.optionsDraft = clone(saved.options);
     state.nodeDetail.options = clone(saved.options);
     if (saved.node) state.nodeDetail.node = saved.node;
-    setSaveState("已同步");
-    toast("Options.json 已儲存");
+    setSaveState(t("已同步"));
+    toast(t("Options.json 已儲存"));
     renderOptionsPanel();
   } catch (error) {
-    setSaveState("儲存失敗", "error");
+    setSaveState(t("儲存失敗"), "error");
     toast(error.message, "error");
   }
 }
 
 function fileListHtml(files, selected, dataName) {
-  if (!files.length) return `<div class="node-list-empty">尚未建立文件</div>`;
+  if (!files.length) return `<div class="node-list-empty">${t("尚未建立文件")}</div>`;
   return files.map((file) => {
     const symbols = file.labels || [];
     return `
       <button class="subnav-item ${file.name === selected ? "active" : ""}" type="button" data-${dataName}="${escapeHtml(file.name)}">
         <span class="subnav-item-copy">
           <strong>${escapeHtml(file.displayName || file.name)}</strong>
-          <span>${symbols.length ? `${symbols.length} 個 label` : "尚未偵測到 label"}</span>
+          <span>${symbols.length ? t("{count} 個 label", { count: symbols.length }) : t("尚未偵測到 label")}</span>
         </span>
       </button>
     `;
@@ -2778,17 +2799,17 @@ function renderContentPanel() {
   dom.contentPanel.innerHTML = `
     <div class="file-workspace content-workspace ${state.leftPanelHidden.content ? "left-panel-hidden" : ""}">
       <aside class="subnav">
-        <div class="subnav-header"><strong>CONTENT</strong><div class="subnav-header-actions"><button class="icon-button add-button" id="newContentButton" type="button" title="新增 Content" aria-label="新增 Content">＋</button></div></div>
+        <div class="subnav-header"><strong>CONTENT</strong><div class="subnav-header-actions"><button class="icon-button add-button" id="newContentButton" type="button" title="${t("新增 Content")}" aria-label="${t("新增 Content")}">＋</button></div></div>
         <div class="subnav-list">${fileListHtml(files, state.selectedContent, "content-file")}</div>
       </aside>
       <div class="editor-scroll">
         ${state.selectedContent ? `
           <div class="code-toolbar">
-            <label class="field" style="width:min(320px,60%)"><span class="visually-hidden">Content 名稱</span><input id="contentDisplayName" value="${escapeHtml(state.selectedContentDisplayName || state.selectedContent)}"></label>
-            <button class="danger-button compact content-delete-button" id="deleteContentButton" type="button">刪除演出</button>
+            <label class="field" style="width:min(320px,60%)"><span class="visually-hidden">${t("Content 名稱")}</span><input id="contentDisplayName" value="${escapeHtml(state.selectedContentDisplayName || state.selectedContent)}"></label>
+            <button class="danger-button compact content-delete-button" id="deleteContentButton" type="button">${t("刪除演出")}</button>
           </div>
           <div class="code-editor-wrap"><textarea class="code-editor" id="contentEditor" spellcheck="false">${escapeHtml(state.contentSource)}</textarea></div>
-        ` : `<div class="editor-empty"><div><p>選擇或新增 Content 文件。</p><button class="primary-button add-button" id="emptyNewContentButton" type="button">新增 Content</button></div></div>`}
+        ` : `<div class="editor-empty"><div><p>${t("選擇或新增 Content 文件。")}</p><button class="primary-button add-button" id="emptyNewContentButton" type="button">${t("新增 Content")}</button></div></div>`}
       </div>
     </div>
   `;
@@ -2846,54 +2867,54 @@ function scheduleContentAutosave() {
   const snapshot = contentSnapshot();
   state.selectedContentDisplayName = snapshot.displayName;
   state.contentSource = snapshot.source;
-  scheduleAutosave("Content 未能儲存", (task) => persistContentSnapshot(snapshot, task));
+  scheduleAutosave(t("Content 未能儲存"), (task) => persistContentSnapshot(snapshot, task));
 }
 
 async function saveContent() {
   const snapshot = contentSnapshot();
   await cancelAutosaveAndWait();
-  setSaveState("儲存中", "saving");
+  setSaveState(t("儲存中..."), "saving");
   try {
     const saved = await persistContentSnapshot(snapshot);
     state.selectedContent = saved.name;
     state.selectedContentDisplayName = saved.displayName;
     await refreshAfterSave();
     await loadContent(saved.name);
-    toast("Content 已儲存");
+    toast(t("Content 已儲存"));
   } catch (error) {
-    setSaveState("儲存失敗", "error");
+    setSaveState(t("儲存失敗"), "error");
     toast(error.message, "error");
   }
 }
 
 async function deleteContent() {
-  if (!state.selectedContent || !window.confirm(`確定刪除 Content「${state.selectedContent}.rpy」？`)) return;
+  if (!state.selectedContent || !window.confirm(t("確定刪除 Content「{name}」？", { name: `${state.selectedContent}.rpy` }))) return;
   const node = state.selectedNodePath;
   const name = state.selectedContent;
   await cancelAutosaveAndWait();
-  setSaveState("刪除中", "saving");
+  setSaveState(t("刪除中..."), "saving");
   try {
     await api(`/api/content?node=${encodeURIComponent(node)}&name=${encodeURIComponent(name)}`, { method: "DELETE" });
     state.selectedContent = null;
     state.selectedContentDisplayName = "";
     state.contentSource = "";
     await refreshAfterSave();
-    toast("Content 已刪除");
+    toast(t("Content 已刪除"));
   } catch (error) {
-    setSaveState("刪除失敗", "error");
+    setSaveState(t("刪除失敗"), "error");
     toast(error.message, "error");
   }
 }
 
 function statRowsHtml(entries) {
-  if (!entries.length) return `<tr><td colspan="5"><div class="row-empty">這個群組尚未建立 Stat。</div></td></tr>`;
+  if (!entries.length) return `<tr><td colspan="5"><div class="row-empty">${t("這個群組尚未建立 Stat。")}</div></td></tr>`;
   return entries.map(([id, values]) => `
     <tr class="stat-row" data-stat-id="${escapeHtml(id)}">
       <td><input name="statName" aria-label="Stat Name" value="${escapeHtml(values.Name || id)}"></td>
       <td><input name="statMin" type="number" step="any" value="${escapeHtml(values.Min)}"></td>
       <td><input name="statInit" type="number" step="any" value="${escapeHtml(values.Init)}"></td>
       <td><input name="statMax" type="number" step="any" value="${escapeHtml(values.Max)}"></td>
-      <td class="action-cell"><button class="row-button" type="button" data-remove-stat="${escapeHtml(id)}" title="移除 Stat" aria-label="移除 Stat">×</button></td>
+      <td class="action-cell"><button class="row-button" type="button" data-remove-stat="${escapeHtml(id)}" title="${t("移除 Stat")}" aria-label="${t("移除 Stat")}">×</button></td>
     </tr>
   `).join("");
 }
@@ -2904,10 +2925,10 @@ function statGroupsHtml() {
     <section class="stat-group-card" data-stat-group="${escapeHtml(group)}">
       <div class="stat-group-heading">
         <label class="field stat-group-name-field">
-          <span class="visually-hidden">群組名稱</span>
-          <input name="statGroupName" aria-label="群組名稱" value="${escapeHtml(group)}" ${group === SceneStateEditor.DEFAULT_GROUP ? "readonly" : ""}>
+          <span class="visually-hidden">${t("群組名稱")}</span>
+          <input name="statGroupName" aria-label="${t("群組名稱")}" value="${escapeHtml(group)}" ${group === SceneStateEditor.DEFAULT_GROUP ? "readonly" : ""}>
         </label>
-        <button class="stat-group-add-button add-button" type="button" data-add-stat-to-group title="在 ${escapeHtml(group)} 新增 Stat" aria-label="在 ${escapeHtml(group)} 新增 Stat">＋</button>
+        <button class="stat-group-add-button add-button" type="button" data-add-stat-to-group title="${t("在 {group} 新增 Stat", { group: escapeHtml(group) })}" aria-label="${t("在 {group} 新增 Stat", { group: escapeHtml(group) })}">＋</button>
       </div>
       <div class="state-table-wrap">
         <table class="data-table state-data-table stats-table">
@@ -2925,8 +2946,8 @@ function memoryRowsHtml() {
     const isDefault = id === "memory";
     return `
       <tr class="memory-row" data-memory-index="${index}" data-memory-id="${escapeHtml(id)}">
-        <td><input name="memoryName" aria-label="記憶庫名稱" value="${escapeHtml(values.Name || id)}" ${isDefault ? "disabled" : ""}></td>
-        <td class="action-cell">${isDefault ? '<span class="default-memory-badge">預設</span>' : `<button class="row-button" type="button" data-remove-memory="${index}" title="移除記憶庫" aria-label="移除記憶庫">×</button>`}</td>
+        <td><input name="memoryName" aria-label="${t("記憶庫名稱")}" value="${escapeHtml(values.Name || id)}" ${isDefault ? "disabled" : ""}></td>
+        <td class="action-cell">${isDefault ? `<span class="default-memory-badge">${t("預設")}</span>` : `<button class="row-button" type="button" data-remove-memory="${index}" title="${t("移除記憶庫")}" aria-label="${t("移除記憶庫")}">×</button>`}</td>
       </tr>
     `;
   }).join("");
@@ -2938,7 +2959,7 @@ function renderStatsPanel() {
       <section class="state-definition-section">
         <div class="state-section-heading">
           <div><h2>Stats</h2></div>
-          <button class="state-add-button add-button" id="addStatGroupButton" type="button" title="新增 Stat 群組" aria-label="新增 Stat 群組">＋</button>
+          <button class="state-add-button add-button" id="addStatGroupButton" type="button" title="${t("新增 Stat 群組")}" aria-label="${t("新增 Stat 群組")}">＋</button>
         </div>
         <div class="stat-groups" id="statsGroups">${statGroupsHtml()}</div>
       </section>
@@ -2946,7 +2967,7 @@ function renderStatsPanel() {
       <section class="state-definition-section">
         <div class="state-section-heading">
           <div><h2>Memory</h2></div>
-          <button class="state-add-button add-button" id="addMemoryButton" type="button" title="新增記憶庫" aria-label="新增記憶庫">＋</button>
+          <button class="state-add-button add-button" id="addMemoryButton" type="button" title="${t("新增記憶庫")}" aria-label="${t("新增記憶庫")}">＋</button>
         </div>
         <div class="state-table-wrap">
           <table class="data-table state-data-table memory-table" aria-label="Memory Banks">
@@ -3081,20 +3102,20 @@ function scheduleStatsAutosave() {
   const memories = readMemoriesForm();
   state.statsDraft = clone(stats);
   state.memoriesDraft = clone(memories);
-  scheduleAutosave("狀態定義未能儲存", (task) => persistStatsSnapshot(stats, memories, task));
+  scheduleAutosave(t("狀態定義未能儲存"), (task) => persistStatsSnapshot(stats, memories, task));
 }
 
 async function saveStats() {
   const stats = readStatsForm();
   const memories = readMemoriesForm();
   await cancelAutosaveAndWait();
-  setSaveState("儲存中", "saving");
+  setSaveState(t("儲存中..."), "saving");
   try {
     await persistStatsSnapshot(stats, memories);
     await refreshAfterSave();
-    toast("狀態定義已儲存");
+    toast(t("狀態定義已儲存"));
   } catch (error) {
-    setSaveState("儲存失敗", "error");
+    setSaveState(t("儲存失敗"), "error");
     toast(error.message, "error");
   }
 }
@@ -3501,7 +3522,7 @@ function renderGraphPanel() {
     state.graphViewBox = fittedGraphViewBox(layout);
   }
   if (!nodes.length) {
-    dom.graphPanel.innerHTML = '<div class="panel-page wide"><div class="success-state">建立 Scene Node 後，關聯圖會顯示 GOTO／REPLACE 關係。</div></div>';
+    dom.graphPanel.innerHTML = '<div class="panel-page wide"><div class="success-state">' + t("建立 Scene Node 後，關聯圖會顯示 GOTO／REPLACE 關係。") + '</div></div>';
     return;
   }
   const nodeNames = new Map(nodes.map((node) => [String(node.id), String(node.name || node.id)]));
@@ -3520,7 +3541,7 @@ function renderGraphPanel() {
         const path = (event.replacePath || [event.replacedNode, relationship.target])
           .map((nodeId) => nodeNames.get(String(nodeId)) || nodeId)
           .join(" → ");
-        return `${path} · ${event.eventName} · ${eventTriggerDisplayName(event.trigger)} · REPLACE 管理關係`;
+        return `${path} · ${event.eventName} · ${eventTriggerDisplayName(event.trigger)} · ${t("REPLACE 管理關係")}`;
       }
       const direction = relationship.bidirectional && event.directionSource
         ? `${nodeNames.get(String(event.directionSource)) || event.directionSource} → ${nodeNames.get(String(event.directionTarget)) || event.directionTarget} · `
@@ -3561,7 +3582,7 @@ function renderGraphPanel() {
     const searchText = `${name} ${node.id} ${node.path}`.toLocaleLowerCase();
     const revealDelay = revealStepFor(node.id) * revealStepMs;
     return `
-      <g class="graph-node ${selected ? "is-selected" : ""} ${root ? "is-root" : ""} ${global ? "is-global" : ""}" transform="translate(${position.x} ${position.y})" role="button" tabindex="0" data-node-id="${escapeHtml(String(node.id))}" data-node-path="${escapeHtml(node.path)}" data-search-text="${escapeHtml(searchText)}" aria-label="開啟節點 ${escapeHtml(name)}" aria-grabbed="false">
+      <g class="graph-node ${selected ? "is-selected" : ""} ${root ? "is-root" : ""} ${global ? "is-global" : ""}" transform="translate(${position.x} ${position.y})" role="button" tabindex="0" data-node-id="${escapeHtml(String(node.id))}" data-node-path="${escapeHtml(node.path)}" data-search-text="${escapeHtml(searchText)}" aria-label="${t("開啟節點 {name}", { name: escapeHtml(name) })}" aria-grabbed="false">
         <rect class="graph-node-hit-target" x="${radius - 120}" y="-10" width="240" height="${radius * 2 + 50}" rx="10"></rect>
         <g class="graph-node-content" style="--graph-reveal-delay: ${revealDelay}ms">
           <circle class="graph-node-dot" cx="${radius}" cy="${radius}" r="${radius}"></circle>
@@ -3574,17 +3595,17 @@ function renderGraphPanel() {
   const detachedGuideHtml = Number.isFinite(layout.detachedStartY) ? `
     <g class="graph-detached-guide" style="--graph-reveal-delay: ${maximumRevealStep * revealStepMs}ms">
       <line x1="60" y1="${layout.detachedStartY}" x2="${Math.max(60, layout.width - 60)}" y2="${layout.detachedStartY}"></line>
-      <text x="78" y="${layout.detachedStartY - 14}">未連結至 ROOT 的節點</text>
+      <text x="78" y="${layout.detachedStartY - 14}">${t("未連結至 ROOT 的節點")}</text>
     </g>
   ` : "";
   dom.graphPanel.innerHTML = `
     <div class="graph-workspace">
       <div class="graph-canvas is-revealing">
-        <label class="search-field graph-search"><span class="visually-hidden">搜尋關聯圖節點</span><input id="graphSearch" type="search" value="${escapeHtml(state.graphSearch)}" placeholder="搜尋節點"></label>
-        <button class="graph-reset-button" id="resetGraphView" type="button" title="顯示全圖" aria-label="顯示全圖">
+        <label class="search-field graph-search"><span class="visually-hidden">${t("搜尋關聯圖節點")}</span><input id="graphSearch" type="search" value="${escapeHtml(state.graphSearch)}" placeholder="${t("搜尋節點")}"></label>
+        <button class="graph-reset-button" id="resetGraphView" type="button" title="${t("顯示全圖")}" aria-label="${t("顯示全圖")}">
           <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"></circle><path d="M12 3v3M12 18v3M3 12h3M18 12h3"></path></svg>
         </button>
-        <svg id="projectGraphSvg" role="img" aria-label="依 Stack 深度排列的 Scene Node GOTO 與 REPLACE 有向關聯圖" viewBox="${graphViewBoxValue()}" data-graph-width="${layout.width}" data-graph-height="${layout.height}" data-layout-algorithm="${layout.algorithm}" data-depth-columns="${layout.columns.length}" data-edge-crossings="${SceneGraphModel.countEdgeCrossings(relationships, layout)}">
+        <svg id="projectGraphSvg" role="img" aria-label="${t("依 Stack 深度排列的 Scene Node GOTO 與 REPLACE 有向關聯圖")}" viewBox="${graphViewBoxValue()}" data-graph-width="${layout.width}" data-graph-height="${layout.height}" data-layout-algorithm="${layout.algorithm}" data-depth-columns="${layout.columns.length}" data-edge-crossings="${SceneGraphModel.countEdgeCrossings(relationships, layout)}">
           ${detachedGuideHtml}
           <g class="graph-edges">${edgesHtml}</g>
           <g class="graph-nodes">${nodesHtml}</g>
@@ -3601,18 +3622,18 @@ function renderValidationPanel() {
   dom.validationPanel.innerHTML = `
     <div class="panel-page wide">
       <div class="section-heading">
-        <div><span class="section-kicker">PROJECT CHECK</span><h2>專案檢查</h2><p>${errors} 個錯誤，${warnings} 個提醒。</p></div>
-        <div class="section-actions"><button class="primary-button" id="runValidationButton" type="button">重新檢查</button></div>
+        <div><span class="section-kicker">PROJECT CHECK</span><h2>${t("專案檢查")}</h2><p>${t("{errors} 個錯誤，{warnings} 個提醒。", { errors, warnings })}</p></div>
+        <div class="section-actions"><button class="primary-button" id="runValidationButton" type="button">${t("重新檢查")}</button></div>
       </div>
       ${state.issues.length ? `
         <div class="validation-list">${state.issues.map((issue) => `
           <div class="issue-row ${escapeHtml(issue.level)}">
-            <span class="issue-level">${issue.level === "error" ? "錯誤" : "提醒"}</span>
+            <span class="issue-level">${issue.level === "error" ? t("錯誤") : t("提醒")}</span>
             <span class="issue-location" title="${escapeHtml(issue.location)}">${escapeHtml(issue.location)}</span>
             <span class="issue-message">${escapeHtml(issue.message)}</span>
           </div>
         `).join("")}</div>
-      ` : `<div class="success-state">目前沒有發現格式或引用問題。</div>`}
+      ` : `<div class="success-state">${t("未發現專案問題")}</div>`}
     </div>
   `;
   document.querySelector("#runValidationButton")?.addEventListener("click", runValidation);
@@ -3625,7 +3646,7 @@ async function runValidation() {
     state.issues = data.issues || [];
     updateHeader();
     renderValidationPanel();
-    toast(state.issues.length ? `找到 ${state.issues.length} 個項目` : "專案檢查通過");
+    toast(state.issues.length ? t("找到 {count} 個項目", { count: state.issues.length }) : t("專案檢查通過"));
   } catch (error) {
     toast(error.message, "error");
   }
@@ -3656,7 +3677,7 @@ async function refreshAfterSave() {
       state.selectedOptionItemId = selectedOptionElement()?.Items?.[0]?.ID || null;
     }
   }
-  setSaveState("已同步");
+  setSaveState(t("已同步"));
   renderAll();
 }
 
@@ -3689,16 +3710,16 @@ async function createNodeFromDialog() {
   const payload = {
     name: form.get("name"),
   };
-  setSaveState("建立中", "saving");
+  setSaveState(t("建立中..."), "saving");
   try {
     const created = await api("/api/nodes", { method: "POST", body: payload });
     dom.nodeDialog.close();
     await loadProject({ preserveNode: false });
     await selectNode(created.path);
     switchTab("node");
-    toast("Scene Node 已建立");
+    toast(t("Scene Node 已建立"));
   } catch (error) {
-    setSaveState("建立失敗", "error");
+    setSaveState(t("建立失敗"), "error");
     toast(error.message, "error");
   }
 }
@@ -3742,7 +3763,7 @@ function shortcutFromEvent(event) {
 }
 
 function shortcutDisplay(shortcut) {
-  if (!shortcut) return "未設定";
+  if (!shortcut) return t("未設定");
   const isMac = /Mac|iPhone|iPad/.test(navigator.platform);
   return shortcut.split("+").map((part) => {
     if (part === "mod") return isMac ? "⌘" : "Ctrl";
@@ -3761,8 +3782,8 @@ function shortcutDisplay(shortcut) {
 function renderShortcutSettings() {
   dom.shortcutList.innerHTML = Object.entries(SHORTCUT_LABELS).map(([action, label]) => `
     <label class="shortcut-row">
-      <span>${escapeHtml(label)}</span>
-      <input data-shortcut-action="${escapeHtml(action)}" value="${escapeHtml(shortcutDisplay(state.editorSettings.shortcuts[action]))}" readonly aria-label="${escapeHtml(label)}">
+      <span>${escapeHtml(t(label))}</span>
+      <input data-shortcut-action="${escapeHtml(action)}" value="${escapeHtml(shortcutDisplay(state.editorSettings.shortcuts[action]))}" readonly aria-label="${escapeHtml(t(label))}">
     </label>
   `).join("");
   dom.shortcutList.querySelectorAll("[data-shortcut-action]").forEach((input) => {
@@ -3782,7 +3803,7 @@ function renderShortcutSettings() {
         if (!shortcut) return;
         const conflict = Object.entries(state.editorSettings.shortcuts).find(([key, value]) => key !== action && value === shortcut);
         if (conflict) {
-          toast(`快捷鍵已用於「${SHORTCUT_LABELS[conflict[0]]}」`, "error");
+          toast(t("快捷鍵已用於「{action}」", { action: SHORTCUT_LABELS[conflict[0]] ? t(SHORTCUT_LABELS[conflict[0]]) : conflict[0] }), "error");
           return;
         }
         state.editorSettings.shortcuts[action] = shortcut;
@@ -3798,6 +3819,10 @@ function openSettings() {
   dom.autosaveEnabled.checked = state.editorSettings.autosave;
   dom.autosaveDelay.value = String(state.editorSettings.autosaveDelay);
   syncSelectPicker(dom.autosaveDelay);
+  if (dom.editorLanguage) {
+    dom.editorLanguage.value = state.editorSettings.language || "zh-Hant";
+    syncSelectPicker(dom.editorLanguage);
+  }
   dom.gridSize.value = state.editorSettings.gridSize;
   renderShortcutSettings();
   if (!dom.settingsDialog.open) dom.settingsDialog.showModal();
@@ -3806,11 +3831,14 @@ function openSettings() {
 function syncShortcutTitles() {
   const settingsButton = document.querySelector("#settingsButton");
   const sidebarButton = document.querySelector("#openSidebar");
-  if (settingsButton) settingsButton.title = `編輯器設定（${shortcutDisplay(state.editorSettings.shortcuts.settings)}）`;
-  if (sidebarButton) sidebarButton.title = `切換節點列表（${shortcutDisplay(state.editorSettings.shortcuts.sidebar)}）`;
+  if (settingsButton) settingsButton.title = `${t("編輯器設定")}（${shortcutDisplay(state.editorSettings.shortcuts.settings)}）`;
+  if (sidebarButton) sidebarButton.title = `${t("切換節點列表")}（${shortcutDisplay(state.editorSettings.shortcuts.sidebar)}）`;
   Object.entries(TAB_SHORTCUT_ACTIONS).forEach(([action, tab]) => {
     const button = document.querySelector(`[data-tab="${tab}"]`);
-    if (button) button.title = `${button.textContent.trim()}（${shortcutDisplay(state.editorSettings.shortcuts[action])}）`;
+    if (button) {
+      const labelText = t(button.dataset.i18n || button.textContent.trim());
+      button.title = `${labelText}（${shortcutDisplay(state.editorSettings.shortcuts[action])}）`;
+    }
   });
   const createShortcut = shortcutDisplay(state.editorSettings.shortcuts.create);
   [
@@ -3822,10 +3850,10 @@ function syncShortcutTitles() {
     ["#emptyNewContentButton", "新增 Content"],
   ].forEach(([selector, label]) => {
     const button = document.querySelector(selector);
-    if (button) button.title = `${label}（${createShortcut}）`;
+    if (button) button.title = `${t(label)}（${createShortcut}）`;
   });
   const optionDivider = document.querySelector(".option-workspace-divider");
-  if (optionDivider) optionDivider.title = `拖曳或按鍵切換表單與畫布（${shortcutDisplay(state.editorSettings.shortcuts.sections)}）`;
+  if (optionDivider) optionDivider.title = `${t("拖曳或按鍵切換表單與畫布")}（${shortcutDisplay(state.editorSettings.shortcuts.sections)}）`;
 }
 
 function toggleActiveSections() {
@@ -3882,22 +3910,22 @@ function createInActiveTab() {
     openNodeDialog();
   } else if (state.activeTab === "events") {
     if (!state.nodeDetail) {
-      toast("請先建立或選擇節點", "error");
+      toast(t("請先建立或選擇節點"), "error");
       return true;
     }
     createEventDraft();
   } else if (state.activeTab === "content") {
     if (!state.nodeDetail) {
-      toast("請先建立或選擇節點", "error");
+      toast(t("請先建立或選擇節點"), "error");
       return true;
     }
     openNameDialog();
   } else if (state.activeTab === "options") {
-    toast("選項具有多種元件類型，請在表單模式使用左側新增按鈕");
+    toast(t("選項具有多種元件類型，請在表單模式使用左側新增按鈕"));
   } else if (state.activeTab === "stats") {
-    toast("狀態具有 Stats 與 Memory，請使用各區新增按鈕");
+    toast(t("狀態具有 Stats 與 Memory，請使用各區新增按鈕"));
   } else {
-    toast("目前功能區沒有可新增的項目");
+    toast(t("目前功能區沒有可新增的項目"));
   }
   return true;
 }
@@ -3920,12 +3948,12 @@ function runShortcut(action) {
 }
 
 function bindDialogEnter(form) {
+  if (!form) return;
   form.addEventListener("keydown", (event) => {
-    if (event.key !== "Enter" || event.isComposing || event.target.matches("textarea, select, button")) return;
-    const submitButton = form.querySelector('button[type="submit"]');
-    if (!submitButton) return;
-    event.preventDefault();
-    form.requestSubmit(submitButton);
+    if (event.key === "Enter" && event.target instanceof HTMLInputElement && event.target.type === "text") {
+      event.preventDefault();
+      form.requestSubmit();
+    }
   });
 }
 
@@ -4007,6 +4035,37 @@ function bindGlobalEvents() {
     state.editorSettings.autosaveDelay = numberValue(event.target.value, 700);
     writeEditorSettings();
   });
+  dom.editorLanguage?.addEventListener("change", async (event) => {
+    const newLanguage = normalizeLocale(event.target.value);
+    const previousLanguage = state.editorSettings.language;
+    if (newLanguage === previousLanguage) return;
+
+    try {
+      if (autosaveCoordinator.hasUnsaved() && !state.editorSettings.autosave) {
+        throw new Error(t("有未儲存的變更"));
+      }
+
+      const flushed = await autosaveCoordinator.flush();
+      if (!flushed || autosaveCoordinator.hasUnsaved()) {
+        throw new Error(t("儲存失敗"));
+      }
+
+      state.editorSettings.language = newLanguage;
+      const saved = await writeEditorSettings({ notifyFailure: false });
+      if (saved) {
+        window.location.reload();
+      } else {
+        throw new Error(t("編輯器設定未能儲存"));
+      }
+    } catch (error) {
+      state.editorSettings.language = previousLanguage;
+      if (dom.editorLanguage) {
+        dom.editorLanguage.value = previousLanguage;
+        syncSelectPicker(dom.editorLanguage);
+      }
+      toast(error.message || t("編輯器設定未能儲存"), "error");
+    }
+  });
   dom.gridSize.addEventListener("change", (event) => {
     state.editorSettings.gridSize = Math.max(4, Math.min(160, numberValue(event.target.value, 24)));
     event.target.value = state.editorSettings.gridSize;
@@ -4018,6 +4077,7 @@ function bindGlobalEvents() {
     writeEditorSettings();
     renderShortcutSettings();
     syncShortcutTitles();
+    toast(t("已重設快捷鍵"));
   });
 
   dom.nodeDialogForm.addEventListener("submit", (event) => {
@@ -4032,7 +4092,7 @@ function bindGlobalEvents() {
     try {
       await createNamedFile(name);
       dom.nameDialog.close();
-      toast("文件已建立");
+      toast(t("文件已建立"));
     } catch (error) {
       toast(error.message, "error");
     }
@@ -4082,6 +4142,8 @@ function bindGlobalEvents() {
 
 async function init() {
   await loadEditorSettings();
+  setLocale(state.editorSettings.language);
+  translateDocument(document);
   await writeEditorSettings({ notifyFailure: false });
   syncSidebarLayout();
   syncShortcutTitles();

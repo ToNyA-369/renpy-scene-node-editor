@@ -1972,6 +1972,17 @@ textarea:disabled {
   overflow-y: auto;
 }
 
+.settings-column {
+  display: grid;
+  min-width: 0;
+  align-content: start;
+  gap: 12px;
+}
+
+.settings-shortcuts-section {
+  align-self: start;
+}
+
 .settings-section {
   min-width: 0;
   padding: 14px;
@@ -6289,5 +6300,221 @@ body *::-webkit-scrollbar {
   .graph-reset-button {
     right: 10px;
     bottom: 10px;
+  }
+}
+
+/* Apple-inspired interaction refinement: tactile controls, clear focus, restrained motion. */
+:where(
+  .primary-button,
+  .quiet-button,
+  .danger-button,
+  .icon-button,
+  .row-button,
+  .add-button,
+  .node-add-button,
+  .tab,
+  .node-item,
+  .subnav-item,
+  .toggle-button,
+  .option-item-entry,
+  .content-choice-trigger,
+  .select-choice-trigger,
+  .select-choice-option,
+  .select-choice-folder,
+  .graph-reset-button
+) {
+  transition:
+    color var(--motion-fast) ease-out,
+    background-color var(--motion-fast) ease-out,
+    border-color var(--motion-fast) ease-out,
+    box-shadow var(--motion-fast) ease-out,
+    opacity var(--motion-fast) ease-out,
+    transform var(--motion-instant) ease-out;
+}
+
+:where(button):active:not(:disabled) {
+  transform: translateY(1px) scale(0.985);
+  transition-duration: var(--motion-instant);
+}
+
+:where(input, select, textarea, .content-choice-trigger, .select-choice-trigger) {
+  transition:
+    color var(--motion-fast) ease-out,
+    background-color var(--motion-fast) ease-out,
+    border-color var(--motion-fast) ease-out,
+    box-shadow var(--motion-fast) ease-out;
+}
+
+:where(input, select, textarea):focus-visible {
+  border-color: var(--accent);
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.field:focus-within > span,
+.field:focus-within > .field-label {
+  color: var(--accent-dark);
+}
+
+:where(
+  .primary-button,
+  .quiet-button,
+  .danger-button,
+  .icon-button,
+  .row-button,
+  .add-button,
+  .node-add-button,
+  .tab,
+  .node-item,
+  .subnav-item,
+  .toggle-button,
+  .option-item-entry,
+  .content-choice-trigger,
+  .select-choice-trigger,
+  .select-choice-option,
+  .select-choice-folder,
+  .graph-reset-button
+):focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+  box-shadow: var(--focus-ring);
+}
+
+.tab:focus-visible {
+  outline-offset: -2px;
+}
+
+.setting-row,
+.shortcut-row {
+  padding-inline: 8px;
+  border-radius: 10px;
+  transition: background-color var(--motion-fast) ease-out;
+}
+
+.setting-row:hover,
+.shortcut-row:hover {
+  background: var(--surface-soft);
+}
+
+.settings-section-heading strong,
+.dialog-header h2,
+.form-section-header h2,
+.form-section-header h3 {
+  letter-spacing: -0.012em;
+}
+
+.dialog {
+  border-radius: 20px;
+}
+
+.dialog[open] {
+  animation: dialog-present var(--motion-medium) var(--ease-settle) both;
+  transform-origin: 50% 45%;
+}
+
+.dialog[open]::backdrop {
+  animation: dialog-backdrop-present var(--motion-fast) ease-out both;
+  -webkit-backdrop-filter: blur(3px);
+  backdrop-filter: blur(3px);
+}
+
+.content-choice-picker.open > .content-choice-menu,
+.select-choice-picker.open > .select-choice-menu,
+.content-file-branch:hover > .content-label-submenu,
+.content-file-branch:focus-within > .content-label-submenu,
+.content-file-branch.submenu-open > .content-label-submenu,
+.select-choice-branch:hover > .select-choice-submenu,
+.select-choice-branch:focus-within > .select-choice-submenu,
+.select-choice-branch.submenu-open > .select-choice-submenu {
+  animation: menu-present var(--motion-fast) var(--ease-out) both;
+  transform-origin: top center;
+}
+
+.toast {
+  animation: toast-present var(--motion-medium) var(--ease-out) both;
+}
+
+@keyframes dialog-present {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.985);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes dialog-backdrop-present {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes menu-present {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.99);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes toast-present {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.985);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dialog[open],
+  .dialog[open]::backdrop,
+  .content-choice-menu,
+  .select-choice-menu,
+  .content-label-submenu,
+  .select-choice-submenu,
+  .toast {
+    animation: none;
+  }
+
+  :where(button):active:not(:disabled) {
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .dialog[open]::backdrop,
+  .graph-floating-tools {
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+
+  .graph-floating-tools,
+  .graph-gesture-hint {
+    background: var(--surface);
+  }
+}
+
+@media (prefers-contrast: more) {
+  :root {
+    --line: rgba(70, 70, 70, 0.34);
+    --line-strong: rgba(70, 70, 70, 0.72);
+    --focus-ring: 0 0 0 4px rgba(92, 114, 101, 0.3);
+  }
+
+  .tab-focus-indicator,
+  .node-item.active,
+  .subnav-item.active,
+  .option-item-entry.active {
+    border-width: 2px;
   }
 }

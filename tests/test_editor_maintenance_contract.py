@@ -19,6 +19,7 @@ class EditorMaintenanceContractTests(unittest.TestCase):
     def test_all_frontend_modules_load_before_the_composition_root(self):
         application = INDEX_HTML.index('src="/app.js"')
         for module in (
+            "/js/core/i18n.js",
             "/js/core/api_client.js",
             "/js/core/editor_settings.js",
             "/js/core/event_contract.js",

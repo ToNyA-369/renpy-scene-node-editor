@@ -228,6 +228,8 @@ Runtime 以獨立 `scene_enabled_options` 保存受控目標，不污染 Stats�
 
 其餘可見色彩應由這五色調整透明度取得。紅色主要用於刪除或危險操作。
 
+互動細節沿用同一套紙質視覺，不另造一套仿原生平台外觀：按鈕在 pointer down 時提供短促位移／縮放回饋，表單與鍵盤操作使用一致的綠色 focus ring，Dialog、Toast 與階層選單只使用 90–220ms 的無彈跳進場。時間與 easing 集中在 `css/tokens.css`；`prefers-reduced-motion` 必須停用非必要動畫，`prefers-reduced-transparency` 移除模糊材質，`prefers-contrast: more` 加強邊框與焦點，不得藉此改變資料或工作區操作。
+
 ### 7.2 整體布局
 
 - 上方左側顯示目前節點名稱與儲存狀態。
@@ -271,6 +273,9 @@ EDITOR/static/index.html
 
 EDITOR/static/app.js
   前端 composition root：狀態、各工作區渲染、Content 專用選單、跨模組協調、表單接線及 Options 畫布互動。
+
+EDITOR/static/js/core/i18n.js
+  前端國際化（i18n）字典與 `t()` 格式化函式，支援 `zh-Hant`（繁體中文）與 `en`（英文）雙語切換。
 
 EDITOR/static/js/core/api_client.js
   HTTP payload 序列化、NETWORK_ERROR／HTTP_ERROR 分類。

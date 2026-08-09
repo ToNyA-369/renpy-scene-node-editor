@@ -118,15 +118,20 @@
     if (!keyLabel && /^K_F(?:[1-9]|1[0-2])$/.test(remaining)) keyLabel = remaining.slice(2);
     if (!keyLabel) keyLabel = remaining.replace(/^K_/, "").replaceAll("_", " ");
     if (keyLabel) labels.push(keyLabel);
-    return labels.join(isMac ? "" : " + ") || "按下鍵盤按鍵";
+    const defaultPrompt = typeof SceneI18n !== "undefined" ? SceneI18n.t("按下鍵盤按鍵") : "按下鍵盤按鍵";
+    return labels.join(isMac ? "" : " + ") || defaultPrompt;
   }
 
   function eventTriggerDisplayName(trigger, platform) {
     const mode = eventTriggerMode(trigger);
     if (mode === "Action") return actionTriggerName(trigger);
     if (mode === "Keyboard") return keyboardKeysymDisplay(keyboardTriggerKeysym(trigger), platform);
-    if (mode === "Mouse") return MOUSE_TRIGGER_CHOICES.find((item) => item.id === trigger)?.name || trigger;
-    return AUTO_TRIGGER_CHOICES.find((item) => item.id === trigger)?.name || trigger;
+    if (mode === "Mouse") {
+      const name = MOUSE_TRIGGER_CHOICES.find((item) => item.id === trigger)?.name || trigger;
+      return typeof SceneI18n !== "undefined" ? SceneI18n.t(name) : name;
+    }
+    const name = AUTO_TRIGGER_CHOICES.find((item) => item.id === trigger)?.name || trigger;
+    return typeof SceneI18n !== "undefined" ? SceneI18n.t(name) : name;
   }
 
   return {
