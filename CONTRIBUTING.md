@@ -56,6 +56,18 @@ python3 tools/create_editor_test_unit.py "/path/to/BlankRenPyProject" --launch-e
 
 The generator intentionally refuses projects that already contain Scene Node Editor data.
 
+## Release packaging
+
+Maintainers can build the creator-facing product archive and its SHA-256 checksum with:
+
+```sh
+python3 tools/package_release.py
+```
+
+The outputs are written to `dist/`. The archive is generated from an explicit allowlist: it contains the installer, Editor, canonical Runtime, license, and creator documentation, while repository-only paths such as tests, `.codex/`, `.github/`, and maintenance tools remain excluded. `tests/test_release_package.py` verifies reproducible output, archive permissions, and installation into a blank Ren'Py project.
+
+Create a release tag only from a verified, merged `main` commit. The tag must be `v` followed by the value in `VERSION`; versions containing `alpha`, `beta`, or `rc` are published as prereleases.
+
 ## Documentation
 
 User-facing changes should update the Traditional Chinese and English documents together:
