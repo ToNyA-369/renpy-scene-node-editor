@@ -5,6 +5,51 @@
   if (typeof module === "object" && module.exports) module.exports = api;
   if (root) root.SceneEventEditor = api;
 })(typeof globalThis !== "undefined" ? globalThis : this, () => {
+  const DEFAULT_EVENT_GROUP = "Normal";
+
+  function normalizeEventGroup(value) {
+    return String(value || DEFAULT_EVENT_GROUP).trim() || DEFAULT_EVENT_GROUP;
+  }
+
+  function groupEvents(events) {
+    const groups = new Map([[DEFAULT_EVENT_GROUP, []]]);
+    (events || []).forEach((event) => {
+      const group = normalizeEventGroup(event?.Group);
+      if (!groups.has(group)) groups.set(group, []);
+      groups.get(group).push(event);
+    });
+    return [...groups.entries()]
+      .sort(([left], [right]) => {
+        if (left === DEFAULT_EVENT_GROUP) return -1;
+        if (right === DEFAULT_EVENT_GROUP) return 1;
+        return left.localeCompare(right);
+      })
+      .map(([name, items]) => ({ name, events: items }));
+  }
+
+  function eventPoolBlocks(events) {
+    const ordered = events || [];
+    const grouped = new Map();
+    ordered.forEach((event) => {
+      const group = normalizeEventGroup(event?.Group);
+      if (group === DEFAULT_EVENT_GROUP) return;
+      if (!grouped.has(group)) grouped.set(group, []);
+      grouped.get(group).push(event);
+    });
+    const emitted = new Set();
+    const blocks = [];
+    ordered.forEach((event) => {
+      const group = normalizeEventGroup(event?.Group);
+      if (group === DEFAULT_EVENT_GROUP) {
+        blocks.push({ type: "item", event });
+      } else if (!emitted.has(group)) {
+        emitted.add(group);
+        blocks.push({ type: "group", name: group, events: grouped.get(group) || [] });
+      }
+    });
+    return blocks;
+  }
+
   function choiceEntries(value) {
     if (value === null || value === undefined || value === "") return [];
     if (typeof value === "string") return [[value, 1]];
@@ -221,9 +266,13 @@
   }
 
   return {
+    DEFAULT_EVENT_GROUP,
     addWeightedChoice,
     choiceEntries,
     createEventEditor,
+    eventPoolBlocks,
+    groupEvents,
+    normalizeEventGroup,
     removeWeightedChoice,
   };
 });

@@ -154,6 +154,7 @@ Options have no lifecycle, condition expressions, or custom Screen source. Every
 {
   "ID": "open_door",
   "Name": "Open the door",
+  "Group": "Normal",
   "Trigger": "Action:open_door",
   "Priority": 3,
   "Weight": 1,
@@ -165,6 +166,8 @@ Options have no lifecycle, condition expressions, or custom Screen source. Every
   "Next Node": "hall"
 }
 ```
+
+`Group` is single-level authoring metadata used only to organize the Event Pool in the Editor. Missing or blank values normalize to the fixed `Normal` group, presented as visually ungrouped without a heading. Optional non-negative integer `Order` is also Editor-only and persists drag order; legacy Events without it retain their stable read order. Neither field participates in Trigger matching, Priority, Weight, lifecycle ordering, the graph, or Runtime execution. The drag preview updates on every pointer event while geometry checks and DOM reflow are coalesced by animation frame. Midpoint hysteresis prevents insertion jitter, the nearest scrollable ancestor supports progressive edge auto-scroll, and window-level lifecycle listeners preserve the gesture while the source moves between containers. Pointer dragging moves a live insertion gap and uses short FLIP offsets to push Event and group blocks aside. A permanent trailing gap allows placement after the bottommost group, while crossing a group boundary changes membership without a dedicated ungroup button. Grouping dwell remains armed only while the pointer is inside the candidate's current geometry, so live reflow moving it away cancels that intent. Groups collapse to a compact name and count by default, then expand on hover, keyboard focus, or drag entry. The unmarked blank space beside the name drags the whole group as one stable block and collapses it at drag start. Releasing after the group frame expands creates a group, and a one-Event group dissolves automatically. Successful drags do not produce toasts; failures remain visible.
 
 `Content` and `Next Node` may be `null`, one string, or a positive weight map:
 
@@ -275,7 +278,7 @@ Event Effects handle Stats, Memories, and Option Availability. Backgrounds, musi
 { "money": { "Name": "Money", "Group": "Resources", "Init": 0, "Min": 0, "Max": 999 } }
 ```
 
-`Group` is authoring metadata; an omitted or blank value normalizes to `Normal`. The State workspace always displays `Normal`, creates groups from the outer Stats control, and creates Stats inside each group. Event Stat Condition / Effect pickers show “Group → Stat”. JSON keys, Runtime state, saves, and `scene_get_stat("money")` still use the flat stable Stat ID; groups do not create nested state.
+`Group` is authoring metadata; an omitted or blank value normalizes to `Normal`, presented as visually ungrouped without a heading. Optional non-negative integer `Order` is Editor-only and persists drag order. The State workspace has one Add Stat button. All Stats share one top Name / Min / Init / Max header and matching CSS Grid columns; grouped rows keep those columns aligned while adding inset space inside the group frame. Pointer dragging starts from a row's perimeter or inter-field whitespace, while inputs and the remove button remain interactive; there is no separate handle, and text selection is disabled only during the drag. The unmarked blank space beside a group name moves that whole group while preserving member order. It uses the same live insertion gap as Events. A permanent trailing gap remains available even when every Stat is grouped, so crossing a group boundary always supports moving out or in; dwelling until the frame expands creates a group. A one-Stat group dissolves automatically. Successful drags do not produce toasts. Event Stat Condition / Effect pickers still show “Group → Stat”. JSON keys, Runtime state, saves, and `scene_get_stat("money")` use the flat stable Stat ID; groups do not create nested state.
 
 `Memories.json`:
 

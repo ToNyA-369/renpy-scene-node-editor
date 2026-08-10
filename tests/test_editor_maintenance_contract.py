@@ -26,6 +26,7 @@ class EditorMaintenanceContractTests(unittest.TestCase):
             "/js/core/state_rule_contract.js",
             "/js/core/autosave_coordinator.js",
             "/js/ui/choice_picker.js",
+            "/js/ui/group_drag.js",
             "/js/workspaces/event_editor.js",
             "/js/workspaces/graph_model.js",
             "/js/workspaces/state_editor.js",
@@ -62,10 +63,16 @@ class EditorMaintenanceContractTests(unittest.TestCase):
         self.assertFalse(STYLES_CSS.lstrip().startswith(":root {"))
 
     def test_navigation_flushes_pending_autosave(self):
-        self.assertIn(
-            'if (tab !== state.activeTab && !await flushAutosave()) return false;',
+        tab_switch = re.search(
+            r"async function requestTabSwitch\(tab, options = \{\}\) \{(?P<body>.*?)(?=\n\})",
             APP_JS,
+            re.DOTALL,
         )
+        self.assertIsNotNone(tab_switch)
+        tab_switch_body = tab_switch.group("body")
+        self.assertIn("if (isSwitchingTab && !await flushAutosave()) return false;", tab_switch_body)
+        self.assertLess(tab_switch_body.index("await flushAutosave()"), tab_switch_body.index("await refreshGraphSnapshot()"))
+        self.assertLess(tab_switch_body.index("await refreshGraphSnapshot()"), tab_switch_body.index("switchTab(tab, options)"))
         self.assertIn(
             'if (path !== state.selectedNodePath && !await flushAutosave()) return;',
             APP_JS,

@@ -166,7 +166,7 @@ Runtime 以獨立 `scene_enabled_options` 保存受控目標，不污染 Stats�
 - 單一 Memory 架構：預設 `Memory`、自訂記憶庫、標籤 add/remove/clear、Runtime API 與舊 Tag 延遲遷移。
 - Scene Node、Event、Stats、Memory Banks 與 Content 的建立與編輯。
 - Global Node 擁有與 Scene Node 相同的 Options 工作區；Runtime 在任何實際節點互動時疊加目前節點與 Global Options。Global Event 可使用 Option Trigger，Option Effect 只能控制 `__global__` 作用域目標。
-- Stats 工作區固定提供 `Normal` 預設群組；外層加號建立新群組及其第一個 Stat，群組內使用寬版加號加入該組 Stat。State 外框與 Event／Options 一樣使用完整工作區寬度，Stats 左框與 Memory 右框直接對齊分頁邊界，不在外層再套圓角遮罩；桌面版 Stat 欄位依群組容器分配寬度且不依賴橫向捲動。Event 的 Stat Condition／Effect 共用 Group → Stat 階層選單。Group 僅為 authoring metadata，Runtime 與存檔維持平面 Stat ID；Stats 與 Memory 卡片高度各自由自身內容決定。
+- Stats 工作區只保留一個新增 Stat 按鈕，`Normal` 在畫面上是不帶標題的未群組排序流。`js/ui/group_drag.js` 提供與 Event 共用的 Pointer 拖移控制器：fixed preview 逐 Pointer 事件緊貼游標，插入判定與 DOM 重排以 `requestAnimationFrame` 合併為每幀一次；真實元素作為即時插入間隙，其他 Stat／群組區塊以可中斷的 160ms FLIP 位移讓位。拖移生命週期由 `window` 持續接收，避免元素跨容器重排時遺失 pointer capture；元素中線帶小幅遲滯以避免前後反覆跳動，靠近最近可捲動祖先的上下邊緣時依距離漸進自動捲動。排序流末端永遠保留自然落點，因此即使畫面只有群組也可直接移出，停留 650ms 至框線展開才建立群組，來源只剩一個 Stat 時自動解散。Stat 整列外框與欄位間留白是拖移面，不設獨立把手；輸入框與刪除按鈕維持原操作，拖移期間以 `user-select: none` 防止掃過文字被標記。Stat 群組名稱旁的無圖示留白可將整組作為單一排序區塊拖移，成員與內部順序保持不變。Name／Min／Init／Max 只在 Stats 頂部顯示一次，所有未群組列及群組內列使用同一 CSS Grid 欄寬；群組框以外擴配合內距，讓列不貼邊且不破壞全域欄位對齊。順序保存於可選、非負整數的 Editor-only `Order`；舊資料缺值時依現有穩定順序讀取，首次排序後正規化。所有成功拖移只更新同步狀態，不顯示完成 Toast；失敗仍顯示錯誤。State 外框與 Event／Options 一樣使用完整工作區寬度，Stats 左框與 Memory 右框直接對齊分頁邊界；Event 的 Stat Condition／Effect 共用 Group → Stat 階層選單。Group／Order 僅為 authoring metadata，Runtime 與存檔維持平面 Stat ID。
 - Options Picture 與 Preview Background 只掃描 `game/images/`，並以子目錄階層選單呈現；選定欄位只顯示葉節點檔名。Preview Background 留空時不顯示預覽圖，也不影響遊戲場景。
 - Node Schema 不保存 Background 或 Screen；兩者與音訊、轉場一樣由 Content 使用 Ren'Py 原生語法管理。
 - Editor 不提供 Screen 文件工作區或 CRUD API；Installer 也不管理創作者的 `gui.rpy`、`screens.rpy` 與其他介面文件。
@@ -174,13 +174,14 @@ Runtime 以獨立 `scene_enabled_options` 保存受控目標，不污染 Stats�
 - Event Conditions、Effects、Content、Next Node 與權重表單。
 - Event Trigger 的 Options 來源在 UI 顯示為 `Option`，JSON／Runtime 契約仍是 `Action:<id>`；Auto 顯示為 On Enter／On Node／On Exit，保存為 `Auto:Enter`／`Auto:Node`／`Auto:Exit`。
 - Event Content 使用創作者命名的文件第一層與 label 第二層的階層選單；只有一個 label 的文件在 UI 直接映射為創作者名稱，實際保存值仍是技術 label。
+- Event 的 `Group` 是單層 authoring metadata；缺值／空值正規化為固定 `Normal`，不參與 Runtime、Priority／Weight、生命週期或關聯圖。Event Pool 只保留一個展滿側欄的新增 Event 按鈕；未群組 Event 與群組卡片依 `Order` 共用同一排序流，末端永遠保留自然落點，可將 Event 排在最末群組之後。Pointer 拖移以真實元素即時騰出插入間隙並用 FLIP 位移推開 Event／群組；只有游標仍位於候選項目或群組的目前幾何邊界內，650ms 停留才可成組，讓位移開後立即取消。普通點擊在 7px 拖移門檻前不得改動 DOM或阻擋 Event 選取。群組預設收起為較短的可改名欄位與數量，hover、鍵盤 focus、拖移進入時展開；名稱與數量之間的無圖示留白可將群組當成單一排序區塊拖移，起拖時內容強制收起，成員歸屬與內部順序不變。群組剩一個 Event 時自動解散；順序保存於可選、非負整數的 Editor-only `Order`，舊資料缺值時依現有穩定順序讀取。成功拖移只更新同步狀態、不顯示 Toast；批次群組與排序經 `/api/event-groups` 一次保存，失敗不得提交畫面狀態且仍需顯示錯誤。
 - 所有固定選項 `<select>` 由前端提升為共用自訂選單；長清單可在選單內捲動。圖片與音訊依路徑資料建立任意深度的父子選單，父子框之間固定保留間隔與透明滑鼠通道，並支援方向鍵、Enter、Esc；欄位只顯示檔名。原始欄位仍保留在表單內，確保既有表單讀取與 API payload 不變。
 - Options 的 Hover Sound 與 Click Sound 只掃描 `game/audio/`。Event 不提供 BGM／SE Effect 或 Persistent；音訊演出由 Content 使用 Ren'Py 原生語法。
 - TEXTBOX、PICTURE、HITBOX 選項表單。
 - Options 拖曳把手式表單／畫布切換，以及畫布拖曳、縮放、格線與吸附。
 - 自動儲存採遞增 revision；過期請求不得覆蓋較新的草稿、狀態或儲存提示。切換節點、分頁或文件前先完成目前 revision，刪除則先取消並等待舊寫入，避免刪除後的競態與假失敗。
 - 自動儲存排程與競態控制已抽成可獨立測試的 `autosave_coordinator.js`；Node 測試覆蓋連續編輯、切換前 flush、刪除前 cancel-and-wait、網路重試與失敗阻擋。
-- 前端已開始漸進式模組化：API Client、Editor Settings、Event Trigger／End up 契約、Event 規則與權重表單、Stats 群組模型、共用階層下拉選單及關聯圖純資料模型都有獨立模組與 Node 測試；`app.js` 保留組裝、渲染與跨模組協調。
+- 前端已開始漸進式模組化：API Client、Editor Settings、Event Trigger／End up 契約、Event 規則與權重表單、Event／Stats 排序流區塊模型、共用 Pointer 即時插入與停留群組控制器、共用階層下拉選單及關聯圖純資料模型都有獨立模組與 Node 測試；`app.js` 保留組裝、渲染與跨模組協調。
 - Condition／Effect 類型、操作與預設資料形狀集中於 `state_rule_contract.js`；跨層測試會直接比較前端 registry、Editor API registry 與 Runtime 分支，新增操作不得只修改表單。
 - CSS 的設計 token 與瀏覽器基礎規則已分離至 `css/tokens.css`、`css/base.css`；其餘工作區樣式仍在 `styles.css` 漸進整理，不在搬移時改變視覺。
 - 節點刪除引用檢查與 `.scene-node-trash/` 可復原區。
@@ -296,11 +297,14 @@ EDITOR/static/js/core/state_rule_contract.js
 EDITOR/static/js/ui/choice_picker.js
   所有原生 select 的共用階層選單、任意目錄深度、鍵盤操作與定位。
 
+EDITOR/static/js/ui/group_drag.js
+  Event／Stats 共用 Pointer 拖移、即時插入間隙、FLIP 讓位、跨群組歸屬與 650ms 停留成組；純資料排序／解散規劃可由 Node 測試直接呼叫。
+
 EDITOR/static/js/workspaces/event_editor.js
-  Event Condition／Effect 列、Content／Next Node 權重表單、DOM 回讀與規則型別切換；依賴由 app.js 建立時明確注入。
+  Event Group 正規化／分組、Condition／Effect 列、Content／Next Node 權重表單、DOM 回讀與規則型別切換；依賴由 app.js 建立時明確注入。
 
 EDITOR/static/js/workspaces/state_editor.js
-  Stats 群組正規化、工作區分組與 Group → Stat 階層選單資料；不改變平面 Stat ID。
+  Stats 群組／順序正規化、工作區分組與 Group → Stat 階層選單資料；不改變平面 Stat ID。
 
 EDITOR/static/js/workspaces/graph_model.js
   關聯圖 GOTO／REPLACE／遞迴管理關係、雙向關係正規化、Stack 深度／同深度 GOTO local progression／REPLACE parity lanes／分支泳道布局、拖曳回位控制器、Cycle route 與 SVG edge path 的可測試資料邏輯。

@@ -36,6 +36,7 @@ class EventApiRoundTripTest(unittest.TestCase):
         golden = {
             "ID": "weighted_replace",
             "Name": "Weighted Replace",
+            "Group": "Normal",
             "Trigger": "Keyboard:ctrl_K_RETURN",
             "Priority": 2,
             "Once": True,
@@ -65,6 +66,7 @@ class EventApiRoundTripTest(unittest.TestCase):
         goto = {
             "ID": "single_goto",
             "Name": "Single GOTO",
+            "Group": "Normal",
             "Trigger": "Auto:Node",
             "Priority": 5,
             "Once": False,
@@ -78,6 +80,7 @@ class EventApiRoundTripTest(unittest.TestCase):
         lifecycle_input = {
             "ID": "enter_scene",
             "Name": "Enter Scene",
+            "Group": "Normal",
             "Trigger": "Auto:Enter",
             "Priority": 1,
             "Once": False,
@@ -91,6 +94,7 @@ class EventApiRoundTripTest(unittest.TestCase):
         lifecycle_golden = {
             "ID": "enter_scene",
             "Name": "Enter Scene",
+            "Group": "Normal",
             "Trigger": "Auto:Enter",
             "Priority": 1,
             "Once": False,
@@ -108,6 +112,7 @@ class EventApiRoundTripTest(unittest.TestCase):
         golden = {
             "ID": "global_clock",
             "Name": "Global Clock",
+            "Group": "Normal",
             "Trigger": "Mouse:WheelDown",
             "Priority": 0,
             "Once": False,
@@ -144,6 +149,90 @@ class EventApiRoundTripTest(unittest.TestCase):
         }
         with self.assertRaisesRegex(app.ApiError, "只能控制同一個 Options 作用域"):
             app.save_event({"node": "@global", "event": cross_node_effect})
+
+    def test_event_groups_normalize_and_rename_without_changing_runtime_fields(self):
+        base = {
+            "ID": "grouped_event",
+            "Name": "Grouped Event",
+            "Group": "  Story  ",
+            "Trigger": "Auto:Node",
+            "Priority": 5,
+            "Once": False,
+            "Conditions": [],
+            "Effects": [],
+            "Content": None,
+            "Weight": 1,
+            "End up": "REDO",
+            "Next Node": None,
+        }
+        normal = {**base, "ID": "normal_event", "Group": ""}
+
+        self.assertEqual(app.save_event({"node": "root", "event": base})["Group"], "Story")
+        self.assertEqual(app.save_event({"node": "root", "event": normal})["Group"], "Normal")
+
+        result = app.rename_event_group({"node": "root", "source": "Story", "target": "Narrative"})
+
+        self.assertEqual([event["ID"] for event in result["events"]], ["grouped_event"])
+        self.assertEqual(self.saved_event("root", "grouped_event")["Group"], "Narrative")
+        self.assertEqual(self.saved_event("root", "normal_event")["Group"], "Normal")
+        assigned = app.rename_event_group({
+            "node": "root",
+            "assignments": {"grouped_event": "Quest", "normal_event": "Quest"},
+        })
+        self.assertEqual({event["ID"] for event in assigned["events"]}, {"grouped_event", "normal_event"})
+        self.assertEqual(self.saved_event("root", "grouped_event")["Group"], "Quest")
+        self.assertEqual(self.saved_event("root", "normal_event")["Group"], "Quest")
+        ordered = app.rename_event_group({
+            "node": "root",
+            "order": ["normal_event", "grouped_event"],
+        })
+        self.assertEqual(ordered["order"], ["normal_event", "grouped_event"])
+        self.assertEqual(self.saved_event("root", "normal_event")["Order"], 0)
+        self.assertEqual(self.saved_event("root", "grouped_event")["Order"], 1)
+
+        result = app.rename_event_group({"node": "root", "source": "Quest", "target": "Narrative"})
+        self.assertEqual({event["ID"] for event in result["events"]}, {"grouped_event", "normal_event"})
+        with self.assertRaisesRegex(app.ApiError, "Normal 是固定"):
+            app.rename_event_group({"node": "root", "source": "Normal", "target": "Other"})
+        with self.assertRaisesRegex(app.ApiError, "所有 Events"):
+            app.rename_event_group({"node": "root", "order": ["normal_event"]})
+
+    def test_event_group_batch_restores_earlier_files_when_a_write_fails(self):
+        base = {
+            "Name": "Grouped Event",
+            "Group": "Normal",
+            "Trigger": "Auto:Node",
+            "Priority": 5,
+            "Once": False,
+            "Conditions": [],
+            "Effects": [],
+            "Content": None,
+            "Weight": 1,
+            "End up": "REDO",
+            "Next Node": None,
+        }
+        app.save_event({"node": "root", "event": {**base, "ID": "first"}})
+        app.save_event({"node": "root", "event": {**base, "ID": "second"}})
+        real_write_json = app.write_json
+        event_write_count = 0
+
+        def fail_second_event_write(path, data):
+            nonlocal event_write_count
+            if path.parent.name == app.EVENT_DIR:
+                event_write_count += 1
+                if event_write_count == 2:
+                    raise OSError("simulated write failure")
+            return real_write_json(path, data)
+
+        with mock.patch.object(app, "write_json", side_effect=fail_second_event_write):
+            with self.assertRaisesRegex(OSError, "simulated write failure"):
+                app.rename_event_group({
+                    "node": "root",
+                    "assignments": {"first": "Story", "second": "Story"},
+                })
+
+        self.assertEqual(self.saved_event("root", "first")["Group"], "Normal")
+        self.assertEqual(self.saved_event("root", "second")["Group"], "Normal")
 
 
 if __name__ == "__main__":
