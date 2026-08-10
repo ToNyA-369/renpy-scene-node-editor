@@ -26,7 +26,7 @@ The editor does not overwrite creator-owned `gui.rpy`, `screens.rpy`, assets, or
 
 ## Get started
 
-1. Download and extract the project with GitHub's **Code → Download ZIP**, or use Git clone.
+1. Open [Releases](https://github.com/ToNyA-369/renpy-scene-node-editor/releases), then download and extract the product ZIP whose name begins with `Scene-Node-Editor-`. Do not choose GitHub's automatically generated **Source code** archives.
 2. Create a blank project in the Ren'Py Launcher.
 3. On macOS, double-click `安裝到RenPy專案.command`.
 4. Select the Ren'Py project folder or its `game/` folder.

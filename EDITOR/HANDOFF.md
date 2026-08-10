@@ -195,6 +195,7 @@ Runtime 以獨立 `scene_enabled_options` 保存受控目標，不污染 Stats�
 - 編輯器快捷鍵與自訂設定。
 - 編輯器設定透過 `/api/editor-settings` 寫入專案根目錄 `.scene-node-editor/settings.json`，不可退回只依賴隨機連接埠來源的 `localStorage`。
 - 安裝到空白 Ren'Py 專案及原地更新。
+- `tools/package_release.py` 以明確允許清單產生可重現的產品 ZIP 與 SHA-256；產品包只包含 Installer、Editor、canonical Runtime、授權及創作者文件，Release tag 必須由通過完整驗證並合併至 `main` 的 commit 建立。
 
 最近完成的版面修正：
 
