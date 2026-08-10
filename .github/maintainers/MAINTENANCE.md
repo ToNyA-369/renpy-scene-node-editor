@@ -2,7 +2,7 @@
 
 [English](MAINTENANCE.en.md)
 
-這份文件回答「新增功能時，應從哪裡開始、必須同步哪些地方」。遊戲架構與資料語意仍以 [Reference](zh-TW/REFERENCE.md) 為準。
+這份文件回答「新增功能時，應從哪裡開始、必須同步哪些地方」。遊戲架構與資料語意仍以 [Reference](../../docs/zh-TW/REFERENCE.md) 為準。
 
 ## 前端分層
 

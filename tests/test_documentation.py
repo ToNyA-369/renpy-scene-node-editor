@@ -14,6 +14,7 @@ class DocumentationTest(unittest.TestCase):
         expected = (
             "README.md",
             "README.en.md",
+            "docs/README.md",
             "docs/zh-TW/FIRST_PROJECT.md",
             "docs/en/FIRST_PROJECT.md",
             "docs/zh-TW/USER_GUIDE.md",
@@ -36,6 +37,7 @@ class DocumentationTest(unittest.TestCase):
             ROOT / "README.en.md",
             ROOT / "CONTRIBUTING.md",
             *(ROOT / "docs").rglob("*.md"),
+            *(ROOT / ".github" / "maintainers").rglob("*.md"),
             ROOT / "EDITOR" / "README.md",
             ROOT / "EDITOR" / "README.en.md",
         ]

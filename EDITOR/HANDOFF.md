@@ -363,7 +363,7 @@ tools/verify.py
   在 GitHub Pull Request 與 main push 上，以 Linux、macOS 執行統一驗證。
 ```
 
-前端工作區的主要頁面渲染與 Options 互動仍集中在 `app.js`，既有工作區 CSS 也仍集中於 `styles.css`；但共用核心、Event 表單資料轉換、下拉選單及關聯圖模型已有可測試邊界。新功能先依 `AGENTS.md` 與 `docs/MAINTENANCE.md` 判斷擴充入口，不要把可獨立邏輯重新塞回 composition root。不同對話若同時修改 `app.js`／`styles.css` 仍容易衝突；平行工作應使用獨立 Git worktree，或明確切分不同模組。
+前端工作區的主要頁面渲染與 Options 互動仍集中在 `app.js`，既有工作區 CSS 也仍集中於 `styles.css`；但共用核心、Event 表單資料轉換、下拉選單及關聯圖模型已有可測試邊界。新功能先依 `AGENTS.md` 與 `.github/maintainers/MAINTENANCE.md` 判斷擴充入口，不要把可獨立邏輯重新塞回 composition root。不同對話若同時修改 `app.js`／`styles.css` 仍容易衝突；平行工作應使用獨立 Git worktree，或明確切分不同模組。
 
 ## 9. 啟動與驗證
 
@@ -431,7 +431,7 @@ UI 變更必須用瀏覽器實際操作，不只檢查靜態畫面。至少確�
 - 資料格式改動必須同步考慮 Editor、Runtime、Installer、示範資料與測試。
 - 平行對話使用不同 worktree；同一工作目錄一次只由一個實作對話寫入。
 
-專案的 Codex 角色路由與 Antigravity worktree 交接流程記錄在 `docs/DEVELOPMENT_WORKFLOW.md`；外部實作者必須使用 `.codex/templates/implementation-brief.md`，並把 diff 與測試證據交回主控審查。
+專案的 Codex 角色路由與 Antigravity worktree 交接流程記錄在 `.github/maintainers/DEVELOPMENT_WORKFLOW.md`；外部實作者必須使用 `.codex/templates/implementation-brief.md`，並把 diff 與測試證據交回主控審查。
 
 ## 11. 尚可繼續進行的方向
 
