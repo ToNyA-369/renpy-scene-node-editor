@@ -5,6 +5,8 @@ const GRID_VISIBLE_KEY = "scene-node-editor.option-grid-visible";
 const SNAP_ENABLED_KEY = "scene-node-editor.option-snap-enabled";
 const GLOBAL_NODE_ID = "__global__";
 const GLOBAL_NODE_PATH = "@global";
+const GRAPH_NAME_FADE_START = 2.2;
+const GRAPH_NAME_FADE_END = 3.2;
 const {
   DEFAULT_LOCALE,
   EN_DICTIONARY,
@@ -89,6 +91,11 @@ const state = {
 let editorSettingsSave = Promise.resolve(true);
 let editorSettingsSaveFailureNotified = false;
 let workspaceAnimationTimer = null;
+let pendingTabPreview = null;
+let pendingEventGroupFocus = null;
+let pendingStatGroupFocus = null;
+let eventGroupDragController = null;
+let statGroupDragController = null;
 
 const dom = {
   workspace: document.querySelector("#workspace"),
@@ -517,8 +524,11 @@ const {
   replaceRuleType,
 } = eventEditor;
 const {
+  DEFAULT_EVENT_GROUP,
   addWeightedChoice,
   choiceEntries,
+  eventPoolBlocks,
+  normalizeEventGroup,
   removeWeightedChoice,
 } = SceneEventEditor;
 
@@ -653,7 +663,7 @@ async function loadProject({ preserveNode = true } = {}) {
     state.images = data.images || [];
     state.audio = data.audio || [];
     state.optionTargets = data.optionTargets || [];
-    state.stats = data.stats || {};
+    state.stats = SceneStateEditor.withStatOrders(data.stats || {});
     state.statsDraft = clone(state.stats);
     state.memories = data.memories || { memory: { Name: "Memory" } };
     state.memoriesDraft = clone(state.memories);
@@ -683,6 +693,7 @@ async function selectNode(path, { preserveTab = false } = {}) {
   setSaveState("讀取中", "saving");
   try {
     const detail = await api(`/api/node?path=${encodeURIComponent(path)}`);
+    detail.events = normalizeEventEntries(detail.events);
     state.selectedNodePath = path;
     state.nodeDetail = detail;
     state.selectedEventId = detail.events[0]?.data?.ID || null;
@@ -727,13 +738,13 @@ function renderAll() {
   syncShortcutTitles();
 }
 
-function syncTabFocusIndicator({ immediate = false } = {}) {
+function syncTabFocusIndicator({ immediate = false, targetTab = null } = {}) {
   const indicator = dom.tabFocusIndicator;
-  const activeTab = dom.tabbar?.querySelector(".tab.active");
+  const activeTab = targetTab || dom.tabbar?.querySelector(".tab.active");
   if (!indicator || !activeTab) return;
   if (immediate) indicator.classList.add("no-transition");
+  indicator.style.left = `${activeTab.offsetLeft}px`;
   indicator.style.width = `${activeTab.offsetWidth}px`;
-  indicator.style.transform = `translateX(${activeTab.offsetLeft}px)`;
   indicator.classList.add("ready");
   if (immediate) {
     window.requestAnimationFrame(() => indicator.classList.remove("no-transition"));
@@ -767,8 +778,32 @@ function switchTab(tab, { render = true } = {}) {
   if (isSwitchingTab) playWorkspaceAnimation("tab-switch-enter");
 }
 
+async function refreshGraphSnapshot() {
+  const project = await api("/api/project");
+  state.rootNodeId = project.rootNodeId || null;
+  state.globalNode = project.globalNode || null;
+  state.nodes = project.nodes || [];
+  state.graph = project.graph || { edges: [] };
+  updateHeader();
+  updateDatalists();
+  renderNodeList();
+  renderNodePanel();
+}
+
 async function requestTabSwitch(tab, options = {}) {
-  if (tab !== state.activeTab && !await flushAutosave()) return false;
+  const isSwitchingTab = tab !== state.activeTab;
+  if (isSwitchingTab && !await flushAutosave()) return false;
+  if (isSwitchingTab && tab === "graph") {
+    setSaveState(t("讀取中"), "saving");
+    try {
+      await refreshGraphSnapshot();
+      setSaveState(t("已同步"));
+    } catch (error) {
+      setSaveState(t("讀取失敗"), "error");
+      toast(error.message, "error");
+      return false;
+    }
+  }
   switchTab(tab, options);
   return true;
 }
@@ -1013,9 +1048,12 @@ function eventActionChoices(current = "") {
 }
 
 function defaultEvent(id = generateId("event")) {
+  const nextOrder = Math.max(-1, ...eventPoolItems().map((event) => numberValue(event.Order, -1))) + 1;
   return {
     ID: id,
     Name: "新事件",
+    Group: DEFAULT_EVENT_GROUP,
+    Order: nextOrder,
     Trigger: eventActionChoices()[0]?.id || "Auto:Node",
     Priority: 5,
     Weight: 1,
@@ -1028,21 +1066,73 @@ function defaultEvent(id = generateId("event")) {
   };
 }
 
-function eventListHtml() {
-  const events = state.nodeDetail?.events || [];
-  if (!events.length) return `<div class="node-list-empty">${escapeHtml(t("尚未建立 Event"))}</div>`;
-  return events.map((entry) => {
+function eventPoolItems() {
+  const items = (state.nodeDetail?.events || []).map((entry, index) => {
     const event = entry.data.ID === state.selectedEventId && state.eventDraft ? state.eventDraft : entry.data;
-    return `
-      <button class="subnav-item ${event.ID === state.selectedEventId ? "active" : ""}" type="button" data-event-id="${escapeHtml(event.ID)}">
-        <span class="subnav-item-copy">
-          <strong>${escapeHtml(event.Name || event.ID || entry.file)}</strong>
-          <span>${escapeHtml(eventTriggerDisplayName(event.Trigger))}</span>
-        </span>
-        <span class="priority-badge" title="Priority">${escapeHtml(event.Priority ?? 5)}</span>
-      </button>
-    `;
-  }).join("");
+    return { ...event, Order: Number.isInteger(event.Order) ? event.Order : index, _file: entry.file };
+  });
+  if (state.eventDraft && !items.some((event) => event.ID === state.eventDraft.ID)) {
+    items.push({ ...state.eventDraft, _file: `${state.eventDraft.ID}.json` });
+  }
+  return items.sort((left, right) => left.Order - right.Order || String(left.ID).localeCompare(String(right.ID)));
+}
+
+function normalizeEventEntries(entries) {
+  return (entries || [])
+    .map((entry, index) => ({
+      ...entry,
+      data: {
+        ...(entry.data || {}),
+        Order: Number.isInteger(entry.data?.Order) && entry.data.Order >= 0 ? entry.data.Order : index,
+      },
+      fallbackOrder: index,
+    }))
+    .sort((left, right) => (
+      left.data.Order - right.data.Order
+      || left.fallbackOrder - right.fallbackOrder
+    ))
+    .map(({ fallbackOrder: _fallbackOrder, ...entry }, index) => ({
+      ...entry,
+      data: { ...entry.data, Order: index },
+    }));
+}
+
+function eventListItemHtml(event, group) {
+  return `
+    <button class="subnav-item group-drag-item ${event.ID === state.selectedEventId ? "active" : ""}" type="button" aria-grabbed="false" data-event-id="${escapeHtml(event.ID)}" data-group-item-id="${escapeHtml(event.ID)}" data-group-item-group="${escapeHtml(group)}">
+      <span class="subnav-item-copy">
+        <strong>${escapeHtml(event.Name || event.ID || event._file)}</strong>
+        <span>${escapeHtml(eventTriggerDisplayName(event.Trigger))}</span>
+      </span>
+      <span class="priority-badge" title="Priority">${escapeHtml(event.Priority ?? 5)}</span>
+    </button>
+  `;
+}
+
+function eventListHtml() {
+  const events = eventPoolItems();
+  if (!events.length) return `<div class="node-list-empty">${escapeHtml(t("尚未建立 Event"))}</div>`;
+  return `
+    <div class="event-pool-flow" data-group-drop="${DEFAULT_EVENT_GROUP}" data-event-ungrouped-drop>
+      ${eventPoolBlocks(events).map((block) => block.type === "item"
+        ? eventListItemHtml(block.event, DEFAULT_EVENT_GROUP)
+        : `
+          <section class="event-group" data-group-drop="${escapeHtml(block.name)}">
+            <div class="event-group-header">
+              <input class="event-group-name" data-event-group-name="${escapeHtml(block.name)}" aria-label="${escapeHtml(t("群組名稱"))}" maxlength="80" value="${escapeHtml(block.name)}">
+              <div class="group-block-drag-space event-group-drag-space" title="${escapeHtml(t("拖移群組"))}" aria-label="${escapeHtml(t("拖移群組"))}"></div>
+              <span class="event-group-count" aria-hidden="true">${block.events.length}</span>
+            </div>
+            <div class="event-group-items-shell">
+              <div class="event-group-items">
+                ${block.events.map((event) => eventListItemHtml(event, block.name)).join("")}
+              </div>
+            </div>
+          </section>
+        `).join("")}
+      <div class="group-loose-drop-tail event-loose-drop-tail" aria-hidden="true"></div>
+    </div>
+  `;
 }
 
 function captureEventPanelView() {
@@ -1084,6 +1174,8 @@ function restoreEventPanelView(view) {
 
 function renderEventsPanel({ preserveView = false } = {}) {
   const view = preserveView ? captureEventPanelView() : null;
+  eventGroupDragController?.destroy();
+  eventGroupDragController = null;
   if (!state.nodeDetail) {
     dom.eventsPanel.innerHTML = "";
     return;
@@ -1113,6 +1205,12 @@ function renderEventsPanel({ preserveView = false } = {}) {
   `;
   bindEventPanel();
   if (view) restoreEventPanelView(view);
+  if (pendingEventGroupFocus) {
+    const input = document.querySelector(`[data-event-group-name="${CSS.escape(pendingEventGroupFocus)}"]`);
+    pendingEventGroupFocus = null;
+    input?.focus({ preventScroll: true });
+    input?.select();
+  }
   syncShortcutTitles();
 }
 
@@ -1205,6 +1303,8 @@ function readEventForm() {
   const result = {
     ID: form.elements.ID.value.trim(),
     Name: form.elements.Name.value.trim(),
+    Group: normalizeEventGroup(state.eventDraft?.Group),
+    Order: Math.max(0, Math.trunc(numberValue(state.eventDraft?.Order, 0))),
     Trigger: trigger,
     Priority: Math.trunc(numberValue(form.elements.Priority.value, 5)),
     Once: form.elements.Once.checked,
@@ -1222,8 +1322,39 @@ function readEventForm() {
 
 function bindEventPanel() {
   document.querySelectorAll("[data-event-id]").forEach((button) => button.addEventListener("click", () => selectEvent(button.dataset.eventId)));
-  document.querySelector("#newEventButton")?.addEventListener("click", createEventDraft);
-  document.querySelector("#emptyNewEventButton")?.addEventListener("click", createEventDraft);
+  document.querySelector("#newEventButton")?.addEventListener("click", () => createEventDraft());
+  document.querySelector("#emptyNewEventButton")?.addEventListener("click", () => createEventDraft());
+  document.querySelectorAll("[data-event-group-name]").forEach((input) => {
+    const source = input.dataset.eventGroupName;
+    input.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        input.blur();
+      } else if (event.key === "Escape") {
+        input.value = source;
+        input.blur();
+      }
+    });
+    input.addEventListener("change", async () => {
+      const target = input.value.trim();
+      if (!target) {
+        input.value = source;
+        return;
+      }
+      await renameEventGroup(source, target);
+    });
+  });
+  eventGroupDragController = SceneGroupDrag.createController({
+    root: dom.eventsPanel.querySelector(".event-pool-flow"),
+    itemSelector: "[data-group-item-id]",
+    groupSelector: ".event-group[data-group-drop]",
+    ungroupedSelector: "[data-event-ungrouped-drop]",
+    groupHandleSelector: ".event-group-drag-space",
+    listSelector: ".event-group-items",
+    onDrop: applyEventGroupDrop,
+    onGroupDrop: applyEventGroupBlockDrop,
+    onError: (error) => toast(error.message, "error"),
+  });
   const form = document.querySelector("#eventForm");
   if (!form) return;
   form.addEventListener("submit", saveEvent);
@@ -1434,6 +1565,11 @@ function bindEventPanel() {
       scheduleEventAutosave({ useDraft: true });
       renderEventsPanel({ preserveView: true });
       return;
+    } else if (event.target.name === "Group") {
+      state.eventDraft = readEventForm();
+      scheduleEventAutosave({ useDraft: true });
+      renderEventsPanel({ preserveView: true });
+      return;
     } else if (event.target.name === "conditionType") {
       const row = event.target.closest(".condition-row");
       const index = Number(row.dataset.index);
@@ -1488,15 +1624,100 @@ async function selectEvent(id) {
   renderEventsPanel();
 }
 
-async function createEventDraft() {
+async function createEventDraft(group = DEFAULT_EVENT_GROUP) {
   if (!await flushAutosave()) return;
   const id = generateId("event");
-  state.selectedEventId = null;
+  state.selectedEventId = id;
   state.eventOriginalId = null;
   state.eventDraft = defaultEvent(id);
+  state.eventDraft.Group = normalizeEventGroup(group);
   renderEventsPanel();
   scheduleEventAutosave();
   document.querySelector('[name="Name"]')?.focus();
+}
+
+async function renameEventGroup(source, target) {
+  const normalizedTarget = normalizeEventGroup(target);
+  if (source === normalizedTarget) return true;
+  if (!await flushAutosave()) return false;
+  setSaveState(t("儲存中..."), "saving");
+  try {
+    const result = await api("/api/event-groups", {
+      method: "PUT",
+      body: { node: state.selectedNodePath, source, target: normalizedTarget },
+    });
+    const updates = new Map((result.events || []).map((event) => [event.ID, event]));
+    state.nodeDetail.events.forEach((entry) => {
+      if (updates.has(entry.data.ID)) entry.data = clone(updates.get(entry.data.ID));
+    });
+    if (state.eventDraft && updates.has(state.eventDraft.ID)) {
+      state.eventDraft = clone(updates.get(state.eventDraft.ID));
+    }
+    renderEventsPanel({ preserveView: true });
+    setSaveState(t("已同步"));
+    toast(source === normalizedTarget ? t("Event 群組未變更") : t("Event 群組已更新"));
+    return true;
+  } catch (error) {
+    setSaveState(t("儲存失敗"), "error");
+    toast(error.message, "error");
+    return false;
+  }
+}
+
+async function assignEventGroups(assignments, { focusGroup = null, order = null, message = null, notify = true } = {}) {
+  if (!Object.keys(assignments || {}).length && !order) return true;
+  if (!await flushAutosave()) return false;
+  setSaveState(t("儲存中..."), "saving");
+  try {
+    const result = await api("/api/event-groups", {
+      method: "PUT",
+      body: { node: state.selectedNodePath, assignments, order },
+    });
+    const updates = new Map((result.events || []).map((event) => [event.ID, event]));
+    state.nodeDetail.events.forEach((entry) => {
+      if (updates.has(entry.data.ID)) entry.data = clone(updates.get(entry.data.ID));
+    });
+    if (order) {
+      const indexes = new Map(order.map((id, index) => [id, index]));
+      state.nodeDetail.events.sort((left, right) => indexes.get(left.data.ID) - indexes.get(right.data.ID));
+    }
+    if (state.eventDraft && updates.has(state.eventDraft.ID)) state.eventDraft = clone(updates.get(state.eventDraft.ID));
+    pendingEventGroupFocus = focusGroup;
+    renderEventsPanel({ preserveView: true });
+    setSaveState(t("已同步"));
+    if (notify) toast(message || (focusGroup ? t("群組已建立") : t("Event 排序已更新")));
+    return true;
+  } catch (error) {
+    setSaveState(t("儲存失敗"), "error");
+    toast(error.message, "error");
+    return false;
+  }
+}
+
+async function applyEventGroupDrop({ mode, sourceId, targetId, targetGroup, position }) {
+  const items = eventPoolItems().map((event) => ({ id: event.ID, group: event.Group }));
+  const settings = { sourceId, targetId, targetGroup, position, defaultGroup: DEFAULT_EVENT_GROUP };
+  const plan = mode === "group"
+    ? SceneGroupDrag.planGroupDrop(items, { ...settings, newGroupName: t("新群組") })
+    : SceneGroupDrag.planReorder(items, settings);
+  if (!plan) return false;
+  return assignEventGroups(plan.assignments, {
+    focusGroup: plan.createdGroup,
+    order: plan.order,
+    notify: false,
+  });
+}
+
+async function applyEventGroupBlockDrop({ sourceGroup, targetId, position }) {
+  const items = eventPoolItems().map((event) => ({ id: event.ID, group: event.Group }));
+  const plan = SceneGroupDrag.planGroupBlockReorder(items, {
+    sourceGroup,
+    targetId,
+    position,
+    defaultGroup: DEFAULT_EVENT_GROUP,
+  });
+  if (!plan) return false;
+  return assignEventGroups({}, { order: plan.order, notify: false });
 }
 
 async function persistEventSnapshot(snapshot, task = null) {
@@ -1508,6 +1729,7 @@ async function persistEventSnapshot(snapshot, task = null) {
   if (state.selectedNodePath !== snapshot.node || !state.nodeDetail) return saved;
   const originalId = snapshot.originalId || snapshot.event.ID;
   const index = state.nodeDetail.events.findIndex((item) => item.data.ID === originalId);
+  const isNewEvent = index < 0;
   const entry = { file: `${saved.ID}.json`, data: clone(saved) };
   if (index >= 0) state.nodeDetail.events[index] = entry;
   else state.nodeDetail.events.push(entry);
@@ -1516,6 +1738,7 @@ async function persistEventSnapshot(snapshot, task = null) {
     state.eventOriginalId = saved.ID;
   }
   updateHeader();
+  if (isNewEvent) renderEventsPanel({ preserveView: true });
   return saved;
 }
 
@@ -2906,38 +3129,39 @@ async function deleteContent() {
   }
 }
 
-function statRowsHtml(entries) {
-  if (!entries.length) return `<tr><td colspan="5"><div class="row-empty">${t("這個群組尚未建立 Stat。")}</div></td></tr>`;
+function statRowsHtml(entries, group) {
   return entries.map(([id, values]) => `
-    <tr class="stat-row" data-stat-id="${escapeHtml(id)}">
-      <td><input name="statName" aria-label="Stat Name" value="${escapeHtml(values.Name || id)}"></td>
-      <td><input name="statMin" type="number" step="any" value="${escapeHtml(values.Min)}"></td>
-      <td><input name="statInit" type="number" step="any" value="${escapeHtml(values.Init)}"></td>
-      <td><input name="statMax" type="number" step="any" value="${escapeHtml(values.Max)}"></td>
-      <td class="action-cell"><button class="row-button" type="button" data-remove-stat="${escapeHtml(id)}" title="${t("移除 Stat")}" aria-label="${t("移除 Stat")}">×</button></td>
-    </tr>
+    <div class="stat-row stat-columns group-drag-item" role="row" data-stat-id="${escapeHtml(id)}" data-stat-order="${escapeHtml(values.Order ?? 0)}" data-group-item-id="${escapeHtml(id)}" data-group-item-group="${escapeHtml(group)}" aria-grabbed="false">
+      <div class="stat-cell stat-name-cell" role="cell"><div class="stat-name-control"><input name="statName" aria-label="Stat Name" value="${escapeHtml(values.Name || id)}"></div></div>
+      <div class="stat-cell" role="cell"><input name="statMin" aria-label="Min" type="number" step="any" value="${escapeHtml(values.Min)}"></div>
+      <div class="stat-cell" role="cell"><input name="statInit" aria-label="Init" type="number" step="any" value="${escapeHtml(values.Init)}"></div>
+      <div class="stat-cell" role="cell"><input name="statMax" aria-label="Max" type="number" step="any" value="${escapeHtml(values.Max)}"></div>
+      <div class="stat-cell action-cell" role="cell"><button class="row-button" type="button" data-remove-stat="${escapeHtml(id)}" title="${t("移除 Stat")}" aria-label="${t("移除 Stat")}">×</button></div>
+    </div>
   `).join("");
 }
 
 function statGroupsHtml() {
-  const groups = SceneStateEditor.groupedStatEntries(state.statsDraft);
-  return groups.map(({ group, entries }) => `
-    <section class="stat-group-card" data-stat-group="${escapeHtml(group)}">
-      <div class="stat-group-heading">
-        <label class="field stat-group-name-field">
-          <span class="visually-hidden">${t("群組名稱")}</span>
-          <input name="statGroupName" aria-label="${t("群組名稱")}" value="${escapeHtml(group)}" ${group === SceneStateEditor.DEFAULT_GROUP ? "readonly" : ""}>
-        </label>
-        <button class="stat-group-add-button add-button" type="button" data-add-stat-to-group title="${t("在 {group} 新增 Stat", { group: escapeHtml(group) })}" aria-label="${t("在 {group} 新增 Stat", { group: escapeHtml(group) })}">＋</button>
-      </div>
-      <div class="state-table-wrap">
-        <table class="data-table state-data-table stats-table">
-          <thead><tr><th>Name</th><th>Min</th><th>Init</th><th>Max</th><th></th></tr></thead>
-          <tbody>${statRowsHtml(entries)}</tbody>
-        </table>
-      </div>
-    </section>
-  `).join("");
+  const blocks = SceneStateEditor.statPoolBlocks(state.statsDraft);
+  return `
+    <div class="stat-column-header stat-columns" role="row">
+      <span role="columnheader">Name</span><span role="columnheader">Min</span><span role="columnheader">Init</span><span role="columnheader">Max</span><span aria-hidden="true"></span>
+    </div>
+    <div class="stat-groups-body" id="statsGroups" role="rowgroup" data-group-drop="${SceneStateEditor.DEFAULT_GROUP}" data-stat-ungrouped-drop>
+      ${blocks.map((block) => block.type === "item"
+        ? statRowsHtml([[block.id, block.values]], SceneStateEditor.DEFAULT_GROUP)
+        : `
+          <section class="stat-group-card" data-stat-group="${escapeHtml(block.group)}" data-group-drop="${escapeHtml(block.group)}">
+            <div class="stat-group-heading">
+              <input class="stat-group-name" name="statGroupName" data-stat-group-name="${escapeHtml(block.group)}" aria-label="${t("群組名稱")}" maxlength="80" value="${escapeHtml(block.group)}">
+              <div class="group-block-drag-space stat-group-drag-space" title="${escapeHtml(t("拖移群組"))}" aria-label="${escapeHtml(t("拖移群組"))}"></div>
+            </div>
+            <div class="stat-group-items">${statRowsHtml(block.entries, block.group)}</div>
+          </section>
+        `).join("")}
+      <div class="group-loose-drop-tail stat-loose-drop-tail" aria-hidden="true"></div>
+    </div>
+  `;
 }
 
 function memoryRowsHtml() {
@@ -2954,14 +3178,16 @@ function memoryRowsHtml() {
 }
 
 function renderStatsPanel() {
+  statGroupDragController?.destroy();
+  statGroupDragController = null;
   dom.statsPanel.innerHTML = `
     <div class="panel-page wide state-definitions-page" id="stateDefinitionsPage">
       <section class="state-definition-section">
         <div class="state-section-heading">
           <div><h2>Stats</h2></div>
-          <button class="state-add-button add-button" id="addStatGroupButton" type="button" title="${t("新增 Stat 群組")}" aria-label="${t("新增 Stat 群組")}">＋</button>
+          <button class="state-add-button add-button" id="addStatButton" type="button" title="${t("新增 Stat")}" aria-label="${t("新增 Stat")}">＋</button>
         </div>
-        <div class="stat-groups" id="statsGroups">${statGroupsHtml()}</div>
+        <div class="stat-groups">${statGroupsHtml()}</div>
       </section>
 
       <section class="state-definition-section">
@@ -2978,16 +3204,45 @@ function renderStatsPanel() {
       </section>
     </div>
   `;
-  document.querySelector("#addStatGroupButton")?.addEventListener("click", addStatGroup);
-  document.querySelectorAll("[data-add-stat-to-group]").forEach((button) => button.addEventListener("click", () => {
-    const group = button.closest(".stat-group-card")?.querySelector('[name="statGroupName"]')?.value;
-    addStat(group);
-  }));
+  document.querySelector("#addStatButton")?.addEventListener("click", () => addStat());
   document.querySelector("#addMemoryButton")?.addEventListener("click", addMemory);
   document.querySelectorAll("[data-remove-stat]").forEach((button) => button.addEventListener("click", () => removeStat(button.dataset.removeStat)));
   document.querySelectorAll("[data-remove-memory]:not([disabled])").forEach((button) => button.addEventListener("click", () => removeMemory(Number(button.dataset.removeMemory))));
+  document.querySelectorAll("[data-stat-group-name]").forEach((input) => {
+    const source = input.dataset.statGroupName;
+    input.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        input.blur();
+      } else if (event.key === "Escape") {
+        input.value = source;
+        input.blur();
+      }
+    });
+    input.addEventListener("change", () => renameStatGroup(source, input.value));
+  });
+  statGroupDragController = SceneGroupDrag.createController({
+    root: document.querySelector("#statsGroups"),
+    itemSelector: ".stat-row[data-group-item-id]",
+    groupSelector: ".stat-group-card[data-group-drop]",
+    ungroupedSelector: "[data-stat-ungrouped-drop]",
+    groupHandleSelector: ".stat-group-drag-space",
+    listSelector: ".stat-group-items",
+    onDrop: applyStatGroupDrop,
+    onGroupDrop: applyStatGroupBlockDrop,
+    onError: (error) => toast(error.message, "error"),
+  });
   const page = document.querySelector("#stateDefinitionsPage");
-  page?.addEventListener("input", scheduleStatsAutosave);
+  page?.addEventListener("input", (event) => {
+    if (event.target.matches("[data-stat-group-name]")) return;
+    scheduleStatsAutosave();
+  });
+  if (pendingStatGroupFocus) {
+    const input = document.querySelector(`[data-stat-group-name="${CSS.escape(pendingStatGroupFocus)}"]`);
+    pendingStatGroupFocus = null;
+    input?.focus({ preventScroll: true });
+    input?.select();
+  }
 }
 
 function readStatsForm() {
@@ -2995,12 +3250,14 @@ function readStatsForm() {
   document.querySelectorAll(".stat-row").forEach((row) => {
     const id = row.dataset.statId;
     if (!id) return;
+    const groupCard = row.closest(".stat-group-card[data-group-drop]");
     const group = SceneStateEditor.normalizeGroup(
-      row.closest(".stat-group-card")?.querySelector('[name="statGroupName"]')?.value,
+      groupCard?.querySelector('[name="statGroupName"]')?.value || groupCard?.dataset.groupDrop,
     );
     result[id] = {
       Name: row.querySelector('[name="statName"]').value.trim() || id,
       Group: group,
+      Order: Math.max(0, Math.trunc(numberValue(row.dataset.statOrder, 0))),
       Min: numberValue(row.querySelector('[name="statMin"]').value),
       Init: numberValue(row.querySelector('[name="statInit"]').value),
       Max: numberValue(row.querySelector('[name="statMax"]').value),
@@ -3025,9 +3282,11 @@ function addStat(group = SceneStateEditor.DEFAULT_GROUP) {
   state.statsDraft = readStatsForm();
   state.memoriesDraft = readMemoriesForm();
   const id = generateId("stat");
+  const nextOrder = Math.max(-1, ...Object.values(state.statsDraft).map((values) => numberValue(values.Order, -1))) + 1;
   state.statsDraft[id] = {
     Name: "新數值",
     Group: SceneStateEditor.normalizeGroup(group),
+    Order: nextOrder,
     Min: 0,
     Init: 0,
     Max: 100,
@@ -3038,28 +3297,101 @@ function addStat(group = SceneStateEditor.DEFAULT_GROUP) {
   return id;
 }
 
-function addStatGroup() {
-  state.statsDraft = readStatsForm();
-  state.memoriesDraft = readMemoriesForm();
-  const existing = new Set(SceneStateEditor.groupedStatEntries(state.statsDraft).map(({ group }) => group));
-  const base = "New Group";
-  let group = base;
-  let suffix = 2;
-  while (existing.has(group)) {
-    group = `${base} ${suffix}`;
-    suffix += 1;
+async function commitStatsGrouping(nextStats, { focusGroup = null, message = t("Stat 群組已更新"), notify = true } = {}) {
+  if (!await flushAutosave()) return false;
+  const previousStats = clone(state.statsDraft);
+  const memories = readMemoriesForm();
+  state.statsDraft = clone(nextStats);
+  state.memoriesDraft = clone(memories);
+  pendingStatGroupFocus = focusGroup;
+  renderStatsPanel();
+  setSaveState(t("儲存中..."), "saving");
+  try {
+    const data = await api("/api/stats", { method: "PUT", body: { stats: nextStats } });
+    state.stats = clone(data.stats);
+    state.statsDraft = clone(data.stats);
+    updateDatalists();
+    setSaveState(t("已同步"));
+    if (notify) toast(message);
+    return true;
+  } catch (error) {
+    state.statsDraft = previousStats;
+    state.memoriesDraft = clone(memories);
+    pendingStatGroupFocus = null;
+    renderStatsPanel();
+    setSaveState(t("儲存失敗"), "error");
+    toast(error.message, "error");
+    return false;
   }
-  const id = addStat(group);
-  document.querySelector(`.stat-row[data-stat-id="${CSS.escape(id)}"]`)
-    ?.closest(".stat-group-card")
-    ?.querySelector('[name="statGroupName"]')
-    ?.select();
+}
+
+async function applyStatGroupDrop({ mode, sourceId, targetId, targetGroup, position }) {
+  const stats = readStatsForm();
+  const items = Object.entries(SceneStateEditor.withStatOrders(state.statsDraft))
+    .map(([id, values]) => ({ id, group: values.Group }));
+  const settings = { sourceId, targetId, targetGroup, position, defaultGroup: SceneStateEditor.DEFAULT_GROUP };
+  const plan = mode === "group"
+    ? SceneGroupDrag.planGroupDrop(items, { ...settings, newGroupName: t("新群組") })
+    : SceneGroupDrag.planReorder(items, settings);
+  if (!plan) return false;
+  Object.entries(plan.assignments).forEach(([id, group]) => {
+    if (stats[id]) stats[id].Group = group;
+  });
+  const orderedStats = {};
+  plan.order.forEach((id, index) => {
+    if (!stats[id]) return;
+    stats[id].Order = index;
+    orderedStats[id] = stats[id];
+  });
+  return commitStatsGrouping(orderedStats, {
+    focusGroup: plan.createdGroup,
+    notify: false,
+  });
+}
+
+async function applyStatGroupBlockDrop({ sourceGroup, targetId, position }) {
+  const stats = readStatsForm();
+  const items = Object.entries(SceneStateEditor.withStatOrders(state.statsDraft))
+    .map(([id, values]) => ({ id, group: values.Group }));
+  const plan = SceneGroupDrag.planGroupBlockReorder(items, {
+    sourceGroup,
+    targetId,
+    position,
+    defaultGroup: SceneStateEditor.DEFAULT_GROUP,
+  });
+  if (!plan) return false;
+  const orderedStats = {};
+  plan.order.forEach((id, index) => {
+    if (!stats[id]) return;
+    stats[id].Order = index;
+    orderedStats[id] = stats[id];
+  });
+  return commitStatsGrouping(orderedStats, { notify: false });
+}
+
+async function renameStatGroup(source, rawTarget) {
+  const target = SceneStateEditor.normalizeGroup(rawTarget);
+  if (!String(rawTarget || "").trim()) {
+    renderStatsPanel();
+    return false;
+  }
+  const stats = readStatsForm();
+  Object.values(stats).forEach((values) => {
+    if (SceneStateEditor.normalizeGroup(values.Group) === source || values.Group === target) values.Group = target;
+  });
+  return commitStatsGrouping(stats);
 }
 
 function removeStat(id) {
   state.statsDraft = readStatsForm();
   state.memoriesDraft = readMemoriesForm();
   delete state.statsDraft[id];
+  SceneStateEditor.groupedStatEntries(state.statsDraft).forEach(({ group, entries }) => {
+    if (group !== SceneStateEditor.DEFAULT_GROUP && entries.length === 1) {
+      state.statsDraft[entries[0][0]].Group = SceneStateEditor.DEFAULT_GROUP;
+    }
+  });
+  state.statsDraft = SceneStateEditor.withStatOrders(state.statsDraft);
   renderStatsPanel();
   scheduleStatsAutosave();
 }
@@ -3141,6 +3473,13 @@ function updateGraphNameScale(svg = dom.graphPanel.querySelector("#projectGraphS
     state.graphViewBox.width / rect.width,
     state.graphViewBox.height / rect.height,
   );
+  const nameFadeProgress = Math.max(0, Math.min(1,
+    (unitsPerPixel - GRAPH_NAME_FADE_START) / (GRAPH_NAME_FADE_END - GRAPH_NAME_FADE_START),
+  ));
+  const nameOpacity = 1 - nameFadeProgress;
+  svg.style.setProperty("--graph-name-opacity", String(nameOpacity));
+  svg.classList.toggle("graph-names-hidden", nameOpacity <= 0);
+  svg.dataset.nodeNames = nameOpacity <= 0 ? "hidden" : nameOpacity < 1 ? "fading" : "visible";
   svg.querySelectorAll(".graph-node").forEach((node) => {
     const name = node.querySelector(".graph-node-name");
     const radius = Number(node.querySelector(".graph-node-dot")?.getAttribute("r"));
@@ -3662,13 +4001,14 @@ async function refreshAfterSave() {
   state.images = project.images || [];
   state.audio = project.audio || [];
   state.optionTargets = project.optionTargets || [];
-  state.stats = project.stats || {};
+  state.stats = SceneStateEditor.withStatOrders(project.stats || {});
   state.statsDraft = clone(state.stats);
   state.memories = project.memories || { memory: { Name: "Memory" } };
   state.memoriesDraft = clone(state.memories);
   state.issues = project.issues || [];
   if (selectedPath && (selectedPath === state.globalNode?.path || state.nodes.some((node) => node.path === selectedPath))) {
     state.nodeDetail = await api(`/api/node?path=${encodeURIComponent(selectedPath)}`);
+    state.nodeDetail.events = normalizeEventEntries(state.nodeDetail.events);
     state.optionsDraft = clone(state.nodeDetail.options || defaultOptionsDraft());
     if (!state.optionsDraft.Elements.some((element) => element.ID === state.selectedOptionElementId)) {
       state.selectedOptionElementId = state.optionsDraft.Elements[0]?.ID || null;
@@ -4004,7 +4344,35 @@ function bindGlobalEvents() {
     const button = event.target.closest("[data-node-path]");
     if (button) selectNode(button.dataset.nodePath);
   });
-  document.querySelectorAll(".tab").forEach((button) => button.addEventListener("click", () => requestTabSwitch(button.dataset.tab)));
+  document.querySelectorAll(".tab").forEach((button) => {
+    button.addEventListener("pointerdown", (event) => {
+      if (event.button !== 0 || !event.isPrimary) return;
+      pendingTabPreview = button;
+      dom.tabbar.classList.add("is-pointer-navigation");
+      syncTabFocusIndicator({ targetTab: button });
+      window.addEventListener("pointerup", () => {
+        window.setTimeout(() => {
+          if (pendingTabPreview !== button) return;
+          pendingTabPreview = null;
+          syncTabFocusIndicator();
+        }, 0);
+      }, { once: true });
+    });
+    button.addEventListener("pointercancel", () => {
+      if (pendingTabPreview !== button) return;
+      pendingTabPreview = null;
+      syncTabFocusIndicator();
+    });
+    button.addEventListener("click", async () => {
+      pendingTabPreview = null;
+      syncTabFocusIndicator({ targetTab: button });
+      if (!await requestTabSwitch(button.dataset.tab)) syncTabFocusIndicator();
+    });
+  });
+  dom.tabbar.addEventListener("keydown", () => dom.tabbar.classList.remove("is-pointer-navigation"));
+  dom.tabbar.addEventListener("focusout", (event) => {
+    if (!dom.tabbar.contains(event.relatedTarget)) dom.tabbar.classList.remove("is-pointer-navigation");
+  });
   document.addEventListener("click", (event) => {
     if (!event.target.closest(".content-choice-picker")) closeContentPickers();
     if (!event.target.closest(".select-choice-picker")) closeSelectPickers();

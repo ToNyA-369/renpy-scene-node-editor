@@ -164,6 +164,7 @@ Options 沒有生命週期、條件運算式或自訂 Screen 來源。所有已�
 {
   "ID": "open_door",
   "Name": "打開門",
+  "Group": "Normal",
   "Trigger": "Action:open_door",
   "Priority": 3,
   "Weight": 1,
@@ -175,6 +176,8 @@ Options 沒有生命週期、條件運算式或自訂 Screen 來源。所有已�
   "Next Node": "hall"
 }
 ```
+
+`Group` 是只供 Editor 整理 Event Pool 的單層創作者資訊；省略或留空時會正規化為固定的 `Normal`。`Normal` 在介面上表示未群組，不顯示群組標題。可選的非負整數 `Order` 同樣只供 Editor 保存拖曳順序；舊 Event 缺值時沿用原本的穩定讀取順序。兩者都不參與 Trigger 比對、Priority、Weight、生命週期順序、關聯圖或 Runtime 執行。Pointer 拖移預覽逐事件更新，幾何判定與 DOM 重排則以 animation frame 合併；中線遲滯避免插入位置抖動，最近的可捲動容器支援漸進邊緣自動捲動。拖移生命週期由視窗持續接收，因此元素跨容器重排不會中斷後續 pointer 事件。真實插入間隙以短促 FLIP 位移推開 Event／群組區塊；排序流有永遠存在的末端留白，跨出或跨入群組邊界即改變歸屬，不使用專用未群組按鈕。只有游標持續位於候選項目目前的幾何邊界內，停留計時才會成立；讓位後離開邊界會取消成組。群組預設收起為精簡名稱與數量，hover、鍵盤 focus 或拖移進入時展開；名稱旁的無圖示留白是群組區塊拖移面，起拖時強制收起並以成員原順序整組移動。只剩一個 Event 時自動解散。成功拖移不產生 Toast，失敗仍顯示錯誤。
 
 `Content` 與 `Next Node` 可為 `null`、單一字串或權重物件：
 
@@ -292,7 +295,7 @@ Event Effects 處理 Stat、Memory 與 Option Availability。背景、音樂、�
 }
 ```
 
-`Group` 是編輯管理資訊；省略或空白時會正規化為 `Normal`。狀態工作區固定顯示 `Normal`，可由 Stats 外層新增群組、由群組內新增 Stat。Event 的 Stat Condition／Effect 選單以「Group → Stat」顯示；JSON key、Runtime 狀態、存檔與 `scene_get_stat("money")` 仍只使用平面的穩定 Stat ID，不形成巢狀資料。
+`Group` 是編輯管理資訊；省略或空白時會正規化為 `Normal`，但介面將其顯示為未群組 Stats，不顯示 `Normal` 標題。可選的非負整數 `Order` 只供 Editor 保存拖曳順序。狀態工作區只有一個新增 Stat 按鈕；所有 Stat 共用最上方唯一一列 Name／Min／Init／Max 欄名與相同 CSS Grid 欄寬，群組列維持欄位對齊並在群組框左右保留內距。Pointer 拖移可從整列外框或欄位間留白開始，輸入框與刪除按鈕不會啟動拖移，也不使用獨立把手；拖移期間整個排序流停用文字選取。群組名稱旁的無圖示留白會以成員原順序拖移整個群組。即時插入間隙與 Event 相同，末端留白即使在沒有未群組 Stat 時仍存在，因此可直接移出／移入群組；停留至群組框展開才建立群組，剩一個 Stat 時群組自動解散。成功拖移不產生 Toast。Event 的 Stat Condition／Effect 選單仍以「Group → Stat」顯示；JSON key、Runtime 狀態、存檔與 `scene_get_stat("money")` 只使用平面的穩定 Stat ID，不形成巢狀資料。
 
 `Memories.json`：
 

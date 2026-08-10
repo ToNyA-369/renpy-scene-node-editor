@@ -32,6 +32,7 @@ PROJECT_ROOT = EDITOR_ROOT.parent
 DATA_DIR = "DATA"
 NODE_DIR = "SCENENODE"
 EVENT_DIR = "EVENTPOOL"
+DEFAULT_EVENT_GROUP = "Normal"
 CONTENT_DIR = "CONTENT"
 OPTIONS_FILE = "Options.json"
 GLOBAL_NODE_PATH = "@global"
@@ -138,6 +139,12 @@ PYTHON_EN_DICTIONARY = {
     "Event 必須是 JSON object。": "Event must be a JSON object.",
     "Priority 必須是 0 到 5 的整數。": "Priority must be an integer between 0 and 5.",
     "Weight 必須大於 0。": "Weight must be greater than 0.",
+    "Event 群組名稱不可超過 80 個字元。": "Event group names cannot exceed 80 characters.",
+    "Event 群組指派必須是非空 object。": "Event group assignments must be a non-empty object.",
+    "找不到 Event：{id}。": "Event not found: {id}.",
+    "{field} 必須是非負整數。": "{field} must be a non-negative integer.",
+    "Event 排序必須包含目前作用域的所有 Events。": "Event order must contain every Event in the current scope.",
+    "Normal 是固定的預設 Event 群組。": "Normal is the fixed default Event group.",
     "Conditions 必須是 object 陣列。": "Conditions must be an array of objects.",
     "Effects 必須是 object 陣列。": "Effects must be an array of objects.",
     "Option Effect 只能控制同一個 Options 作用域內的 Option。": "Option Effect can only control Options in the same Options scope.",
@@ -916,6 +923,8 @@ def validate_stats(data):
             "Init": initial,
         }
         result[stat_id]["Group"] = str(settings.get("Group") or "Normal").strip() or "Normal"
+        if "Order" in settings:
+            result[stat_id]["Order"] = validate_editor_order(settings.get("Order"), f"Stat {stat_id} Order")
     return result
 
 
@@ -976,6 +985,19 @@ def validate_event_trigger(value):
     return f"{source}:{payload}"
 
 
+def validate_event_group(value):
+    group = str(value or DEFAULT_EVENT_GROUP).strip() or DEFAULT_EVENT_GROUP
+    if len(group) > 80:
+        raise ApiError(HTTPStatus.BAD_REQUEST, tr("Event 群組名稱不可超過 80 個字元。"))
+    return group
+
+
+def validate_editor_order(value, field="Order"):
+    if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+        raise ApiError(HTTPStatus.BAD_REQUEST, tr("{field} 必須是非負整數。", field=field))
+    return value
+
+
 def validate_event(event, global_scope=False, owner_node_id=None):
     if not isinstance(event, dict):
         raise ApiError(HTTPStatus.BAD_REQUEST, tr("Event 必須是 JSON object。"))
@@ -1016,6 +1038,7 @@ def validate_event(event, global_scope=False, owner_node_id=None):
     result = {
         "ID": event_id,
         "Name": str(event.get("Name") or event_id),
+        "Group": validate_event_group(event.get("Group")),
         "Trigger": trigger,
         "Priority": priority,
         "Once": bool(event.get("Once", False)),
@@ -1023,6 +1046,8 @@ def validate_event(event, global_scope=False, owner_node_id=None):
         "Effects": validated_effects,
         "Content": content,
     }
+    if "Order" in event:
+        result["Order"] = validate_editor_order(event.get("Order"), "Event Order")
     if is_lifecycle:
         return result
 
@@ -1291,6 +1316,116 @@ def save_event(payload):
     return event
 
 
+def write_event_updates(updates):
+    originals = {path: path.read_text(encoding="utf-8") for path, _ in updates}
+    written = []
+    try:
+        for path, event in updates:
+            write_json(path, event)
+            written.append(path)
+    except Exception:
+        for path in written:
+            atomic_write(path, originals[path])
+        raise
+
+
+def rename_event_group(payload):
+    directory = authoring_directory(payload.get("node"))
+    if not (directory / "Node.json").exists():
+        raise ApiError(HTTPStatus.NOT_FOUND, tr("找不到指定的 authoring scope。"))
+    assignments = payload.get("assignments", {})
+    order = payload.get("order")
+    if assignments or order is not None:
+        if not isinstance(assignments, dict):
+            raise ApiError(HTTPStatus.BAD_REQUEST, tr("Event 群組指派必須是非空 object。"))
+        global_scope = is_global_node_path(payload.get("node"))
+        node = read_json(directory / "Node.json", {}) or {}
+        owner_node_id = GLOBAL_NODE_ID if global_scope else node.get("ID")
+        event_root = directory / EVENT_DIR
+        paths = {
+            path.stem: path
+            for path in sorted(event_root.glob("*.json"), key=lambda value: value.name.casefold())
+        }
+        order_indexes = {}
+        if order is not None:
+            if (
+                not isinstance(order, list)
+                or not all(isinstance(event_id, str) for event_id in order)
+                or len(order) != len(set(order))
+                or set(order) != set(paths)
+            ):
+                raise ApiError(HTTPStatus.BAD_REQUEST, tr("Event 排序必須包含目前作用域的所有 Events。"))
+            order_indexes = {event_id: index for index, event_id in enumerate(order)}
+        updates = []
+        update_ids = set(assignments) | set(order_indexes)
+        for raw_event_id in update_ids:
+            event_id = clean_file_name(raw_event_id, ".json")
+            path = paths.get(event_id)
+            if path is None:
+                raise ApiError(HTTPStatus.NOT_FOUND, tr("找不到 Event：{id}。", id=event_id))
+            raw_event = read_json(path, {}) or {}
+            updated = dict(raw_event)
+            if raw_event_id in assignments:
+                updated["Group"] = validate_event_group(assignments[raw_event_id])
+            if event_id in order_indexes:
+                updated["Order"] = order_indexes[event_id]
+            validated = validate_event(
+                updated,
+                global_scope=global_scope,
+                owner_node_id=owner_node_id,
+            )
+            updates.append((path, validated))
+        updates.sort(key=lambda entry: entry[1].get("Order", 0))
+        write_event_updates(updates)
+        return {"events": [event for _, event in updates], "order": order}
+
+    source = validate_event_group(payload.get("source"))
+    target = validate_event_group(payload.get("target"))
+    if source == DEFAULT_EVENT_GROUP:
+        raise ApiError(HTTPStatus.BAD_REQUEST, tr("Normal 是固定的預設 Event 群組。"))
+
+    global_scope = is_global_node_path(payload.get("node"))
+    node = read_json(directory / "Node.json", {}) or {}
+    owner_node_id = GLOBAL_NODE_ID if global_scope else node.get("ID")
+    updates = []
+    event_root = directory / EVENT_DIR
+    if event_root.exists():
+        for path in sorted(event_root.glob("*.json"), key=lambda value: value.name.casefold()):
+            raw_event = read_json(path, {}) or {}
+            if validate_event_group(raw_event.get("Group")) != source:
+                continue
+            validated = validate_event(
+                {**raw_event, "Group": target},
+                global_scope=global_scope,
+                owner_node_id=owner_node_id,
+            )
+            updates.append((path, validated))
+
+    write_event_updates(updates)
+    return {"source": source, "target": target, "events": [event for _, event in updates]}
+
+
+def dissolve_singleton_event_groups(directory):
+    event_root = directory / EVENT_DIR
+    grouped = {}
+    if not event_root.exists():
+        return []
+    for path in sorted(event_root.glob("*.json"), key=lambda value: value.name.casefold()):
+        event = read_json(path, {}) or {}
+        group = validate_event_group(event.get("Group"))
+        if group != DEFAULT_EVENT_GROUP:
+            grouped.setdefault(group, []).append((path, event))
+    updates = []
+    for entries in grouped.values():
+        if len(entries) != 1:
+            continue
+        path, event = entries[0]
+        event = {**event, "Group": DEFAULT_EVENT_GROUP}
+        write_json(path, event)
+        updates.append(event)
+    return updates
+
+
 def save_content_file(root, payload):
     name = clean_file_name(payload.get("id") or payload.get("name") or generate_id("content"), ".rpy")
     original = payload.get("originalName")
@@ -1537,6 +1672,9 @@ class EditorHandler(BaseHTTPRequestHandler):
                     result["optionTargets"] = scan_option_targets()
                 self.send_json(result)
                 return
+            if parsed.path == "/api/event-groups":
+                self.send_json(rename_event_group(payload))
+                return
             raise ApiError(HTTPStatus.NOT_FOUND, tr("找不到 API。"))
         except ApiError as exc:
             self.send_error_json(exc)
@@ -1562,7 +1700,10 @@ class EditorHandler(BaseHTTPRequestHandler):
             if not target.exists():
                 raise ApiError(HTTPStatus.NOT_FOUND, tr("找不到要刪除的文件。"))
             target.unlink()
-            self.send_json({"deleted": True})
+            response = {"deleted": True}
+            if parsed.path == "/api/events":
+                response["events"] = dissolve_singleton_event_groups(directory.parent)
+            self.send_json(response)
         except ApiError as exc:
             self.send_error_json(exc)
         except Exception as exc:  # pragma: no cover

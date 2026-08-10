@@ -53,6 +53,7 @@ Global On Node 會在下一次節點互動循環檢查。若本地 Event 先增�
 
 Event 是目前節點對 Trigger 的反應。主要欄位：
 
+- `Group`：只供 Editor 整理 Event Pool；缺值時屬於固定的 `Normal`，不影響遊戲執行。
 - `Trigger`：On Enter、On Node、On Exit、Option、Keyboard 或 Mouse。
 - `Priority`：數字越小越優先；只在最低 Priority 層中選擇。
 - `Weight`：On Node／玩家輸入中，同 Trigger、同 Priority且 Conditions 都通過時的相對機率。
@@ -63,6 +64,8 @@ Event 是目前節點對 Trigger 的反應。主要欄位：
 - `End up`：Content 返回後執行 REDO、GOTO、REPLACE 或 EXIT。GOTO／REPLACE 都可使用單一或權重 Next Node。
 
 UI 中的 `Option` 技術格式仍是 `Action:<id>`。Event 選擇器會列出目前作用域 Options 已註冊的 Triggers；在 Global Node 編輯的 Option Trigger 會在所有實際節點的互動畫面可用。
+
+Event Pool 使用單層群組整理大量 Events，但只保留一個展滿側欄的新增 Event 按鈕；新 Event 預設不顯示群組。拖移時目前插入位置會直接騰空，周圍 Event 與群組區塊隨游標向上或向下讓位；預覽會持續跟住游標，實際排序每畫面幀最多更新一次。游標在元素中線附近的小幅晃動不會讓插入位置反覆翻轉，靠近清單上下邊緣時會漸進自動捲動。排序流末端也保留自然留白，因此 Event 可放在最末群組之後。移出原群組邊界即回到未群組排序流，進入另一個群組邊界則可直接插入，不需要專用的移出位置。在另一個 Event 的目前邊界上持續停留片刻，群組框才會展開；若對方已被讓位動畫推離游標，停留意圖立即取消，不會在放開時誤成組。群組預設收起，只顯示較短的名稱欄與數量；游標移入或鍵盤焦點進入時展開。名稱旁沒有圖示的空白可拖移整個群組，起拖時內容會重新收起。群組只剩一個 Event 時自動解散。群組名稱可直接點擊修改，順序保存於只供 Editor 使用的 `Order`；成功拖移不顯示額外通知，保存失敗時才顯示錯誤並回復原狀。
 
 Picture 與 Preview Background 只列出 `game/images/`；Options 的 Hover Sound／Click Sound 只列出 `game/audio/`。資源可用子資料夾整理，Editor 會保留其階層供選擇，但選定欄位只顯示檔名。遊戲場景、BGM、SE 與轉場請在 Content 使用 Ren'Py 原生語法。
 
@@ -132,7 +135,7 @@ Content label 應返回 Runner。不要在一般 Content 中自行複製 Event E
 
 ### Stats
 
-Stats 是有 `Init`、`Min`、`Max` 的數值，並以只供管理使用的 `Group` 整理；未指定群組會歸入預設的 `Normal`。Stats 外框右上角的加號會建立新群組及第一個 Stat，各群組內的加號則繼續加入該組數值。群組名稱可直接編輯，`Normal` 保持為固定預設群組。Event 的 Stat Conditions／Effects 使用「Group → Stat」兩層選單，選定後仍只顯示 Stat 名稱。群組不改變 Stat ID、Runtime 存取或存檔格式。Conditions 可比較數值，Effects 可 `set`、`+`、`-`、`*`、`/`。
+Stats 是有 `Init`、`Min`、`Max` 的數值，並以只供管理使用的 `Group` 整理；未指定群組會歸入預設的 `Normal`。Stats 只保留一個新增 Stat 按鈕，新 Stat 預設不顯示群組。Name／Min／Init／Max 欄名只在整個 Stats 區最上方顯示一次，所有未群組列與群組內列共用相同欄寬；群組框會在列的左右保留一致內距。Stat 整列的外框與欄位間留白都是拖移面，輸入框與刪除按鈕則保持原本操作；不再顯示或保留額外把手，拖移期間也不會選取掃過的文字。群組名稱旁沒有圖示的空白可拖移整個 Stat 群組。拖移時插入位置會即時騰空並推開周圍 Stat 或群組，並共用 Event 的逐幀重排、插入遲滯與邊緣自動捲動，因此長清單不需中途放開。排序流末端永遠保留自然留白，所以即使畫面中只有群組，也能把 Stat 直接拖到群組之外。進入另一群組即可插入；在另一個 Stat 上停留到群組框展開後放開，才會建立群組。群組只剩一個 Stat 時自動解散。群組名稱可直接編輯，順序保存於只供 Editor 使用的 `Order`；成功拖移不顯示額外通知。Event 的 Stat Conditions／Effects 使用「Group → Stat」兩層選單，選定後仍只顯示 Stat 名稱。`Group` 與 `Order` 不改變 Stat ID、Runtime 存取或存檔鍵。Conditions 可比較數值，Effects 可 `set`、`+`、`-`、`*`、`/`。
 
 ### Memory Banks
 
@@ -154,9 +157,9 @@ REPLACE 不增加 Stack 深度，因此算法會先把彼此以 REPLACE 相連�
 
 每次開啟關聯圖時，圖面會由 ROOT 開始，依正式深度與局部關係順序讓連線延展、節點分批彈出。進場完成後，節點會在各自結構錨點附近緩慢呼吸；真實 GOTO／REPLACE 鄰居會以微弱彈簧傳遞視覺動量，錨點相近的節點則有小幅對稱斥力，因此相連枝條會彼此牽動而不會完全同步。這層局部物理不採用管理線或 Global 關係，每個節點的總偏移硬性限制在 7 graph units 內，也不會累積位移、改變深度或泳道。連線會同步跟隨可見節點，但互動命中區仍固定在結構錨點；開始拖曳、平移、縮放或鍵盤操作會立即結束進場。系統偏好「減少動態效果」時，進場與閒置微動都會停用。
 
-圖面可持續往任意方向平移，縮放範圍足以巡覽大型專案。背景不繪製深度色帶、欄名或操作圖例；深度只由節點的整體左右位置表達。初始畫面與「顯示全圖」按鈕會配合目前圖面範圍顯示整體結構；Node Name 會反向補償縮放，維持近似固定的螢幕字級。需要查看局部時可在游標位置放大，再沿流程方向巡覽。
+圖面可持續往任意方向平移，縮放範圍足以巡覽大型專案。背景不繪製深度色帶、欄名或操作圖例；深度只由節點的整體左右位置表達。初始畫面與「顯示全圖」按鈕會配合目前圖面範圍顯示整體結構；Node Name 會反向補償縮放，維持近似固定的螢幕字級，但縮小到不足以清楚分辨節點時會隨縮放淡出，讓總覽只保留節點與連線，重新放大後則恢復。需要查看局部時可在游標位置放大，再沿流程方向巡覽。
 
-GOTO 使用實線，REPLACE 使用同色虛線；所有連線路徑仍由節點圓心連到圓心，箭頭尖端則精確停在接收端圓周，雙向關係的兩端亦相同。箭頭屬於圖面幾何，會隨圖面縮放；Node Name 會反向補償縮放，維持近似固定的螢幕字級與可讀性。連線不放置行內文字，Event 名稱、Trigger、End up 與方向細節仍保留在 tooltip。`A REPLACE B` 與 `B REPLACE A` 會合併成一條兩端都有箭頭的線，但 tooltip 仍分別列出兩個方向的 Events，JSON 也保持原樣。雙向 GOTO 不合併，而以高對比的兩條反向弧線呈現 GOTO Cycle，提醒可能持續推高 Stack 的結構。管理關係會追蹤完整 REPLACE 鏈：若 `Parent GOTO A`、`A REPLACE B`、`B REPLACE C`，圖上會以較透明實線顯示 `Parent → B` 與 `Parent → C`，並與直接 GOTO 共用 Parent 圓心。Global Event 與 GLOBAL 節點不顯示在關聯圖中；這只影響視覺化，不改變它們在 Editor、資料或 Runtime 的行為。關聯圖不建立 Schema Parent，不修改 Event 或 Runtime 契約。
+GOTO 使用實線，REPLACE 使用同色虛線；所有連線路徑仍由節點圓心連到圓心，箭頭尖端則精確停在接收端圓周，雙向關係的兩端亦相同。箭頭屬於圖面幾何，會隨圖面縮放；Node Name 在可讀範圍內會反向補償縮放，維持近似固定的螢幕字級，進入遠距總覽時則淡出。連線不放置行內文字，Event 名稱、Trigger、End up 與方向細節仍保留在 tooltip。`A REPLACE B` 與 `B REPLACE A` 會合併成一條兩端都有箭頭的線，但 tooltip 仍分別列出兩個方向的 Events，JSON 也保持原樣。雙向 GOTO 不合併，而以高對比的兩條反向弧線呈現 GOTO Cycle，提醒可能持續推高 Stack 的結構。管理關係會追蹤完整 REPLACE 鏈：若 `Parent GOTO A`、`A REPLACE B`、`B REPLACE C`，圖上會以較透明實線顯示 `Parent → B` 與 `Parent → C`，並與直接 GOTO 共用 Parent 圓心。Global Event 與 GLOBAL 節點不顯示在關聯圖中；這只影響視覺化，不改變它們在 Editor、資料或 Runtime 的行為。關聯圖不建立 Schema Parent，不修改 Event 或 Runtime 契約。
 
 - 滾輪或觸控板雙指上下移動：以游標位置縮放。
 - 拖曳空白處：平移。

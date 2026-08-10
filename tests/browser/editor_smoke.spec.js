@@ -91,6 +91,97 @@ async function reloadAndWaitForProject(page) {
   await expect(page.getByRole("status")).toHaveText(/^(已同步|Synced)$/);
 }
 
+async function dragStartPoint(source, box) {
+  const isStatRow = await source.getAttribute("data-stat-id") !== null;
+  return {
+    x: isStatRow ? box.x + 4 : box.x + box.width / 2,
+    y: box.y + box.height / 2,
+  };
+}
+
+async function dragWithDwell(page, source, target, dwellMs = 720, beforeDrop = null) {
+  const sourceElement = source.first();
+  const targetElement = target.first();
+  await sourceElement.scrollIntoViewIfNeeded();
+  const sourceBox = await sourceElement.boundingBox();
+  const targetBox = await targetElement.boundingBox();
+  if (!sourceBox || !targetBox) throw new Error("Drag source or target is not visible");
+  const start = await dragStartPoint(sourceElement, sourceBox);
+  await page.mouse.move(start.x, start.y);
+  await page.mouse.down();
+  await page.mouse.move(targetBox.x + targetBox.width / 2, targetBox.y + targetBox.height / 2, { steps: 12 });
+  await page.waitForTimeout(220);
+  const settledTargetBox = await targetElement.boundingBox();
+  if (!settledTargetBox) throw new Error("Drag target disappeared during live reflow");
+  await page.mouse.move(
+    settledTargetBox.x + settledTargetBox.width / 2,
+    settledTargetBox.y + settledTargetBox.height / 2,
+    { steps: 4 },
+  );
+  await page.waitForTimeout(dwellMs);
+  if (beforeDrop) await beforeDrop();
+  await page.mouse.up();
+}
+
+async function dragWithoutFollowingReflow(page, source, target, dwellMs = 720, beforeDrop = null) {
+  const sourceElement = source.first();
+  const targetElement = target.first();
+  await sourceElement.scrollIntoViewIfNeeded();
+  const sourceBox = await sourceElement.boundingBox();
+  const targetBox = await targetElement.boundingBox();
+  if (!sourceBox || !targetBox) throw new Error("Drag source or target is not visible");
+  const start = await dragStartPoint(sourceElement, sourceBox);
+  const targetY = sourceBox.y < targetBox.y
+    ? targetBox.y + targetBox.height * 0.78
+    : targetBox.y + targetBox.height * 0.22;
+  await page.mouse.move(start.x, start.y);
+  await page.mouse.down();
+  await page.mouse.move(targetBox.x + targetBox.width / 2, targetY, { steps: 12 });
+  await page.waitForTimeout(dwellMs);
+  if (beforeDrop) await beforeDrop();
+  await page.mouse.up();
+}
+
+async function dispatchImmediateDrag(page, sourceSelector, targetSelector, beforeDrop = null) {
+  const source = page.locator(sourceSelector).first();
+  const target = page.locator(targetSelector).first();
+  await source.scrollIntoViewIfNeeded();
+  const sourceBox = await source.boundingBox();
+  const targetBox = await target.boundingBox();
+  if (!sourceBox || !targetBox) throw new Error("Drag source or target is not visible");
+  const start = await dragStartPoint(source, sourceBox);
+  await page.mouse.move(start.x, start.y);
+  await page.mouse.down();
+  await page.mouse.move(targetBox.x + targetBox.width / 2, targetBox.y + targetBox.height * 0.28, { steps: 5 });
+  if (beforeDrop) await beforeDrop();
+  await page.mouse.up();
+}
+
+async function dragToLiveTarget(page, sourceSelector, targetSelector, beforeDrop = null) {
+  const source = page.locator(sourceSelector).first();
+  const target = page.locator(targetSelector).first();
+  await source.scrollIntoViewIfNeeded();
+  const sourceBox = await source.boundingBox();
+  const targetBox = await target.boundingBox();
+  if (!sourceBox || !targetBox) throw new Error("Drag source or target is not visible");
+  const start = await dragStartPoint(source, sourceBox);
+  await page.mouse.move(start.x, start.y);
+  await page.mouse.down();
+  await page.mouse.move(targetBox.x + targetBox.width / 2, targetBox.y + targetBox.height / 2, { steps: 8 });
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    await page.waitForTimeout(120);
+    const liveTargetBox = await target.boundingBox();
+    if (!liveTargetBox) throw new Error("Drag target disappeared during live reflow");
+    await page.mouse.move(
+      liveTargetBox.x + liveTargetBox.width / 2,
+      liveTargetBox.y + liveTargetBox.height / 2,
+      { steps: 3 },
+    );
+  }
+  if (beforeDrop) await beforeDrop();
+  await page.mouse.up();
+}
+
 test.beforeAll(async () => {
   projectRoot = fs.mkdtempSync(path.join(os.tmpdir(), "scene-node-browser-smoke-"));
   const gameRoot = path.join(projectRoot, "game");
@@ -140,7 +231,14 @@ test("critical editor interactions survive reload without browser errors", async
   await expect(page.getByRole("navigation", { name: "編輯器分頁" })).toBeVisible();
 
   await page.getByRole("button", { name: "狀態", exact: true }).click();
-  await expect(page.locator('.stat-group-card[data-stat-group="Normal"]')).toBeVisible();
+  await expect(page.locator("#statsGroups")).toBeVisible();
+  const tabIndicatorMotion = await page.locator("#tabFocusIndicator").evaluate((indicator) => {
+    const style = getComputedStyle(indicator);
+    return { transform: style.transform, transitionProperty: style.transitionProperty };
+  });
+  expect(tabIndicatorMotion.transform).toBe("none");
+  expect(tabIndicatorMotion.transitionProperty.split(", ")).toEqual(["left", "width", "opacity"]);
+  await expect(page.locator('.stat-group-card[data-stat-group="Normal"]')).toHaveCount(0);
   await expect(page.locator('.stat-group-card[data-stat-group="測試資源"]')).toBeVisible();
   await expect(page.locator('.stat-group-card[data-stat-group="流程追蹤"]')).toBeVisible();
   const initialStateGeometry = await page.evaluate(() => {
@@ -149,59 +247,72 @@ test("critical editor interactions survive reload without browser errors", async
     const sections = Array.from(document.querySelectorAll(".state-definition-section"));
     const statsRect = sections[0].getBoundingClientRect();
     const memoryRect = sections[1].getBoundingClientRect();
-    const innerAdd = document.querySelector("[data-add-stat-to-group]").getBoundingClientRect();
     return {
       panelWidth: panel.width,
       pageWidth: pageRect.width,
       statsLeftInset: statsRect.left - panel.left,
       memoryRightInset: panel.right - memoryRect.right,
       panelRadius: getComputedStyle(document.querySelector("#statsPanel")).borderTopLeftRadius,
-      innerAddWidth: innerAdd.width,
-      innerAddHeight: innerAdd.height,
-      horizontalOverflow: Array.from(document.querySelectorAll(".stat-group-card .state-table-wrap"))
-        .some((wrap) => wrap.scrollWidth > wrap.clientWidth + 1),
+      headerColumns: getComputedStyle(document.querySelector(".stat-column-header")).gridTemplateColumns,
+      rowColumns: getComputedStyle(document.querySelector(".stat-row")).gridTemplateColumns,
+      repeatedColumnHeaders: document.querySelectorAll(".stat-group-card [role='columnheader']").length,
+      statDragSpaceCount: document.querySelectorAll(".stat-drag-space").length,
+      statRowCursor: getComputedStyle(document.querySelector(".stat-row")).cursor,
+      memoryContentGap: (() => {
+        const memorySection = sections[1];
+        const heading = memorySection.querySelector(".state-section-heading").getBoundingClientRect();
+        const firstRow = memorySection.querySelector(".memory-row").getBoundingClientRect();
+        return firstRow.top - heading.bottom;
+      })(),
+      groupInsetLeft: (() => {
+        const group = document.querySelector(".stat-group-card").getBoundingClientRect();
+        const row = document.querySelector(".stat-group-card .stat-row").getBoundingClientRect();
+        return row.left - group.left;
+      })(),
+      groupInsetRight: (() => {
+        const group = document.querySelector(".stat-group-card").getBoundingClientRect();
+        const row = document.querySelector(".stat-group-card .stat-row").getBoundingClientRect();
+        return group.right - row.right;
+      })(),
+      horizontalOverflow: document.querySelector(".stat-groups").scrollWidth
+        > document.querySelector(".stat-groups").clientWidth + 1,
     };
   });
   expect(Math.abs(initialStateGeometry.pageWidth - initialStateGeometry.panelWidth)).toBeLessThan(1);
   expect(Math.abs(initialStateGeometry.statsLeftInset)).toBeLessThan(1);
   expect(Math.abs(initialStateGeometry.memoryRightInset)).toBeLessThan(1);
   expect(initialStateGeometry.panelRadius).toBe("0px");
-  expect(initialStateGeometry.innerAddWidth).toBeGreaterThan(initialStateGeometry.innerAddHeight * 2);
+  expect(initialStateGeometry.rowColumns).toBe(initialStateGeometry.headerColumns);
+  expect(initialStateGeometry.repeatedColumnHeaders).toBe(0);
+  expect(initialStateGeometry.statDragSpaceCount).toBe(0);
+  expect(initialStateGeometry.statRowCursor).toBe("grab");
+  expect(initialStateGeometry.memoryContentGap).toBeLessThan(30);
+  expect(initialStateGeometry.groupInsetLeft).toBeGreaterThanOrEqual(11);
+  expect(initialStateGeometry.groupInsetRight).toBeGreaterThanOrEqual(11);
   expect(initialStateGeometry.horizontalOverflow).toBe(false);
   const initialSectionHeights = await page.evaluate(() => (
     Array.from(document.querySelectorAll(".state-definition-section")).map((section) => section.getBoundingClientRect().height)
   ));
   await waitForStateSave(page, async () => {
-    await page.locator("#addStatGroupButton").click();
+    await page.locator("#addStatButton").click();
   });
-  const newGroup = page.locator('.stat-group-card[data-stat-group="New Group"]');
-  await expect(newGroup).toBeVisible();
-  await expect(newGroup.locator(".stat-row")).toHaveCount(1);
+  await expect(page.locator("#statsGroups > .stat-row")).toHaveCount(1);
   const afterGroupSectionHeights = await page.evaluate(() => (
     Array.from(document.querySelectorAll(".state-definition-section")).map((section) => section.getBoundingClientRect().height)
   ));
   expect(afterGroupSectionHeights[0]).toBeGreaterThan(initialSectionHeights[0]);
   expect(Math.abs(afterGroupSectionHeights[1] - initialSectionHeights[1])).toBeLessThan(6);
-  await waitForStateSave(page, async () => {
-    await newGroup.locator("[data-add-stat-to-group]").click();
-  });
-  await expect(newGroup.locator(".stat-row")).toHaveCount(2);
-  const afterStatSectionHeights = await page.evaluate(() => (
-    Array.from(document.querySelectorAll(".state-definition-section")).map((section) => section.getBoundingClientRect().height)
-  ));
-  expect(afterStatSectionHeights[0]).toBeGreaterThan(afterGroupSectionHeights[0]);
-  expect(Math.abs(afterStatSectionHeights[1] - afterGroupSectionHeights[1])).toBeLessThan(1);
-  const pointsGroup = page.locator('.stat-group-card[data-stat-group="測試資源"] input[name="statGroupName"]');
-  await waitForStateSave(page, async () => {
-    await pointsGroup.fill("測試資源 Smoke");
-  });
-  await reloadAndWaitForProject(page);
-  await page.getByRole("button", { name: "狀態", exact: true }).click();
-  await expect(page.locator('.stat-group-card[data-stat-group="測試資源 Smoke"]')).toBeVisible();
-  await expect(page.locator('.stat-group-card[data-stat-group="New Group"] .stat-row')).toHaveCount(2);
+  expect(Math.abs(afterGroupSectionHeights[1] - initialSectionHeights[1])).toBeLessThan(6);
 
   await page.getByRole("button", { name: /^事件 / }).click();
-  await page.getByRole("button", { name: new RegExp(`^${TEST_EVENT_NAME} `) }).click();
+  const eventAddGeometry = await page.locator("#newEventButton").evaluate((button) => ({
+    buttonWidth: button.getBoundingClientRect().width,
+    containerWidth: button.parentElement.getBoundingClientRect().width,
+  }));
+  expect(Math.abs(eventAddGeometry.buttonWidth - eventAddGeometry.containerWidth)).toBeLessThan(1);
+  const weightedEventButton = page.locator('[data-event-id="branch_random"]');
+  await weightedEventButton.click();
+  await expect(weightedEventButton).toHaveClass(/active/);
 
   const contentPicker = page.locator("[data-content-picker-toggle]");
   await expect(contentPicker).toBeVisible();
@@ -211,7 +322,20 @@ test("critical editor interactions survive reload without browser errors", async
   const contentFileBranch = page.locator("[data-content-file-expand]");
   await expect(contentFileBranch).toHaveCount(1);
   await contentFileBranch.click();
-  await expect(page.locator('[data-content-label-choice="test_branch_success"]')).toBeVisible();
+  const contentLabelChoice = page.locator('[data-content-label-choice="test_branch_success"]');
+  await expect(contentLabelChoice).toBeVisible();
+  const contentSubmenuGeometry = await page.evaluate(() => {
+    const menu = document.querySelector(".content-choice-menu").getBoundingClientRect();
+    const submenu = document.querySelector(".content-label-submenu").getBoundingClientRect();
+    return {
+      menuRight: menu.right,
+      submenuLeft: submenu.left,
+      submenuRight: submenu.right,
+      viewportWidth: window.innerWidth,
+    };
+  });
+  expect(contentSubmenuGeometry.submenuLeft).toBeGreaterThan(contentSubmenuGeometry.menuRight);
+  expect(contentSubmenuGeometry.submenuRight).toBeLessThanOrEqual(contentSubmenuGeometry.viewportWidth - 12);
 
   await page.getByRole("button", { name: "新增條件" }).click();
   await expect(page.locator(".condition-row")).toHaveCount(1);
@@ -260,6 +384,20 @@ test("critical editor interactions survive reload without browser errors", async
   await waitForEventSave(page, async () => {
     await changeSelect(page, "EndUp", "GOTO");
   });
+  const refreshedGraphTarget = await page.locator('select[name="nextWeightedId"]').inputValue();
+  const graphRefreshResponse = page.waitForResponse((candidate) => (
+    candidate.url().endsWith("/api/project")
+    && candidate.request().method() === "GET"
+    && candidate.ok()
+  ));
+  await page.getByRole("button", { name: "關聯圖", exact: true }).click();
+  await graphRefreshResponse;
+  await expect(page.locator(
+    `.graph-edge[data-source="branch_lab"][data-target="${refreshedGraphTarget}"][data-end-up="GOTO"]`,
+  )).toHaveCount(1);
+  await expect(page.locator(
+    `.graph-edge[data-source="branch_lab"][data-target="${refreshedGraphTarget}"][data-end-up="REPLACE"]`,
+  )).toHaveCount(0);
   await reloadAndWaitForProject(page);
   await page.getByRole("button", { name: /^事件 / }).click();
   await page.getByRole("button", { name: new RegExp(`^${SAVED_EVENT_NAME} `) }).click();
@@ -277,6 +415,33 @@ test("critical editor interactions survive reload without browser errors", async
     options.map((option) => JSON.parse(option.value).node)
   ));
   expect(new Set(localTargets)).toEqual(new Set(["options_lab"]));
+  const targetPickerToggle = optionEffect.locator(
+    'select[name="effectOptionTarget"] ~ [data-select-picker-toggle]',
+  );
+  await targetPickerToggle.click();
+  const targetFolder = optionEffect.locator(
+    'select[name="effectOptionTarget"] ~ .select-choice-menu [data-select-folder-toggle]',
+  ).first();
+  await targetFolder.click();
+  const targetSubmenuGeometry = await optionEffect.locator(
+    'select[name="effectOptionTarget"] ~ .select-choice-menu',
+  ).evaluate((menu) => {
+    const menuRect = menu.getBoundingClientRect();
+    const submenuRect = menu.querySelector(".submenu-open > .select-choice-submenu").getBoundingClientRect();
+    return {
+      menuLeft: menuRect.left,
+      menuRight: menuRect.right,
+      submenuLeft: submenuRect.left,
+      submenuRight: submenuRect.right,
+      viewportWidth: window.innerWidth,
+    };
+  });
+  const targetSubmenuIsBesideMenu = targetSubmenuGeometry.submenuLeft > targetSubmenuGeometry.menuRight
+    || targetSubmenuGeometry.submenuRight < targetSubmenuGeometry.menuLeft;
+  expect(targetSubmenuIsBesideMenu).toBe(true);
+  expect(targetSubmenuGeometry.submenuLeft).toBeGreaterThanOrEqual(12);
+  expect(targetSubmenuGeometry.submenuRight).toBeLessThanOrEqual(targetSubmenuGeometry.viewportWidth - 12);
+  await page.keyboard.press("Escape");
 
   await page.locator("#openSidebar").click();
   await page.locator('#nodeList [data-node-path="@global"]').click();
@@ -497,6 +662,19 @@ test("critical editor interactions survive reload without browser errors", async
   await page.mouse.wheel(0, -120);
   await page.waitForTimeout(80);
 
+  for (let step = 0; step < 4; step += 1) {
+    await page.mouse.wheel(0, 120);
+    await page.waitForTimeout(40);
+  }
+  await expect(page.locator("#projectGraphSvg")).toHaveAttribute("data-node-names", "hidden");
+  await expect(page.locator('.graph-node[data-node-id="root"] .graph-node-name')).toHaveCSS("visibility", "hidden");
+  for (let step = 0; step < 4; step += 1) {
+    await page.mouse.wheel(0, -120);
+    await page.waitForTimeout(40);
+  }
+  await expect(page.locator("#projectGraphSvg")).toHaveAttribute("data-node-names", "visible");
+  await expect(page.locator('.graph-node[data-node-id="root"] .graph-node-name')).toHaveCSS("visibility", "visible");
+
   const panStart = await page.evaluate(() => {
     const svg = document.querySelector("#projectGraphSvg");
     const rect = svg.getBoundingClientRect();
@@ -599,6 +777,38 @@ test("critical editor interactions survive reload without browser errors", async
   expect(settingsColumns.primaryLeft).toBeLessThan(settingsColumns.shortcutsLeft);
   const editorLanguageSelect = page.locator("#editorLanguage");
   await expect(editorLanguageSelect).toHaveValue("zh-Hant");
+  const compactSettingLabels = page.locator(
+    '.setting-row strong[data-i18n="介面語言"], .setting-row strong[data-i18n="儲存延遲"]',
+  );
+  await expect(compactSettingLabels).toHaveCount(2);
+  const compactSettingLabelMetrics = await compactSettingLabels.evaluateAll((labels) => labels.map((label) => ({
+    height: label.getBoundingClientRect().height,
+    lineHeight: Number.parseFloat(getComputedStyle(label).lineHeight),
+    whiteSpace: getComputedStyle(label).whiteSpace,
+  })));
+  compactSettingLabelMetrics.forEach((metric) => {
+    expect(metric.height).toBeLessThanOrEqual(metric.lineHeight * 1.15);
+    expect(metric.whiteSpace).toBe("nowrap");
+  });
+  const languagePickerToggle = page.locator("#editorLanguage ~ [data-select-picker-toggle]");
+  await languagePickerToggle.click();
+  const languageMenuGeometry = await page.locator("#editorLanguage ~ .select-choice-menu").evaluate((menu) => {
+    const picker = menu.closest(".select-choice-picker");
+    const trigger = picker.querySelector("[data-select-picker-toggle]").getBoundingClientRect();
+    const menuRect = menu.getBoundingClientRect();
+    return {
+      triggerLeft: trigger.left,
+      triggerBottom: trigger.bottom,
+      menuLeft: menuRect.left,
+      menuTop: menuRect.top,
+      menuRight: menuRect.right,
+      viewportWidth: window.innerWidth,
+    };
+  });
+  expect(Math.abs(languageMenuGeometry.menuLeft - languageMenuGeometry.triggerLeft)).toBeLessThan(2);
+  expect(Math.abs(languageMenuGeometry.menuTop - (languageMenuGeometry.triggerBottom + 7))).toBeLessThan(2);
+  expect(languageMenuGeometry.menuRight).toBeLessThanOrEqual(languageMenuGeometry.viewportWidth - 12);
+  await page.keyboard.press("Escape");
 
   const settingsSaveResponse = page.waitForResponse((candidate) => (
     candidate.url().endsWith("/api/editor-settings")
@@ -641,6 +851,384 @@ test("critical editor interactions survive reload without browser errors", async
   await expect(page.getByRole("button", { name: "節點", exact: true })).toBeVisible();
 
   expect(browserErrors, browserErrors.join("\n")).toEqual([]);
+});
+
+test("Stats use the same dwell grouping, rollback, and singleton dissolution", async ({ page }) => {
+  await page.setViewportSize({ width: 1680, height: 1600 });
+  await page.goto(editorUrl);
+  await page.getByRole("button", { name: "狀態", exact: true }).click();
+
+  const looseIdsBeforeTailTest = await page.locator("#statsGroups > .stat-row").evaluateAll((rows) => (
+    rows.map((row) => row.dataset.statId)
+  ));
+  if (looseIdsBeforeTailTest.length) {
+    const setupResult = await page.evaluate(async (looseIds) => {
+      const projectResponse = await fetch("/api/project");
+      const project = await projectResponse.json();
+      looseIds.forEach((id) => {
+        if (project.stats[id]) project.stats[id].Group = "測試資源";
+      });
+      const response = await fetch("/api/stats", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ stats: project.stats }),
+      });
+      return { ok: response.ok, status: response.status };
+    }, looseIdsBeforeTailTest);
+    expect(setupResult).toEqual({ ok: true, status: 200 });
+    await reloadAndWaitForProject(page);
+    await page.getByRole("button", { name: "狀態", exact: true }).click();
+  }
+  await expect(page.locator("#statsGroups > .stat-row")).toHaveCount(0);
+
+  await page.locator("#statsPanel").evaluate((panel) => {
+    panel.style.height = "520px";
+    panel.style.overflowY = "auto";
+    panel.querySelector("#stateDefinitionsPage").style.minHeight = "2200px";
+  });
+  const scrollMetrics = await page.locator("#statsPanel").evaluate((panel) => ({
+    clientHeight: panel.clientHeight,
+    overflowY: getComputedStyle(panel).overflowY,
+    scrollHeight: panel.scrollHeight,
+  }));
+  expect(scrollMetrics.overflowY).toBe("auto");
+  expect(scrollMetrics.scrollHeight).toBeGreaterThan(scrollMetrics.clientHeight);
+  let scrollSource = page.locator(".stat-group-card .stat-row").first();
+  const scrollSourceId = await scrollSource.getAttribute("data-stat-id");
+  scrollSource = page.locator(`#statsGroups .stat-row[data-stat-id="${scrollSourceId}"]`);
+  await scrollSource.scrollIntoViewIfNeeded();
+  const initialScrollTop = await page.locator("#statsPanel").evaluate((panel) => panel.scrollTop);
+  const scrollSourceBox = await scrollSource.boundingBox();
+  const statsPanelBox = await page.locator("#statsPanel").boundingBox();
+  if (!scrollSourceBox || !statsPanelBox) throw new Error("Stats auto-scroll geometry is unavailable");
+  await page.mouse.move(scrollSourceBox.x + 4, scrollSourceBox.y + scrollSourceBox.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(scrollSourceBox.x + 4, statsPanelBox.y + statsPanelBox.height - 4, { steps: 10 });
+  await expect(scrollSource).toHaveAttribute("aria-grabbed", "true");
+  await expect.poll(() => page.locator("#statsPanel").evaluate((panel) => panel.scrollTop)).toBeGreaterThan(initialScrollTop + 20);
+  await page.keyboard.press("Escape");
+  await page.mouse.up();
+  await page.locator("#statsPanel").evaluate((panel) => {
+    panel.scrollTop = 0;
+    panel.style.height = "";
+    panel.style.overflowY = "";
+    panel.querySelector("#stateDefinitionsPage").style.minHeight = "";
+  });
+
+  const initiallyGroupedRow = page.locator('.stat-group-card[data-stat-group="流程追蹤"] .stat-row').first();
+  const initiallyGroupedId = await initiallyGroupedRow.getAttribute("data-stat-id");
+  const leaveGroupResponse = page.waitForResponse((candidate) => (
+    candidate.url().endsWith("/api/stats")
+    && candidate.request().method() === "PUT"
+    && candidate.ok()
+  ));
+  await dragToLiveTarget(
+    page,
+    `.stat-row[data-stat-id="${initiallyGroupedId}"]`,
+    ".stat-loose-drop-tail",
+    async () => {
+      await expect(page.locator(`#statsGroups .stat-row[data-stat-id="${initiallyGroupedId}"]`)).toHaveAttribute("aria-grabbed", "true");
+      expect(await page.evaluate(() => window.getSelection()?.toString() || "")).toBe("");
+    },
+  );
+  await leaveGroupResponse;
+  await expect(page.locator(`#statsGroups > .stat-row[data-stat-id="${initiallyGroupedId}"]`)).toBeVisible();
+
+  await waitForStateSave(page, () => page.locator("#addStatButton").click());
+  await waitForStateSave(page, () => page.locator("#addStatButton").click());
+
+  const rows = page.locator("#statsGroups > .stat-row");
+  const rowCount = await rows.count();
+  const sourceId = await rows.nth(rowCount - 2).getAttribute("data-stat-id");
+  const targetId = await rows.nth(rowCount - 1).getAttribute("data-stat-id");
+  const sourceRow = page.locator(`.stat-row[data-stat-id="${sourceId}"]`);
+  const targetRow = page.locator(`.stat-row[data-stat-id="${targetId}"]`);
+
+  await page.route("**/api/stats", async (route) => {
+    if (route.request().method() === "PUT") {
+      await route.fulfill({ status: 500, contentType: "application/json", body: JSON.stringify({ error: "Stat 群組測試失敗" }) });
+      return;
+    }
+    await route.continue();
+  });
+  await dragWithDwell(page, sourceRow, targetRow);
+  await expect(page.locator(".toast.error")).toContainText("Stat 群組測試失敗");
+  await expect(page.locator(`#statsGroups > .stat-row[data-stat-id="${sourceId}"]`)).toBeVisible();
+  await expect(page.locator(`#statsGroups > .stat-row[data-stat-id="${targetId}"]`)).toBeVisible();
+  await page.unroute("**/api/stats");
+
+  const createGroupResponse = page.waitForResponse((candidate) => (
+    candidate.url().endsWith("/api/stats")
+    && candidate.request().method() === "PUT"
+    && candidate.ok()
+  ));
+  await dragWithDwell(page, sourceRow, targetRow);
+  await createGroupResponse;
+  await expect(page.locator(".toast", { hasText: "群組已建立" })).toHaveCount(0);
+  const newGroup = page.locator('.stat-group-card[data-stat-group="新群組"]');
+  await expect(newGroup.locator(".stat-row")).toHaveCount(2);
+  await expect(newGroup.locator("[data-stat-group-name]")).toBeFocused();
+
+  const moveStatGroupResponse = page.waitForResponse((candidate) => (
+    candidate.url().endsWith("/api/stats")
+    && candidate.request().method() === "PUT"
+    && candidate.ok()
+  ));
+  await dragToLiveTarget(
+    page,
+    '.stat-group-card[data-stat-group="新群組"] .stat-group-drag-space',
+    "#statsGroups > .stat-row",
+  );
+  await moveStatGroupResponse;
+  await expect(page.locator(".toast", { hasText: "Stat 排序已更新" })).toHaveCount(0);
+  await expect.poll(() => page.locator("#statsGroups").evaluate((flow) => {
+    const blocks = [...flow.children].filter((child) => (
+      child.matches(".stat-group-card, .stat-row")
+    ));
+    return blocks.at(-1)?.getAttribute("data-stat-group") !== "新群組";
+  })).toBe(true);
+
+  const resourcesGroup = page.locator('.stat-group-card[data-stat-group="測試資源"]');
+  const moveResponse = page.waitForResponse((candidate) => (
+    candidate.url().endsWith("/api/stats")
+    && candidate.request().method() === "PUT"
+    && candidate.ok()
+  ));
+  await dragWithDwell(
+    page,
+    sourceRow,
+    resourcesGroup.locator(".stat-row").first(),
+    720,
+    async () => {
+      await expect(page.locator(".group-drag-preview")).toBeVisible();
+      await expect(resourcesGroup).toHaveClass(/is-group-preview-open/);
+      await expect(resourcesGroup.locator(`.stat-row[data-stat-id="${sourceId}"]`)).toHaveCount(1);
+    },
+  );
+  await moveResponse;
+  await expect(page.locator('.stat-group-card[data-stat-group="新群組"]')).toHaveCount(0);
+  await expect(resourcesGroup.locator(`.stat-row[data-stat-id="${sourceId}"]`)).toBeVisible();
+  await expect(page.locator(`#statsGroups > .stat-row[data-stat-id="${targetId}"]`)).toBeVisible();
+
+  const reorderResponse = page.waitForResponse((candidate) => (
+    candidate.url().endsWith("/api/stats")
+    && candidate.request().method() === "PUT"
+    && candidate.ok()
+  ));
+  await dispatchImmediateDrag(
+    page,
+    `.stat-row[data-stat-id="${sourceId}"]`,
+    `#statsGroups > .stat-row[data-stat-id="${targetId}"]`,
+  );
+  await reorderResponse;
+  await expect(page.locator('.stat-group-card[data-stat-group="測試資源"]')).toHaveCount(0);
+  await expect.poll(() => page.locator("#statsGroups > .stat-row").evaluateAll((items, ids) => {
+    const order = items.map((item) => item.dataset.statId);
+    return order.indexOf(ids[0]) < order.indexOf(ids[1]);
+  }, [sourceId, targetId])).toBe(true);
+
+  await reloadAndWaitForProject(page);
+  await page.getByRole("button", { name: "狀態", exact: true }).click();
+  await expect.poll(() => page.locator("#statsGroups > .stat-row").evaluateAll((items, ids) => {
+    const order = items.map((item) => item.dataset.statId);
+    return order.indexOf(ids[0]) < order.indexOf(ids[1]);
+  }, [sourceId, targetId])).toBe(true);
+});
+
+test("graph refreshes newly created nodes without a page reload", async ({ page }) => {
+  await page.setViewportSize({ width: 1680, height: 900 });
+  await page.goto(editorUrl);
+  await expect(page.getByRole("navigation", { name: "編輯器分頁" })).toBeVisible();
+
+  await page.evaluate(() => document.querySelector("#newNodeButton")?.click());
+  await page.locator('#nodeDialog input[name="name"]').fill("即時更新節點");
+  const createResponse = page.waitForResponse((candidate) => (
+    candidate.url().endsWith("/api/nodes")
+    && candidate.request().method() === "POST"
+    && candidate.ok()
+  ));
+  await page.getByRole("button", { name: "建立節點" }).click();
+  await createResponse;
+  await expect(page.getByRole("status")).toHaveText("已同步");
+
+  await page.evaluate(() => { window.__graphRefreshDidNotReload = true; });
+  const graphRefreshResponse = page.waitForResponse((candidate) => (
+    candidate.url().endsWith("/api/project")
+    && candidate.request().method() === "GET"
+    && candidate.ok()
+  ));
+  await page.getByRole("button", { name: "關聯圖", exact: true }).click();
+  await graphRefreshResponse;
+  await expect(page.locator(".graph-node-name", { hasText: "即時更新節點" })).toHaveCount(1);
+  await expect.poll(() => page.evaluate(() => window.__graphRefreshDidNotReload)).toBe(true);
+});
+
+test("Event groups form through dwell-drag and dissolve when one item remains", async ({ page }) => {
+  await page.setViewportSize({ width: 1680, height: 900 });
+  await page.goto(editorUrl);
+  await expect(page.getByRole("navigation", { name: "編輯器分頁" })).toBeVisible();
+  await expect(page.getByRole("status")).toHaveText("已同步");
+  await page.locator("#openSidebar").click();
+  const branchLabNode = page.locator('#nodeList [data-node-path="branch_lab"]');
+  await expect(branchLabNode).toBeVisible();
+  await branchLabNode.click();
+  await page.getByRole("button", { name: /^事件 / }).click();
+
+  await expect(page.locator("#newEventGroupButton")).toHaveCount(0);
+  const savedEvent = page.locator('[data-group-item-id="branch_random"]');
+  const backEvent = page.locator('[data-group-item-id="branch_back"]');
+  await expect(savedEvent).toBeVisible();
+  const nonStickyReorder = page.waitForResponse((candidate) => (
+    candidate.url().endsWith("/api/event-groups")
+    && candidate.request().method() === "PUT"
+    && candidate.ok()
+  ));
+  await dragWithoutFollowingReflow(page, savedEvent, backEvent, 720, async () => {
+    await expect(backEvent).not.toHaveClass(/is-group-ready/);
+  });
+  await nonStickyReorder;
+  await expect(page.locator(".event-group")).toHaveCount(0);
+
+  await page.route("**/api/event-groups", async (route) => {
+    const payload = route.request().postDataJSON();
+    if (payload?.assignments) {
+      await route.fulfill({ status: 500, contentType: "application/json", body: JSON.stringify({ error: "測試移動失敗" }) });
+      return;
+    }
+    await route.continue();
+  });
+  await dragWithDwell(page, savedEvent, backEvent, 720, async () => {
+    await expect(backEvent).toHaveClass(/is-group-ready/);
+    await expect(page.locator(".group-drag-preview")).toBeVisible();
+  });
+  await expect(page.locator(".event-group")).toHaveCount(0);
+  await expect(page.locator('.event-pool-flow > [data-group-item-id="branch_random"]')).toBeVisible();
+  await expect(page.locator(".toast.error")).toContainText("測試移動失敗");
+  await page.unroute("**/api/event-groups");
+  await page.waitForTimeout(220);
+
+  const createGroupResponse = page.waitForResponse((candidate) => (
+    candidate.url().endsWith("/api/event-groups")
+    && candidate.request().method() === "PUT"
+    && candidate.ok()
+  ));
+  await dragWithDwell(page, savedEvent, backEvent);
+  await createGroupResponse;
+  await expect(page.locator(".toast", { hasText: "群組已建立" })).toHaveCount(0);
+  const newGroup = page.locator('[data-group-drop="新群組"]');
+  await expect(newGroup.locator(".subnav-item")).toHaveCount(2);
+  const groupName = newGroup.locator("[data-event-group-name]");
+  await expect(groupName).toBeFocused();
+  const renameResponse = page.waitForResponse((candidate) => (
+    candidate.url().endsWith("/api/event-groups")
+    && candidate.request().method() === "PUT"
+    && candidate.ok()
+  ));
+  await groupName.fill("主線流程");
+  await groupName.press("Enter");
+  await renameResponse;
+  const renamedGroup = page.locator('[data-group-drop="主線流程"]');
+  await expect(renamedGroup).toBeVisible();
+  await expect(renamedGroup.locator("button")).toHaveCount(2);
+  await page.mouse.move(1000, 700);
+  await expect.poll(() => renamedGroup.locator(".event-group-items-shell").evaluate((shell) => (
+    shell.getBoundingClientRect().height
+  ))).toBeLessThan(2);
+  const groupHeaderBox = await renamedGroup.locator(".event-group-header").boundingBox();
+  if (!groupHeaderBox) throw new Error("Event group header is not visible");
+  await page.mouse.move(groupHeaderBox.x + groupHeaderBox.width / 2, groupHeaderBox.y + groupHeaderBox.height / 2);
+  await expect.poll(() => renamedGroup.locator(".event-group-items-shell").evaluate((shell) => (
+    shell.getBoundingClientRect().height
+  ))).toBeGreaterThan(20);
+
+  const moveGroupResponse = page.waitForResponse((candidate) => (
+    candidate.url().endsWith("/api/event-groups")
+    && candidate.request().method() === "PUT"
+    && candidate.ok()
+  ));
+  await dragToLiveTarget(
+    page,
+    '[data-group-drop="主線流程"] .event-group-drag-space',
+    ".event-loose-drop-tail",
+    async () => {
+      await expect(page.locator('[data-group-drop="主線流程"]').first()).toHaveClass(/is-group-block-dragging/);
+      expect(await page.locator('[data-group-drop="主線流程"] .event-group-items-shell').first().evaluate((shell) => (
+        shell.getBoundingClientRect().height
+      ))).toBeLessThan(2);
+    },
+  );
+  await moveGroupResponse;
+  await expect(page.locator(".toast", { hasText: "Event 排序已更新" })).toHaveCount(0);
+  await expect.poll(() => page.locator(".event-pool-flow").evaluate((flow) => {
+    const blocks = [...flow.children].filter((child) => (
+      child.matches(".event-group, [data-group-item-id]")
+    ));
+    return blocks.at(-1)?.getAttribute("data-group-drop");
+  })).toBe("主線流程");
+
+  const looseEvent = page.locator(".event-pool-flow > [data-group-item-id]").first();
+  const looseEventId = await looseEvent.getAttribute("data-group-item-id");
+  const moveBelowGroupResponse = page.waitForResponse((candidate) => (
+    candidate.url().endsWith("/api/event-groups")
+    && candidate.request().method() === "PUT"
+    && candidate.ok()
+  ));
+  await dragToLiveTarget(
+    page,
+    `.event-pool-flow > [data-group-item-id="${looseEventId}"]`,
+    ".event-loose-drop-tail",
+  );
+  await moveBelowGroupResponse;
+  await expect.poll(() => page.locator(".event-pool-flow").evaluate((flow) => {
+    const blocks = [...flow.children].filter((child) => (
+      child.matches(".event-group, [data-group-item-id]")
+    ));
+    return blocks.at(-1)?.getAttribute("data-group-item-id");
+  })).toBe(looseEventId);
+
+  const ungrouped = page.locator(".event-pool-flow");
+  const dissolveResponse = page.waitForResponse((candidate) => (
+    candidate.url().endsWith("/api/event-groups")
+    && candidate.request().method() === "PUT"
+    && candidate.ok()
+  ));
+  const renamedGroupHeader = page.locator('[data-group-drop="主線流程"] .event-group-header');
+  await renamedGroupHeader.hover();
+  await page.waitForTimeout(260);
+  await dragToLiveTarget(
+    page,
+    '[data-group-drop="主線流程"] [data-group-item-id="branch_random"]',
+    ".event-loose-drop-tail",
+  );
+  await dissolveResponse;
+  await expect(page.locator('[data-group-drop="主線流程"]')).toHaveCount(0);
+  await expect(ungrouped.locator(':scope > [data-group-item-id="branch_random"]')).toBeVisible();
+  await expect(ungrouped.locator(':scope > [data-group-item-id="branch_back"]')).toBeVisible();
+
+  const reorderResponse = page.waitForResponse((candidate) => (
+    candidate.url().endsWith("/api/event-groups")
+    && candidate.request().method() === "PUT"
+    && candidate.ok()
+  ));
+  await dispatchImmediateDrag(
+    page,
+    '.event-pool-flow > [data-group-item-id="branch_random"]',
+    '.event-pool-flow > [data-group-item-id="branch_back"]',
+  );
+  await reorderResponse;
+  await expect.poll(() => ungrouped.locator(":scope > [data-group-item-id]").evaluateAll((items) => {
+    const order = items.map((item) => item.dataset.groupItemId);
+    return order.indexOf("branch_random") < order.indexOf("branch_back");
+  })).toBe(true);
+
+  await reloadAndWaitForProject(page);
+  await page.getByRole("button", { name: /^事件 / }).click();
+  await expect(page.locator('[data-group-drop="主線流程"]')).toHaveCount(0);
+  await expect(page.locator('.event-pool-flow > [data-group-item-id="branch_back"]')).toBeVisible();
+  await expect.poll(() => page.locator(".event-pool-flow > [data-group-item-id]").evaluateAll((items) => {
+    const order = items.map((item) => item.dataset.groupItemId);
+    return order.indexOf("branch_random") < order.indexOf("branch_back");
+  })).toBe(true);
 });
 
 test("language switch handles failed persistence with atomic rollback and error toast", async ({ page }) => {
@@ -772,7 +1360,7 @@ test("dynamic English surfaces render localized strings correctly across all wor
   await expect(page.locator("#newContentButton")).toHaveAttribute("aria-label", "Add Content");
 
   await page.getByRole("button", { name: "State", exact: true }).click();
-  await expect(page.locator("#addStatGroupButton")).toHaveAttribute("aria-label", "Add Stat Group");
+  await expect(page.locator("#addStatButton")).toHaveAttribute("aria-label", "Add Stat");
   await expect(page.locator("#addMemoryButton")).toHaveAttribute("aria-label", "Add Memory Bank");
   await expect(page.locator('input[name="statName"][value="測試點數"]')).toBeVisible();
 
@@ -809,6 +1397,29 @@ test("interaction details expose keyboard focus and honor reduced motion", async
   await page.setViewportSize({ width: 1280, height: 800 });
   await page.goto(editorUrl);
   await expect(page.getByRole("navigation", { name: "編輯器分頁" })).toBeVisible();
+
+  const eventTab = page.locator('.tab[data-tab="events"]');
+  const eventTabBox = await eventTab.boundingBox();
+  if (!eventTabBox) throw new Error("Event tab geometry is unavailable");
+  await page.mouse.move(eventTabBox.x + eventTabBox.width / 2, eventTabBox.y + eventTabBox.height / 2);
+  await page.mouse.down();
+  const pressedTabState = await page.evaluate(() => {
+    const indicator = document.querySelector("#tabFocusIndicator");
+    const target = document.querySelector('.tab[data-tab="events"]');
+    return {
+      activeTab: document.querySelector(".tab.active")?.dataset.tab,
+      indicatorLeft: Number.parseFloat(indicator.style.left),
+      pointerNavigation: document.querySelector("#tabbar").classList.contains("is-pointer-navigation"),
+      targetLeft: target.offsetLeft,
+    };
+  });
+  expect(pressedTabState.activeTab).toBe("node");
+  expect(pressedTabState.indicatorLeft).toBe(pressedTabState.targetLeft);
+  expect(pressedTabState.pointerNavigation).toBe(true);
+  await page.mouse.up();
+  await expect(eventTab).toHaveClass(/active/);
+  await page.locator('.tab[data-tab="node"]').click();
+  await expect(page.locator('.tab[data-tab="node"]')).toHaveClass(/active/);
 
   const nameField = page.locator('#nodeForm [name="Name"]');
   await nameField.focus();

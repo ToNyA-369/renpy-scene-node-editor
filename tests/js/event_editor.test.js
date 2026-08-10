@@ -82,6 +82,38 @@ test("weighted Event choices preserve string and map representations", () => {
   );
 });
 
+test("Event groups keep Normal first and preserve flat Event order", () => {
+  const events = [
+    { ID: "b", Group: "Story" },
+    { ID: "a" },
+    { ID: "d", Group: "Story" },
+    { ID: "c", Group: "System" },
+    { ID: "e", Group: "   " },
+  ];
+
+  assert.deepEqual(SceneEventEditor.groupEvents(events), [
+    { name: "Normal", events: [events[1], events[4]] },
+    { name: "Story", events: [events[0], events[2]] },
+    { name: "System", events: [events[3]] },
+  ]);
+  assert.equal(SceneEventEditor.normalizeEventGroup(null), "Normal");
+  assert.equal(SceneEventEditor.normalizeEventGroup("  Story  "), "Story");
+});
+
+test("Event pool blocks keep loose items at their ordered positions", () => {
+  const events = [
+    { ID: "a" },
+    { ID: "b", Group: "Story" },
+    { ID: "c", Group: "Story" },
+    { ID: "d" },
+  ];
+  assert.deepEqual(SceneEventEditor.eventPoolBlocks(events), [
+    { type: "item", event: events[0] },
+    { type: "group", name: "Story", events: [events[1], events[2]] },
+    { type: "item", event: events[3] },
+  ]);
+});
+
 test("Condition and Effect DOM values map to the stable Event JSON contract", () => {
   const editor = createEditor();
   const conditions = [
