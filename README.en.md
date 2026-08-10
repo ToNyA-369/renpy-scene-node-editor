@@ -2,64 +2,68 @@
 
 [繁體中文](README.md) · [English](README.en.md)
 
-Scene Node Editor is a local browser-based content editor for Ren'Py. It turns nodes, events, player options, state, and branching flow into structured, validated project data. It manages interaction rules and connections; visual design, assets, and game-specific systems remain native Ren'Py work.
+A local content editor for Ren'Py game developers. Manage nodes, events, player options, state, and branching flow through visual forms while keeping narrative, presentation, and game-specific systems native to Ren'Py.
 
-> Public alpha. Currently verified with Ren'Py 8.5.3, Python 3, and macOS. The editor itself uses only the Python standard library.
+> **Public alpha** — Currently verified with Ren'Py 8.5.3, Python 3, and macOS. The editor runs locally and requires no third-party Python packages.
 
-## What does it manage?
+## What games is it for?
 
-| Scene Node Editor manages | The creator designs |
+- Visual novels driven by choices, conditions, and numeric state.
+- Simulation, raising, exploration, and branching-event games.
+- Projects that need a visual way to manage many Events while authoring presentation in Ren'Py.
+- Long-running projects that benefit from stable IDs, reference validation, and saved state.
+
+## Editor and Ren'Py responsibilities
+
+| Scene Node Editor manages | You continue to build in Ren'Py |
 | --- | --- |
-| Scene Nodes, the Global Node, Events, and Options | `gui.rpy`, `screens.rpy`, and HUD layouts |
-| Conditions, Effects, Priority, and Weight | Images, audio, fonts, and animation assets |
-| Stats, Memory Banks, and Once state | Characters, dialogue, ATL, and transforms |
-| Content label references and node flow | Inventory, time, quests, and other game-specific systems |
-| The GOTO / REPLACE graph and project validation | Narrative content and game design |
+| Scene Nodes, the Global Node, Events, and Options | Narrative, characters, dialogue, and game design |
+| Conditions, Effects, Priority, and Weight | `gui.rpy`, `screens.rpy`, and HUDs |
+| Stats, Memory Banks, and Once state | Images, audio, fonts, ATL, and transforms |
+| GOTO / REPLACE flow graph and validation | Inventory, time, quests, and other custom systems |
 
-The editor does not overwrite creator-owned `gui.rpy`, `screens.rpy`, or other interface files, and custom screens do not replace the data-driven Options renderer.
+The editor does not overwrite creator-owned `gui.rpy`, `screens.rpy`, assets, or other game files.
 
-## Five-minute start
+## Get started
 
-1. Create a blank project in the Ren'Py Launcher.
-2. On macOS, double-click `安裝到RenPy專案.command` in this repository.
-3. Select the Ren'Py project folder or its `game/` folder.
-4. In the editor, add an Option to the ROOT node, then create an Event with the same Trigger.
-5. Run “Check Project”, then launch the game from Ren'Py.
+1. Download and extract the project with GitHub's **Code → Download ZIP**, or use Git clone.
+2. Create a blank project in the Ren'Py Launcher.
+3. On macOS, double-click `安裝到RenPy專案.command`.
+4. Select the Ren'Py project folder or its `game/` folder.
+5. In the editor, create an Option and an Event with the same Trigger.
+6. Run **Check Project**, then launch the game from Ren'Py.
 
-A blank project gets a ROOT node and is connected to `scene_runtime_start()` when its start script is still the Ren'Py template. If the project already has a custom `label start`, the installer preserves it; add the call yourself:
+Continue with [Build your first playable project](docs/en/FIRST_PROJECT.md) to connect ROOT, an Option, an Event, and Content.
 
-```renpy
-label start:
-    call scene_runtime_start()
-    return
+Other platforms can install and launch from a terminal:
+
+```sh
+python3 tools/install.py "/path/to/RenPyProject"
+python3 "/path/to/RenPyProject/.scene-node-editor/EDITOR/app.py" \
+  --project "/path/to/RenPyProject/game"
 ```
 
-Continue with [Build your first project](docs/en/FIRST_PROJECT.md).
-
-## Core flow
+## Game flow model
 
 ```mermaid
 flowchart LR
-    A["Option / Keyboard / Mouse / Auto lifecycle"] --> B["Trigger"]
-    B --> C["Event Conditions"]
+    A["Option / Keyboard / Mouse / Auto"] --> B["Trigger"]
+    B --> C["Event + Conditions"]
     C --> D["Effects"]
-    D --> E["Content label"]
+    D --> E["Ren'Py Content label"]
     E --> F["REDO / GOTO / REPLACE / EXIT"]
 ```
 
-- An Option returns a Trigger; it does not select an Event directly.
-- Events own Conditions, Stat / Memory / Option Availability Effects, Content, and the flow result.
-- Options may be persistent `Always` entries or `Controlled` by Effects; TEXTBOX supports whole-list and per-Item targets, and an Event may control only its own Options scope.
-- Content stores a Ren'Py `label` name, not an `.rpy` filename.
-- On Enter and On Exit may run several Events at node boundaries; On Node preserves the former Auto single selection.
-- The fixed, undeletable Global Node provides global Events and Options. It never enters the Stack, but its Options render beside the current Scene Node's Options and may trigger or be controlled by same-scope Global Events.
-- REPLACE swaps the top of the Scene Stack directly and never resumes or re-runs the parent during the transition.
-- Backgrounds, audio, and transitions use native Ren'Py inside Content.
-- Creators continue to own `gui.rpy` and `screens.rpy`.
+- An Option emits a Trigger; its Event decides conditions, state changes, presentation, and routing.
+- Content is a native Ren'Py label that may use dialogue, backgrounds, audio, transitions, or custom Screens.
+- The Global Node supplies cross-node Events and Options without entering the Scene Stack.
+- The graph uses GOTO / REPLACE to show each node's position in the whole game.
+- Stats, Memory Banks, and Controlled Options participate in Ren'Py saves.
+- Project validation checks data shape and node, state, and Content references.
 
 ## Updates and data safety
 
-Run the installer again to update the managed editor and runtime. These creator-owned files are preserved:
+Download a newer version and run the installer again to update the managed editor and runtime. These creator-owned paths remain untouched:
 
 ```text
 game/DATA/
@@ -70,26 +74,17 @@ game/screens.rpy
 other creator files and assets under game/
 ```
 
-Node deletion is blocked while Events still reference the node. Deleted nodes are moved to `.scene-node-trash/` at the project root.
+A node cannot be deleted while an Event references it. Deleted nodes move to `.scene-node-trash/` at the project root for recovery.
 
 ## Documentation
 
-- [Build your first project](docs/en/FIRST_PROJECT.md)
-- [Editor user guide](docs/en/USER_GUIDE.md)
-- [Schema and runtime reference](docs/en/REFERENCE.md)
-- [AI-assisted workflow](docs/en/AI_WORKFLOW.md)
-- [繁體中文文件](README.md)
-- [Development and testing](CONTRIBUTING.md)
+- [Build your first playable project](docs/en/FIRST_PROJECT.md) — start from a blank Ren'Py project.
+- [Editor user guide](docs/en/USER_GUIDE.md) — the seven workspaces and daily authoring.
+- [Schema and runtime reference](docs/en/REFERENCE.md) — data formats and public APIs.
+- [AI-assisted workflow](docs/en/AI_WORKFLOW.md) — optional game-development assistance.
+- [Complete documentation index](docs/README.md) — English, Chinese, and maintenance entry points.
 
-## Other platforms
-
-macOS has double-click installers and launchers. Other platforms currently use the manual commands:
-
-```sh
-python3 tools/install.py "/path/to/RenPyProject"
-python3 "/path/to/RenPyProject/.scene-node-editor/EDITOR/app.py" \
-  --project "/path/to/RenPyProject/game"
-```
+To modify the editor or runtime itself, start with [Contributing and testing](CONTRIBUTING.md).
 
 ## License
 
