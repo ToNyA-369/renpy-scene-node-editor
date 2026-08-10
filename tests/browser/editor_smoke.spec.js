@@ -858,27 +858,22 @@ test("Stats use the same dwell grouping, rollback, and singleton dissolution", a
   await page.goto(editorUrl);
   await page.getByRole("button", { name: "狀態", exact: true }).click();
 
-  const looseIdsBeforeTailTest = await page.locator("#statsGroups > .stat-row").evaluateAll((rows) => (
-    rows.map((row) => row.dataset.statId)
-  ));
-  if (looseIdsBeforeTailTest.length) {
-    const setupResult = await page.evaluate(async (looseIds) => {
-      const projectResponse = await fetch("/api/project");
-      const project = await projectResponse.json();
-      looseIds.forEach((id) => {
-        if (project.stats[id]) project.stats[id].Group = "測試資源";
-      });
-      const response = await fetch("/api/stats", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ stats: project.stats }),
-      });
-      return { ok: response.ok, status: response.status };
-    }, looseIdsBeforeTailTest);
-    expect(setupResult).toEqual({ ok: true, status: 200 });
-    await reloadAndWaitForProject(page);
-    await page.getByRole("button", { name: "狀態", exact: true }).click();
-  }
+  const setupResult = await page.evaluate(async () => {
+    const projectResponse = await fetch("/api/project");
+    const project = await projectResponse.json();
+    Object.values(project.stats).forEach((stat) => {
+      if (stat.Group !== "流程追蹤") stat.Group = "測試資源";
+    });
+    const response = await fetch("/api/stats", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ stats: project.stats }),
+    });
+    return { ok: response.ok, status: response.status };
+  });
+  expect(setupResult).toEqual({ ok: true, status: 200 });
+  await reloadAndWaitForProject(page);
+  await page.getByRole("button", { name: "狀態", exact: true }).click();
   await expect(page.locator("#statsGroups > .stat-row")).toHaveCount(0);
 
   await page.locator("#statsPanel").evaluate((panel) => {
@@ -1021,7 +1016,8 @@ test("Stats use the same dwell grouping, rollback, and singleton dissolution", a
     `#statsGroups > .stat-row[data-stat-id="${targetId}"]`,
   );
   await reorderResponse;
-  await expect(page.locator('.stat-group-card[data-stat-group="測試資源"]')).toHaveCount(0);
+  await expect(resourcesGroup.locator(`.stat-row[data-stat-id="${sourceId}"]`)).toHaveCount(0);
+  await expect(page.locator(`#statsGroups > .stat-row[data-stat-id="${sourceId}"]`)).toBeVisible();
   await expect.poll(() => page.locator("#statsGroups > .stat-row").evaluateAll((items, ids) => {
     const order = items.map((item) => item.dataset.statId);
     return order.indexOf(ids[0]) < order.indexOf(ids[1]);
