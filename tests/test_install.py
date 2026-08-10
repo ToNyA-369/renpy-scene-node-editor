@@ -34,7 +34,7 @@ class InstallerTest(unittest.TestCase):
 
             self.assertEqual(resolved_project, project_root)
             self.assertEqual(resolved_game, game_root)
-            self.assertEqual(version, "0.1.0-alpha")
+            self.assertEqual(version, "0.2.0-alpha")
             self.assertTrue(launcher.exists())
             self.assertTrue(os.access(launcher, os.X_OK))
             self.assertTrue((project_root / ".scene-node-editor" / "EDITOR" / "app.py").exists())
@@ -194,7 +194,7 @@ class InstallerTest(unittest.TestCase):
             manifest = json.loads(
                 (project_root / ".scene-node-editor" / "manifest.json").read_text(encoding="utf-8")
             )
-            self.assertEqual(manifest["version"], "0.1.0-alpha")
+            self.assertEqual(manifest["version"], "0.2.0-alpha")
             self.assertEqual(manifest["managed_runtime_files"], list(install.RUNTIME_FILES))
             self.assertEqual(manifest["managed_context_files"], list(install.MANAGED_CONTEXT_FILES))
 
