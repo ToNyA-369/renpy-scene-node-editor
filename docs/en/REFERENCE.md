@@ -1,6 +1,6 @@
 # Scene Node Editor technical reference
 
-[繁體中文](../zh-TW/REFERENCE.md) · [English](REFERENCE.md) · [Home](../../README.en.md)
+[繁體中文](../zh-TW/REFERENCE.md) · [English](REFERENCE.md) · [Home](../../EDITOR/README.en.md)
 
 This document defines the current public-alpha data and Runtime contracts. For normal operation, see the [User guide](USER_GUIDE.md).
 
@@ -16,6 +16,7 @@ This document defines the current public-alpha data and Runtime contracts. For n
       SceneProject.json
       Stats.json
       Memories.json
+      TEXTBOX_PROFILES/<profile_id>.json
     GLOBALNODE/
       Node.json
       Options.json
@@ -44,12 +45,20 @@ This document defines the current public-alpha data and Runtime contracts. For n
 ```json
 {
   "ID": "room",
-  "Name": "My room"
+  "Name": "My room",
+  "Group": "Chapter One",
+  "Order": 2,
+  "Content Order": ["room_enter", "room_options"]
 }
 ```
 
 - `ID`: stable technical ID.
 - `Name`: editable display name.
+- `Group`: optional single-level Editor group name; missing or blank values normalize to `Normal`.
+- `Order`: optional non-negative integer storing Scene Node list drag order only.
+- `Content Order`: optional string array storing the Content-file list order for this authoring scope only.
+
+`Group`, Scene Node `Order`, and Content `Content Order` are Editor-only metadata. Legacy data without them uses the existing stable scan order and writes metadata only after the first drag. Scene Node groups reuse the Event Pool's dwell-to-group, boundary-crossing membership, whole-group reorder, and singleton-dissolution behavior; the Global Node remains outside this flow. None participates in ROOT, the Stack, Event selection, graph layout, or Runtime.
 
 ## Global Node
 
@@ -67,7 +76,7 @@ Global Event prepare retains both `owner_node_id = "__global__"` and `node_id = 
 
 ```json
 {
-  "Version": 2,
+  "Version": 3,
   "Canvas": { "Width": 1920, "Height": 1080, "Preview Background": "" },
   "Elements": []
 }
@@ -98,6 +107,15 @@ Global Event prepare retains both `owner_node_id = "__global__"` and `node_id = 
     "Text Size": 30,
     "Text Align": 0.5
   },
+  "Appearance": {
+    "Profile": "glass",
+    "Features": {
+      "hover_accent": true,
+      "text_shadow": false,
+      "staggered_entrance": true
+    },
+    "Style Overrides": { "Text Size": 34 }
+  },
   "Hover": { "Enabled": true, "Color": "#ffffff18" },
   "Hover Sound": "",
   "Click Sound": "",
@@ -113,6 +131,38 @@ Global Event prepare retains both `owner_node_id = "__global__"` and `node_id = 
   ]
 }
 ```
+
+`Appearance` is optional in Version 3. `Profile` references the stable ID of `DATA/TEXTBOX_PROFILES/<profile_id>.json`; `Features` overrides only whether a profile feature is enabled; and `Style Overrides` stores only values that differ for this Text Box. Resolution order is fixed: defaults → profile → Text Box overrides → Item `Style Override`. Without a Profile, the existing inline `Style` remains authoritative. A missing or invalid Profile also falls back to `Style` and produces a project-validation warning.
+
+Appearance profiles are creator-owned, project-wide data. Each file has this format:
+
+```json
+{
+  "Version": 1,
+  "ID": "glass",
+  "Name": "Glass",
+  "Order": 0,
+  "Style": {
+    "Background": "#102030cc",
+    "Item Background": "#203040dd",
+    "Text Color": "#ffffff",
+    "Text Size": 30,
+    "Text Align": 0.5
+  },
+  "Features": {
+    "hover_accent": { "Enabled": true, "Color": "#5c7265", "Width": 6 },
+    "hover_text_color": { "Enabled": false, "Color": "#ffffff" },
+    "item_border": { "Enabled": false, "Color": "#ffffff33", "Width": 1 },
+    "text_shadow": { "Enabled": false, "Color": "#00000088", "Size": 2, "X": 0, "Y": 2 },
+    "text_outline": { "Enabled": false, "Color": "#000000cc", "Size": 1 },
+    "staggered_entrance": { "Enabled": true, "Distance": 18, "Delay": 0.04, "Duration": 0.22 }
+  }
+}
+```
+
+The optional non-negative `Order` on an appearance profile controls only the profile manager's list order. Runtime ignores it while resolving appearance.
+
+The six features provide a hover-side accent, hover text color, Item border, text shadow, text outline, and staggered item entrance whenever an Options interaction opens. Newly introduced features default to disabled when absent from an older profile. Editor and Runtime consume the same parameters. Profile ID and filename must match, and referenced profiles cannot be deleted. The Installer creates only the empty directory and never overwrites its files.
 
 ### Picture
 
@@ -146,7 +196,9 @@ Picture shares `ID`, `Name`, `Availability`, `Layout`, `Hover`, and sound fields
 
 `Availability` is either `ALWAYS` or `CONTROLLED`. `ALWAYS` is always visible. `CONTROLLED` starts hidden, appears after an Option Effect enables it, and disappears when disabled. PICTURE and HITBOX support Element-level control. TEXTBOX supports both whole-Element and individual-Item control. An Item is visible only when both it and its parent Element are available; disabling the parent retains Item state, and an empty TEXTBOX hides automatically.
 
-Options have no lifecycle, condition expressions, or custom Screen source. Every displayed Option is actionable. Version 1 data and omitted `Availability` values are read as `ALWAYS`; the next save normalizes the document to Version 2.
+Options have no lifecycle, condition expressions, or custom Screen source. Every displayed Option is actionable. Version 1 data and omitted `Availability` values are read as `ALWAYS`; Version 1 and 2 documents normalize to Version 3 on their next save without changing unprofiled presentation.
+
+`Elements` and TEXTBOX `Items` are ordered arrays. Pointer dragging from row whitespace reorders the existing arrays directly and adds no Group or Order field. Element order is the stable tie-breaker when `Z Order` values match; distinct `Z Order` values remain the explicit layer control. Item array order determines display and staggered entrance order.
 
 ## Event
 
@@ -167,13 +219,15 @@ Options have no lifecycle, condition expressions, or custom Screen source. Every
 }
 ```
 
-`Group` is single-level authoring metadata used only to organize the Event Pool in the Editor. Missing or blank values normalize to the fixed `Normal` group, presented as visually ungrouped without a heading. Optional non-negative integer `Order` is also Editor-only and persists drag order; legacy Events without it retain their stable read order. Neither field participates in Trigger matching, Priority, Weight, lifecycle ordering, the graph, or Runtime execution. The drag preview updates on every pointer event while geometry checks and DOM reflow are coalesced by animation frame. Midpoint hysteresis prevents insertion jitter, the nearest scrollable ancestor supports progressive edge auto-scroll, and window-level lifecycle listeners preserve the gesture while the source moves between containers. Pointer dragging moves a live insertion gap and uses short FLIP offsets to push Event and group blocks aside. A permanent trailing gap allows placement after the bottommost group, while crossing a group boundary changes membership without a dedicated ungroup button. Grouping dwell remains armed only while the pointer is inside the candidate's current geometry, so live reflow moving it away cancels that intent. Groups collapse to a compact name and count by default, then expand on hover, keyboard focus, or drag entry. The unmarked blank space beside the name drags the whole group as one stable block and collapses it at drag start. Releasing after the group frame expands creates a group, and a one-Event group dissolves automatically. Successful drags do not produce toasts; failures remain visible.
+`Group` is single-level authoring metadata used only to organize the Event Pool in the Editor. Missing or blank values normalize to the fixed `Normal` group, presented as visually ungrouped without a heading. Optional non-negative integer `Order` is also Editor-only and persists drag order; legacy Events without it retain their stable read order. Neither field participates in Trigger matching, Priority, Weight, lifecycle ordering, the graph, or Runtime execution. The drag preview updates on every pointer event while geometry checks and DOM reflow are coalesced by animation frame. Midpoint hysteresis prevents insertion jitter, the nearest scrollable ancestor supports progressive edge auto-scroll, and window-level lifecycle listeners preserve the gesture while the source moves between containers. Pointer dragging moves a live insertion gap and uses short FLIP offsets to push Event and group blocks aside. A permanent trailing gap allows placement after the bottommost group, while crossing a group boundary changes membership without a dedicated ungroup button. Grouping dwell remains armed for 500ms only while the pointer is inside the candidate's current geometry; an ungrouped candidate opens a 48px group reservation below itself, while live reflow moving it away cancels that intent. Groups collapse to a compact name and count by default, then expand on hover, keyboard focus, or drag entry. An internal reorder keeps the group open until pointerleave. The unmarked blank space beside the name drags the whole group as one stable block, with the floating preview contracting over 220ms. Releasing after the reservation expands creates a group, and a one-Event group dissolves automatically. Successful drags do not produce toasts; failures remain visible.
 
 `Content` and `Next Node` may be `null`, one string, or a positive weight map:
 
 ```json
 { "content_day": 3, "content_night": 1 }
 ```
+
+`Conditions` and `Effects` are ordered arrays. Pointer dragging from row whitespace saves their array order directly without adding grouping or ordering metadata. Conditions still all need to pass; Effects execute in array order after Content returns. Weight objects remain probability maps and are not drag-sortable.
 
 An ordinary Event's `End up` may be `REDO`, `GOTO`, `REPLACE`, or `EXIT`. GOTO and REPLACE require `Next Node`; the Editor shows Node Name while JSON stores the stable Node ID. REPLACE example:
 
@@ -291,6 +345,8 @@ Event Effects handle Stats, Memories, and Option Availability. Backgrounds, musi
 
 `memory` is required. Ordinary Once Events use `once:<event_id>`; Global Once Events use `once:global:<event_id>`.
 
+Memory Banks remain a JSON object. The Editor uses object-key insertion order to preserve the dragged presentation order and adds no schema field. This order does not affect Runtime lookup, Once keys, public APIs, or Ren'Py save semantics.
+
 ## Event selection
 
 `Auto:Node`, Option, Keyboard, and Mouse use the single-selection flow:
@@ -299,8 +355,8 @@ Event Effects handle Stats, Memories, and Option Availability. Backgrounds, musi
 2. Exclude failed Conditions and completed Once Events.
 3. Find the minimum Priority.
 4. Choose one Event by Weight only within that Priority.
-5. Apply Effects.
-6. Choose and call Content.
+5. Choose and call Content.
+6. After Content returns, record Once and apply Effects.
 7. Select a single or weighted GOTO / REPLACE Next Node during prepare, then validate it after Content returns and before any On Exit.
 8. Resolve End up.
 
@@ -308,7 +364,7 @@ Event Effects handle Stats, Memories, and Option Availability. Backgrounds, musi
 
 1. Evaluate all Conditions and Once markers against one state snapshot before any Effects run.
 2. Sort every matching Event by ascending Priority, then Event ID.
-3. Apply each Event's Effects and call its Content in order.
+3. Call each Event's Content in order, then record Once and apply that Event's Effects after its Content returns.
 
 Lifecycle Events do not use Weight and do not change the Scene Stack.
 
@@ -321,9 +377,9 @@ Global On Node participates on the Runner's next interaction iteration. If a loc
 - `REPLACE`: require an actual Stack depth greater than one and atomically replace the top: `[parent, current] -> [parent, target]`.
 - `EXIT`: pop the current Node; return to its parent, or end the Runner at ROOT.
 
-Effects run before Content. A Content label must `return` so the Runner can resolve End up.
+Content runs before Effects. A Content label must `return`; only then does the Runtime record Once, apply Effects, and resolve End up.
 
-REPLACE runs in this order: Event Effects, Event Content, destination validation, current On Exit, atomic top replacement, destination On Enter, then destination On Node / Options. The current On Exit Conditions can therefore observe state changed by the main Event's Effects and Content. The parent runs no On Enter, On Exit, On Node, or Options during the transition. A later EXIT from the destination returns to the original parent, never the replaced node.
+REPLACE runs in this order: Event Content, Once / Effects, destination validation, current On Exit, atomic top replacement, destination On Enter, then destination On Node / Options. The current On Exit Conditions can therefore observe state changed by the main Event's Effects and Content. The parent runs no On Enter, On Exit, On Node, or Options during the transition. A later EXIT from the destination returns to the original parent, never the replaced node.
 
 The parent restriction uses the live Stack depth, not the configured Root Node ID. A node started as the first level with `scene_runtime_start("node_id")` therefore cannot REPLACE either, and the Runtime reports a clear error. REPLACE does not use a static Parent field and does not restrict destinations by folder.
 
@@ -381,6 +437,8 @@ The installer may update:
 ```text
 .scene-node-editor/EDITOR/
 .scene-node-editor/AI_CONTEXT.md
+.scene-node-editor/docs/zh-TW/*.md
+.scene-node-editor/docs/en/*.md
 game/FRAMEWORK/runtime.rpy
 game/FRAMEWORK/option_renderer.rpy
 啟動 Scene Node 編輯器.command

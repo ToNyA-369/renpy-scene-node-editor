@@ -1,13 +1,13 @@
 # Scene Node Editor user guide
 
-[繁體中文](../zh-TW/USER_GUIDE.md) · [English](USER_GUIDE.md) · [Home](../../README.en.md)
+[繁體中文](../zh-TW/USER_GUIDE.md) · [English](USER_GUIDE.md) · [Home](../../EDITOR/README.en.md)
 
 This guide defines the editor's scope and its seven workspaces. If you do not yet have a playable flow, start with [Build your first project](FIRST_PROJECT.md).
 
 ## Working model
 
 ```text
-Input source → Trigger → Event → Effects → Content → End up
+Input source → Trigger → Event → Content → Effects → End up
 ```
 
 Input sources are Option, Keyboard, Mouse, and three Auto phases. A Trigger only describes what happened; the current Scene Node and Global Node Event Pools decide the reaction together.
@@ -32,6 +32,8 @@ A Scene Node is one unit of player interaction. Each node owns:
 - Its own Options, Event Pool, and Content files.
 
 ROOT is the Runtime entry node. Select another root before deleting it. A node cannot be deleted while an Event still references it as Next Node.
+
+Real Scene Nodes can be reordered by dragging the whole row. Dwell over another Node for about half a second; a framed group reservation opens below that card, and releasing creates a single-level group just like the Event Pool. Nodes cross group frames directly to move in or out; blank space beside a group name moves the whole group, and a one-Node group dissolves automatically. Groups are collapsed by default and expand on hover, keyboard focus, or drag entry. Reordering inside a group keeps it open until the pointer actually leaves, while grabbing the whole group continuously contracts its floating preview from the current expanded height to the heading. The Global Node remains fixed at the top and does not participate. `Group` and `Order` affect authoring presentation only; they do not change ROOT, GOTO / REPLACE, graph depth, or Runtime execution.
 
 Nodes do not store a Screen. Define HUDs, scene shells, and other Screens in creator-owned `.rpy`, then control them from Content with native Ren'Py `show screen`, `hide screen`, or `call screen`.
 
@@ -65,7 +67,9 @@ An Event is the current node's reaction to a Trigger:
 
 The UI calls the source `Option`; the technical format remains `Action:<id>`. The Event picker lists Triggers registered by the current authoring scope's Options. A Trigger authored on the Global Node is available during every real-node interaction.
 
-The Event Pool uses one level of groups but keeps one full-width Add Event button; new Events appear visually ungrouped. While dragging, the current insertion gap follows the pointer and nearby Events or group blocks move up or down to make room. The preview stays attached to every pointer update while layout work is coalesced to one update per animation frame. A small midpoint hysteresis prevents insertion flip-flop, and approaching the list edges scrolls progressively without releasing the item. The flow keeps natural trailing space, so an Event can be placed after a bottommost group. Crossing out of a group returns the Event to the loose ordering flow, while crossing into another group inserts it there; no dedicated ungroup target is required. Dwell over another Event's current bounds until the group frame expands, then release to create a group. If live reflow moves that Event away from the pointer, the grouping intent is cancelled immediately. Groups are collapsed by default to a compact name field and item count, and expand on pointer hover or keyboard focus. The unmarked blank space beside the name drags the entire group as one ordering block and collapses its contents as the drag starts. A group dissolves automatically when one Event remains. Group names are edited directly and order is stored in Editor-only `Order` metadata. Successful drags do not show a toast; failures restore the previous layout and remain visible.
+The Event Pool uses one level of groups but keeps one full-width Add Event button; new Events appear visually ungrouped. While dragging, the current insertion gap follows the pointer and nearby Events or group blocks move up or down to make room. The preview stays attached to every pointer update while layout work is coalesced to one update per animation frame. A small midpoint hysteresis prevents insertion flip-flop, and approaching the list edges scrolls progressively without releasing the item. The flow keeps natural trailing space, so an Event can be placed after a bottommost group. Crossing out of a group returns the Event to the loose ordering flow, while crossing into another group inserts it there; no dedicated ungroup target is required. Dwell over another ungrouped Event's current bounds for about half a second; a framed group reservation opens below it before release. If live reflow moves that Event away from the pointer, the grouping intent is cancelled immediately. Groups are collapsed by default to a compact name field and item count, and expand on pointer hover or keyboard focus. Reordering inside a group keeps it open until the pointer leaves. The unmarked blank space beside the name drags the entire group as one ordering block, with its floating preview continuously contracting from the expanded contents to the heading. A group dissolves automatically when one Event remains. Group names are edited directly and order is stored in Editor-only `Order` metadata. Successful drags do not show a toast; failures restore the previous layout and remain visible.
+
+Conditions, Effects, weighted Content entries, and weighted Next Node entries are presented as discrete cards. Drag a card's perimeter or inter-field whitespace to reorder it; inputs and remove buttons remain interactive, and this flow never creates groups. Conditions must still all pass. Effects execute in saved array order after Content returns. Weight-entry order affects Editor presentation only, not probability.
 
 Picture and Preview Background images are listed only from `game/images/`; Options Hover Sound and Click Sound are listed only from `game/audio/`. You may organize assets in subdirectories: the Editor preserves that hierarchy in the picker but shows only the filename after selection. Write game scenes, BGM, SE, transitions, and fades in Content with native Ren'Py syntax.
 
@@ -100,6 +104,14 @@ The three Element types are:
 
 Form mode edits Name, Text, Trigger, images, and sounds. Canvas mode edits position, size, layer, Hover, colors, and visual details.
 
+The Element sidebar and TEXTBOX Items in form mode can be reordered directly without a separate handle or grouping behavior. A TEXTBOX Item's whole card is the drag surface; only its remove button remains an independent control. Element array order is persisted and acts as the stable tie-breaker for equal Z Order; explicit Z Order remains the primary canvas-layer control. TEXTBOX Item order also determines game display and staggered entrance order.
+
+Canvas mode keeps the preview and Inspector visible together at an approximate 4:3 width ratio. The Inspector header keeps the current Element, type, appearance summary, and Layout / Style / Effects / Item categories visible while one focused control set appears below; there are no nested disclosure cards or separate appearance page. Selecting a Text Box Item on the canvas opens that Item category directly, and color, typography, or effect changes remain visible on the canvas while editing. Profiles are individual JSON files under `game/DATA/TEXTBOX_PROFILES/` and provide base colors and text styling plus six optional features: hover accent, hover text color, Item border, text shadow, text outline, and staggered item entrance. The same profile can be reused by multiple Text Boxes in any Scene Node or Global Options scope; updating it updates every reference that has not overridden that value.
+
+After applying a profile, the current Text Box may still enable or disable each exposed feature and change colors or typography as local overrides. Item Style Override remains the final layer. Clear Local Overrides returns the Text Box to the shared profile, while detaching the profile materializes the currently resolved style so its appearance does not jump. Referenced profiles cannot be deleted. A missing or manually damaged file does not block Options loading: Runtime falls back to the Text Box's inline `Style`, and project validation reports the problem.
+
+When a Text Box has local overrides, the Appearance section shows their count explicitly; choose Use Profile Appearance to clear them and follow the shared profile again. Every new Scene Runtime session also reloads project data and profiles, so starting the game again from the main menu picks up the latest Editor save.
+
 Every Element has an `Availability` mode:
 
 - `Always`: persistently visible.
@@ -118,6 +130,10 @@ Options have one Interaction lifecycle. Returning a Trigger closes the screen; R
 ## Content
 
 Content is native `.rpy` managed for location and references by the editor. Creators still write dialogue, characters, backgrounds, audio, transitions, ATL, and custom Python inside labels.
+
+The Content workspace includes an offline Ren'Py code editor built from the syntax rules and snippets in Ren'Py's official VS Code extension. It provides syntax colors, line numbers, bracket matching, folding, search, four-space indentation, current-node label suggestions, and project image/audio suggestions. This is an authoring aid, not a replacement for Ren'Py lint or a real game run. If the enhanced editor cannot initialize, the basic text editor remains available automatically.
+
+Content files in the same authoring scope can be reordered by dragging their whole row in the left list. This changes Editor presentation only and does not rewrite `.rpy` labels or Runtime call order. The Textbox appearance-profile manager uses the same ordering gesture.
 
 ```renpy
 label content_example:
@@ -141,6 +157,8 @@ Stats are numbers with `Init`, `Min`, and `Max`, organized by an authoring-only 
 
 Memory Banks store tags. Conditions use `has` / `not_has`; Effects use `add` / `remove` / `clear`.
 
+Memory Bank rows can be reordered from inter-field whitespace. The editor saves and restores their presentation order through object-key insertion order in `Memories.json`; this does not change Bank IDs, Runtime APIs, or saved-game contents, and it never creates groups.
+
 The default `Memory` bank cannot be deleted and also tracks Once Events. Custom banks do not reset daily or weekly automatically; call clear explicitly from your own time flow.
 
 ## Graph
@@ -156,6 +174,8 @@ The GOTO structure reachable from ROOT forms a primary tree ordered by stable Na
 Node radius still derives from the cycle-safe spatial demand of unique descendants. Direct children contribute most, deeper descendants decay by level, and the result is logarithmically compressed so hubs remain recognizable without becoming oversized. This metric changes only dot size, not position. The same data and ROOT always produce the same coordinates, and waiting or dragging cannot rearrange the whole graph.
 
 Each time the graph opens, edges extend and nodes appear in stages from ROOT according to formal depth and local relationship order. After the entrance completes, nodes breathe slowly around their structural anchors. Real GOTO / REPLACE neighbors pass a small amount of visual momentum through weak springs, while nodes with nearby anchors apply slight symmetric repulsion, so connected branches influence one another without moving in lockstep. Management and Global relationships do not participate in this local physics, total displacement is hard-capped at 7 graph units per node, and motion cannot accumulate or alter depth and swimlanes. Routes follow the visible nodes, but interaction hit targets remain fixed at structural anchors. Beginning a drag, pan, zoom, or keyboard action finishes the entrance immediately. Both entrance and idle motion are disabled when the system prefers reduced motion.
+
+For large projects, layout and edge-crossing diagnostics run in the background, and an unchanged topology reuses its completed layout. Idle node motion stops completely after leaving Graph or placing the browser in the background, then resumes only when Graph is visible again. These optimizations reduce switching stalls and resource use without changing layout results or saving node positions.
 
 The canvas can still be panned in any direction and the zoom range accommodates large projects. The background draws no depth color bands, column labels, or interaction legend; depth is expressed only by the nodes' overall left-to-right position. The initial view and Show Entire Graph button fit the current graph bounds. Node Names compensate for zoom to retain an approximately constant readable screen size, then fade with the zoom once nodes become too small to distinguish clearly, leaving only nodes and connections in the distant overview. They return when the canvas is enlarged again. Zoom around the pointer for local inspection, then follow the flow across the project.
 

@@ -59,7 +59,7 @@
   function removeWeightedChoice(value, index) {
     const entries = choiceEntries(value);
     entries.splice(Number(index), 1);
-    return Object.fromEntries(entries);
+    return entries.length ? Object.fromEntries(entries) : null;
   }
 
   function addWeightedChoice(value, choices, fallbackId) {
@@ -120,7 +120,7 @@
         const type = normalizeRuleType(condition.type);
         const isMemory = type === "memory";
         return `
-          <div class="repeat-row condition-row" data-index="${index}" data-condition-type="${escapeHtml(type)}">
+          <div class="repeat-row condition-row list-reorder-item" data-index="${index}" data-reorder-id="${index}" data-condition-type="${escapeHtml(type)}" aria-grabbed="false">
             <label class="field"><span class="visually-hidden">${tr("條件類型")}</span><select name="conditionType" aria-label="${tr("條件類型")}">${optionTags(CONDITION_TYPES, type)}</select></label>
             ${isMemory ? `
               <label class="field"><span class="visually-hidden">${tr("記憶庫")}</span><select name="conditionBank" aria-label="${tr("記憶庫")}">${namedOptionTags(memoryChoices(), condition.bank || "memory")}</select></label>
@@ -146,7 +146,7 @@
         const opItems = effectOperators(type);
         if (isOption) {
           return `
-            <div class="repeat-row effect-row option-effect-row" data-index="${index}" data-effect-type="${escapeHtml(type)}">
+            <div class="repeat-row effect-row option-effect-row list-reorder-item" data-index="${index}" data-reorder-id="${index}" data-effect-type="${escapeHtml(type)}" aria-grabbed="false">
               <label class="field option-effect-type-field"><span class="visually-hidden">${tr("效果類型")}</span><select name="effectType" aria-label="${tr("效果類型")}">${optionTags(effectTypeChoices(), type)}</select></label>
               <label class="field option-effect-target-field"><span class="visually-hidden">${tr("Option 目標")}</span><select name="effectOptionTarget" aria-label="${tr("Option 目標")}">${optionEffectOptionTags(effect)}</select></label>
               <label class="field option-effect-operation-field"><span class="visually-hidden">${tr("操作")}</span><select name="effectOp" aria-label="${tr("操作")}">${optionTags(opItems, effect.op)}</select></label>
@@ -161,7 +161,7 @@
           ? `<select name="effectId" aria-label="Stat">${namedOptionTags(statChoices(), effect.id)}</select>`
           : `<select name="effectBank" aria-label="${tr("記憶庫")}">${namedOptionTags(memoryChoices(), effect.bank || "memory")}</select>`;
         return `
-          <div class="repeat-row effect-row" data-index="${index}" data-effect-type="${escapeHtml(type)}">
+          <div class="repeat-row effect-row list-reorder-item" data-index="${index}" data-reorder-id="${index}" data-effect-type="${escapeHtml(type)}" aria-grabbed="false">
             <label class="field"><span class="visually-hidden">${tr("效果類型")}</span><select name="effectType" aria-label="${tr("效果類型")}">${optionTags(effectTypeChoices(), type)}</select></label>
             <label class="field"><span class="visually-hidden">${isStat ? "Stat" : tr("記憶庫")}</span>${resourceField}</label>
             <label class="field"><span class="visually-hidden">${tr("操作")}</span><select name="effectOp" aria-label="${tr("操作")}">${optionTags(opItems, effect.op)}</select></label>
@@ -181,7 +181,7 @@
           ? contentPickerHtml(id, index)
           : `<label class="field"><span class="visually-hidden">${tr("節點名稱")}</span><select name="nextWeightedId" aria-label="${tr("節點名稱")}">${namedOptionTags(choices, id)}</select></label>`;
         return `
-          <div class="repeat-row weight-row ${kind === "content" ? "content-weight-row" : ""}" data-index="${index}">
+          <div class="repeat-row weight-row list-reorder-item ${kind === "content" ? "content-weight-row" : ""}" data-index="${index}" data-reorder-id="${index}" data-weighted-kind="${kind}" aria-grabbed="false">
             ${choiceControl}
             <label class="field"><span class="visually-hidden">Weight</span><input name="${kind}WeightedValue" aria-label="${tr("權重")}" type="number" min="0.0001" step="any" value="${escapeHtml(weight)}"></label>
             <button class="row-button" type="button" data-remove-weighted="${kind}:${index}" title="${tr("移除項目")}" aria-label="${tr("移除項目")}">×</button>

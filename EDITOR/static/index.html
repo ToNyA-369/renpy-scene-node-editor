@@ -7,6 +7,7 @@
   <title>Scene Node Editor</title>
   <link rel="stylesheet" href="/css/tokens.css">
   <link rel="stylesheet" href="/css/base.css">
+  <link rel="stylesheet" href="/vendor/content_editor.css">
   <link rel="stylesheet" href="/styles.css">
 </head>
 <body>
@@ -179,6 +180,31 @@
     </form>
   </dialog>
 
+  <dialog class="dialog textbox-profile-dialog" id="textboxProfileDialog">
+    <form id="textboxProfileForm">
+      <div class="dialog-header">
+        <div>
+          <span class="section-kicker">TEXTBOX</span>
+          <h2 data-i18n="外觀設定檔">外觀設定檔</h2>
+        </div>
+        <button class="icon-button" type="button" data-close-dialog="textboxProfileDialog" title="關閉" aria-label="關閉" data-i18n-title="關閉" data-i18n-aria-label="關閉">×</button>
+      </div>
+      <div class="dialog-body textbox-profile-body">
+        <aside class="textbox-profile-sidebar">
+          <button class="quiet-button compact add-button" id="newTextboxProfile" type="button" data-i18n="新增設定檔">新增設定檔</button>
+          <div class="subnav-list" id="textboxProfileList"></div>
+        </aside>
+        <section class="textbox-profile-editor" id="textboxProfileEditor"></section>
+      </div>
+      <div class="dialog-actions textbox-profile-actions">
+        <button class="danger-button" id="deleteTextboxProfile" type="button" data-i18n="刪除設定檔">刪除設定檔</button>
+        <span class="dialog-action-spacer"></span>
+        <button class="quiet-button" type="button" data-close-dialog="textboxProfileDialog" data-i18n="取消">取消</button>
+        <button class="primary-button" id="saveTextboxProfile" type="submit" data-i18n="儲存設定檔">儲存設定檔</button>
+      </div>
+    </form>
+  </dialog>
+
   <datalist id="statNames"></datalist>
   <datalist id="nodeNames"></datalist>
   <datalist id="contentNames"></datalist>
@@ -193,10 +219,15 @@
   <script src="/js/core/state_rule_contract.js" defer></script>
   <script src="/js/ui/choice_picker.js" defer></script>
   <script src="/js/ui/group_drag.js" defer></script>
+  <script src="/js/ui/list_reorder.js" defer></script>
   <script src="/js/workspaces/graph_model.js" defer></script>
+  <script src="/js/workspaces/graph_layout_client.js" defer></script>
+  <script src="/js/workspaces/textbox_profiles.js" defer></script>
+  <script src="/js/workspaces/content_editor_support.js" defer></script>
   <script src="/js/workspaces/state_editor.js" defer></script>
   <script src="/js/workspaces/event_editor.js" defer></script>
   <script src="/js/core/autosave_coordinator.js" defer></script>
+  <script src="/vendor/content_editor.js" defer></script>
   <script src="/app.js" defer></script>
 </body>
 </html>

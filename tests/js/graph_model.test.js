@@ -543,6 +543,26 @@ test("large structured layouts remain finite and produce complete view bounds", 
   assert.ok(layout.columns.length > 3);
 });
 
+test("large detached node sets are placed in one bounded pass", () => {
+  const detachedNodes = Array.from({ length: 1200 }, (_, index) => ({
+    id: index === 0 ? "root" : `detached_${String(index).padStart(4, "0")}`,
+    name: `Node ${String(index).padStart(4, "0")}`,
+  }));
+  const layout = graph.layout(detachedNodes, [], "root");
+  const compact = graph.compactLayout(layout);
+
+  assert.equal(layout.positions.size, detachedNodes.length);
+  assert.equal(layout.detachedNodeIds.size, detachedNodes.length - 1);
+  assert.equal(layout.columns.length, 1);
+  assert.equal(compact.positions.size, detachedNodes.length);
+  assert.equal(compact.hierarchyDepths, undefined);
+  assert.deepEqual(graph.viewBounds(compact), graph.viewBounds(layout));
+  layout.positions.forEach((position) => {
+    assert.ok(Number.isFinite(position.x));
+    assert.ok(Number.isFinite(position.y));
+  });
+});
+
 test("nodes outside ROOT reachability are separated into a detached region", () => {
   const detachedNodes = ["root", "child", "island", "island_child"].map((id) => ({ id, name: id }));
   const relationships = graph.relationships(detachedNodes, [

@@ -76,6 +76,7 @@ test("weighted Event choices preserve string and map representations", () => {
   assert.deepEqual(editor.readChoice(weightedForm, "next"), { root: 1, branch: 2.5 });
   assert.deepEqual(SceneEventEditor.choiceEntries("intro"), [["intro", 1]]);
   assert.deepEqual(SceneEventEditor.removeWeightedChoice({ root: 1, branch: 2 }, 0), { branch: 2 });
+  assert.equal(SceneEventEditor.removeWeightedChoice("show_intro", 0), null);
   assert.deepEqual(
     SceneEventEditor.addWeightedChoice("root", [{ id: "root" }, { id: "branch" }], "missingNode"),
     { root: 1, branch: 1 },

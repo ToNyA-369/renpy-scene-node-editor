@@ -1,6 +1,6 @@
 # Build your first Scene Node project
 
-[繁體中文](../zh-TW/FIRST_PROJECT.md) · [English](FIRST_PROJECT.md) · [Home](../../README.en.md)
+[繁體中文](../zh-TW/FIRST_PROJECT.md) · [English](FIRST_PROJECT.md) · [Home](../../EDITOR/README.en.md)
 
 This tutorial builds a minimal complete interaction: the player sees “Open the door”, selecting it increments an action counter, plays Content, and moves to a second node.
 

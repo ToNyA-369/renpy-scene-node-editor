@@ -9,6 +9,25 @@ import app  # noqa: E402
 
 
 class OptionSchemaTests(unittest.TestCase):
+    def test_element_and_textbox_item_array_order_is_preserved(self):
+        options = app.validate_options({
+            "Elements": [
+                {"ID": "front", "Type": "HITBOX", "Trigger": "Action:front"},
+                {
+                    "ID": "actions",
+                    "Type": "TEXTBOX",
+                    "Items": [
+                        {"ID": "second", "Trigger": "Action:second"},
+                        {"ID": "first", "Trigger": "Action:first"},
+                    ],
+                },
+                {"ID": "back", "Type": "HITBOX", "Trigger": "Action:back"},
+            ],
+        })
+
+        self.assertEqual([element["ID"] for element in options["Elements"]], ["front", "actions", "back"])
+        self.assertEqual([item["ID"] for item in options["Elements"][1]["Items"]], ["second", "first"])
+
     def test_option_schema_has_no_lifecycle_field(self):
         options = app.default_options()
         options["Lifecycle"] = "NODE"

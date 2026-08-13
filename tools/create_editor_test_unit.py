@@ -257,7 +257,7 @@ def textbox_element(
 
 def options_document(elements=None):
     return {
-        "Version": 2,
+        "Version": 3,
         "Canvas": {
             "Width": 1920,
             "Height": 1080,

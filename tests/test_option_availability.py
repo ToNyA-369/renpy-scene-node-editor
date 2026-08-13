@@ -57,7 +57,7 @@ class OptionAvailabilitySchemaTest(unittest.TestCase):
             "Elements": [textbox(availability=None, item_availability=None)],
         })
 
-        self.assertEqual(result["Version"], 2)
+        self.assertEqual(result["Version"], 3)
         self.assertEqual(result["Elements"][0]["Availability"], "ALWAYS")
         self.assertEqual(result["Elements"][0]["Items"][0]["Availability"], "ALWAYS")
 

@@ -1,0 +1,430 @@
+{
+  "information_for_contributors": [
+    "This file is generated from syntaxes/renpy.screen.tmLanguage.yaml. Please edit that file instead.",
+    "Please remember to regenerate the ts token patterns using the 'syntax-to-token-pattern.py' python script"
+  ],
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "Ren'Py Screen",
+  "scopeName": "source.renpy.screen",
+  "patterns": [
+    {
+      "include": "#screen-language"
+    }
+  ],
+  "repository": {
+    "builtin-screens": {
+      "name": "support.function.builtin.screen.renpy",
+      "match": "(?<!\\.)\\b(?:start|quit|after_load|splashscreen|before_main_menu|main_menu|after_warp|hide_windows)\\b"
+    },
+    "screen-def-name": {
+      "comment": "TODO: Should combine this with label-def-name",
+      "patterns": [
+        {
+          "include": "source.renpy.python#builtin-possible-callables"
+        },
+        {
+          "include": "#builtin-screens"
+        },
+        {
+          "match": "(?<=^|[ \\t])(\\b(?:[a-zA-Z_]\\w*)\\b)?(\\.)?(\\b(?:[a-zA-Z_]\\w*)\\b)",
+          "captures": {
+            "1": {
+              "name": "entity.name.function.renpy"
+            },
+            "2": {
+              "name": "punctuation.separator.dot.renpy"
+            },
+            "3": {
+              "name": "entity.name.function.renpy"
+            }
+          }
+        }
+      ]
+    },
+    "screen-build-in-properties": {
+      "patterns": [
+        {
+          "comment": "Special ATL keywords.",
+          "match": "\\b(?<!\\.)(?:(warp)|(circles)|(clockwise)|(counterclockwise)|(knot))\\b",
+          "captures": {
+            "1": {
+              "name": "keyword.warp.renpy"
+            },
+            "2": {
+              "name": "keyword.circles.renpy"
+            },
+            "3": {
+              "name": "keyword.clockwise.renpy"
+            },
+            "4": {
+              "name": "keyword.counterclockwise.renpy"
+            },
+            "5": {
+              "name": "keyword.knot.renpy"
+            }
+          }
+        },
+        {
+          "comment": "Special manipulation keywords",
+          "name": "keyword.control.flow.renpy",
+          "match": "\\b(?<!\\.)(?:action|at|(?:un)?hovered|alt|value|dragged|released)\\b"
+        },
+        {
+          "comment": "Special manipulation keywords",
+          "match": "\\b(?<!\\.)(key|default|input|(?:text|image)?button|grid|auto|mousearea|side|timer|[vh]?bar|action|viewport|(?:vp)?grid|imagemap|hotspot|hotbar|transclude)\\b",
+          "captures": {
+            "1": {
+              "name": "keyword.other.renpy"
+            }
+          }
+        },
+        {
+          "include": "#screen-automatic-properties"
+        },
+        {
+          "comment": "Transform properties.",
+          "name": "entity.other.attribute-name.transform.renpy support.type.property-name.transform.renpy",
+          "match": "\\b(?<!\\.)(?:_reset|additive|align|alignaround|alpha|anchor|anchorangle|anchoraround|anchorradius|angle|around|blend|blur|corner1|corner2|crop|crop_relative|debug|delay|events|fit|fps|gl_anisotropic|gl_blend_func|gl_color_mask|gl_cull_face|gl_depth|gl_drawable_resolution|gl_mipmap|gl_pixel_perfect|gl_texture_scaling|gl_texture_wrap|gl_texture_wrap_tex0|gl_texture_wrap_tex1|gl_texture_wrap_tex2|gl_texture_wrap_tex3|matrixanchor|matrixcolor|matrixtransform|maxsize|mesh|mesh_pad|nearest|offset|orientation|perspective|point_to|pos|radius|rotate|rotate_pad|shader|show_cancels_hide|size|subpixel|transform_anchor|u_lod_bias|u_renpy_alpha|u_renpy_blur_log2|u_renpy_dissolve|u_renpy_dissolve_multiplier|u_renpy_dissolve_offset|u_renpy_mask_multiplier|u_renpy_mask_offset|u_renpy_matrixcolor|u_renpy_over|u_renpy_solid_color|xalign|xanchor|xanchoraround|xaround|xcenter|xoffset|xpan|xpos|xrotate|xsize|xtile|xycenter|xysize|xzoom|yalign|yanchor|yanchoraround|yaround|ycenter|yoffset|ypan|ypos|yrotate|ysize|ytile|yzoom|zoom|zpos|zrotate|zzoom)\\b"
+        }
+      ]
+    },
+    "screen-automatic-properties": {
+      "comment": "Automatically replaced with a list of properties taken from keywords.py.",
+      "patterns": [
+        {
+          "name": "support.constant.property-key.renpy entity.name.tag.css.style.renpy",
+          "match": "\\b(?<!\\.)(?:action|activate_sound|activated|adjustment|allow|allow_underfull|alpha|alt|alternate|alternate_keysym|arguments|arrowkeys|at|auto|bottom_to_top|cache|caption|capture|caret_blink|changed|child_size|clicked|cols|copypaste|default|default_focus|drag_handle|drag_joined|drag_name|drag_offscreen|drag_raise|draggable|dragged|dragging|drop_allowable|droppable|dropped|edgescroll|exclude|extra_alt|finished|focus|focus_mask|ground|group_alt|height|hover|hovered|icon_extra_alt|icon_group_alt|icon_tooltip|id|idle|image_style|insensitive|invert_offsets|keysym|layer|length|mask|min_overlap|modal|mouse_drop|mousewheel|multiline|pagekeys|persist|pixel_width|position|predict|prefer_screen_to_id|prefer_top|preferred_side|prefix|properties|range|rect|released|repeat|right_to_left|roll_forward|rows|scope|scrollbars|selected|selected_hover|selected_idle|selected_insensitive|sensitive|slow|slow_done|snapped|spacing|style|style_group|style_prefix|style_suffix|substitute|suffix|text_extra_alt|text_group_alt|text_style|text_tooltip|tooltip|transpose|unhovered|value|variant|width|xadjustment|xinitial|yadjustment|yinitial|zorder)\\b"
+        },
+        {
+          "name": "support.constant.property-key.renpy entity.name.tag.css.style.renpy",
+          "match": "\\b(?<!\\.)(?:|activate_|hover_|idle_|insensitive_|selected_|selected_activate_|selected_hover_|selected_idle_|selected_insensitive_)(?:_reset|additive|adjust_spacing|align|alignaround|alpha|alt|anchor|anchorangle|anchoraround|anchorradius|angle|antialias|area|around|axis|background|bar_invert|bar_resizing|bar_vertical|base_bar|black_color|blend|blur|bold|bottom_bar|bottom_gutter|bottom_margin|bottom_padding|box_align|box_justify|box_layout|box_reverse|box_wrap|box_wrap_spacing|caret|child|clipping|color|corner1|corner2|crop|crop_relative|debug|delay|drop_shadow|drop_shadow_color|emoji_font|events|first_indent|first_spacing|fit|fit_first|focus_mask|font|font_features|foreground|fps|gl_anisotropic|gl_blend_func|gl_color_mask|gl_cull_face|gl_depth|gl_drawable_resolution|gl_mipmap|gl_pixel_perfect|gl_texture_scaling|gl_texture_wrap|gl_texture_wrap_tex0|gl_texture_wrap_tex1|gl_texture_wrap_tex2|gl_texture_wrap_tex3|hinting|hyperlink_functions|instance|italic|justify|kerning|key_events|keyboard_focus|keyboard_focus_insets|language|layout|left_bar|left_gutter|left_margin|left_padding|line_leading|line_overlap_split|line_spacing|margin|matrixanchor|matrixcolor|matrixtransform|maximum|maxsize|mesh|mesh_pad|min_width|minimum|minwidth|mipmap|modal|mouse|nearest|newline_indent|offset|order_reverse|orientation|outline_scaling|outlines|padding|perspective|point_to|pos|prefer_emoji|radius|rest_indent|right_bar|right_gutter|right_margin|right_padding|rotate|rotate_pad|ruby_style|shader|shaper|show_cancels_hide|size|size_group|slow_abortable|slow_cps|slow_cps_multiplier|sound|spacing|strikethrough|subpixel|text_align|text_y_fudge|textalign|textshader|thumb|thumb_align|thumb_offset|thumb_shadow|top_bar|top_gutter|top_margin|top_padding|transform_anchor|underline|unscrollable|vertical|xalign|xanchor|xanchoraround|xaround|xcenter|xfill|xfit|xmargin|xmaximum|xminimum|xoffset|xpadding|xpan|xpos|xrotate|xsize|xspacing|xtile|xycenter|xysize|xzoom|yalign|yanchor|yanchoraround|yaround|ycenter|yfill|yfit|ymargin|ymaximum|yminimum|yoffset|ypadding|ypan|ypos|yrotate|ysize|yspacing|ytile|yzoom|zoom|zpos|zrotate|zzoom)\\b"
+        },
+        {
+          "name": "support.constant.property-key.renpy entity.name.tag.css.style.renpy",
+          "match": "\\b(?<!\\.)(?:scrollbar_|vscrollbar_)(?:|activate_|hover_|idle_|insensitive_|selected_|selected_activate_|selected_hover_|selected_idle_|selected_insensitive_)(?:align|alt|anchor|area|bar_invert|bar_resizing|bar_vertical|base_bar|bottom_bar|bottom_gutter|clipping|debug|keyboard_focus|left_bar|left_gutter|maximum|minimum|mouse|offset|pos|right_bar|right_gutter|thumb|thumb_align|thumb_offset|thumb_shadow|top_bar|top_gutter|unscrollable|xalign|xanchor|xcenter|xfill|xmaximum|xminimum|xoffset|xpos|xsize|xycenter|xysize|yalign|yanchor|ycenter|yfill|ymaximum|yminimum|yoffset|ypos|ysize)\\b"
+        },
+        {
+          "name": "support.constant.property-key.renpy entity.name.tag.css.style.renpy",
+          "match": "\\b(?<!\\.)side_(?:|activate_|hover_|idle_|insensitive_|selected_|selected_activate_|selected_hover_|selected_idle_|selected_insensitive_)(?:align|alt|anchor|area|clipping|debug|maximum|minimum|offset|pos|spacing|xalign|xanchor|xcenter|xfill|xmaximum|xminimum|xoffset|xpos|xsize|xycenter|xysize|yalign|yanchor|ycenter|yfill|ymaximum|yminimum|yoffset|ypos|ysize)\\b"
+        },
+        {
+          "name": "support.constant.property-key.renpy entity.name.tag.css.style.renpy",
+          "match": "\\b(?<!\\.)text_(?:|activate_|hover_|idle_|insensitive_|selected_|selected_activate_|selected_hover_|selected_idle_|selected_insensitive_)(?:adjust_spacing|align|alt|anchor|antialias|area|axis|black_color|bold|clipping|color|debug|drop_shadow|drop_shadow_color|emoji_font|first_indent|font|font_features|hinting|hyperlink_functions|instance|italic|justify|kerning|language|layout|line_leading|line_overlap_split|line_spacing|maximum|min_width|minimum|minwidth|mipmap|newline_indent|offset|outline_scaling|outlines|pos|prefer_emoji|rest_indent|ruby_style|shaper|size|slow_abortable|slow_cps|slow_cps_multiplier|strikethrough|text_align|text_y_fudge|textalign|textshader|underline|vertical|xalign|xanchor|xcenter|xfill|xmaximum|xminimum|xoffset|xpos|xsize|xycenter|xysize|yalign|yanchor|ycenter|yfill|ymaximum|yminimum|yoffset|ypos|ysize)\\b"
+        },
+        {
+          "name": "support.constant.property-key.renpy entity.name.tag.css.style.renpy",
+          "match": "\\b(?<!\\.)viewport_(?:|activate_|hover_|idle_|insensitive_|selected_|selected_activate_|selected_hover_|selected_idle_|selected_insensitive_)(?:align|alt|anchor|area|clipping|debug|maximum|minimum|offset|pos|xalign|xanchor|xcenter|xfill|xmaximum|xminimum|xoffset|xpos|xsize|xycenter|xysize|yalign|yanchor|ycenter|yfill|ymaximum|yminimum|yoffset|ypos|ysize)\\b"
+        }
+      ]
+    },
+    "screen-simple-expression": {
+      "patterns": [
+        {
+          "include": "source.renpy#renpy-only-expressions"
+        },
+        {
+          "include": "#screen-build-in-properties"
+        },
+        {
+          "include": "source.renpy.python#member-access"
+        },
+        {
+          "include": "source.renpy.python#illegal-operator"
+        },
+        {
+          "include": "source.renpy.python#operator"
+        },
+        {
+          "include": "source.renpy.python#curly-braces"
+        },
+        {
+          "include": "source.renpy.python#item-access"
+        },
+        {
+          "include": "source.renpy.python#list"
+        },
+        {
+          "include": "source.renpy.python#odd-function-call"
+        },
+        {
+          "include": "source.renpy.python#round-braces"
+        },
+        {
+          "include": "source.renpy.python#function-call"
+        },
+        {
+          "include": "source.renpy.python#builtin-functions"
+        },
+        {
+          "include": "source.renpy.python#builtin-types"
+        },
+        {
+          "include": "source.renpy.python#builtin-exceptions"
+        },
+        {
+          "include": "source.renpy.python#magic-names"
+        },
+        {
+          "include": "source.renpy.python#special-names"
+        },
+        {
+          "include": "source.renpy.python#illegal-names"
+        },
+        {
+          "include": "source.renpy.python#special-variables"
+        },
+        {
+          "include": "source.renpy.python#ellipsis"
+        },
+        {
+          "include": "source.renpy.python#punctuation"
+        },
+        {
+          "include": "source.renpy.python#line-continuation"
+        },
+        {
+          "comment": "Tokenize identifiers",
+          "name": "variable.name.python",
+          "match": "\\b([[:alpha:]_]\\w*)\\b"
+        },
+        {
+          "include": "source.renpy#whitespace"
+        }
+      ]
+    },
+    "screen-keywords": {
+      "comment": "https://www.renpy.org/doc/html/screens.html#screen-statement",
+      "patterns": [
+        {
+          "contentName": "meta.screen.sensitive.renpy",
+          "begin": "(?<=^[ \\t]*)(sensitive)\\b[ \\t]*",
+          "beginCaptures": {
+            "1": {
+              "name": "keyword.sensitive.renpy"
+            }
+          },
+          "end": "$",
+          "patterns": [
+            {
+              "include": "#screen-simple-expression"
+            }
+          ]
+        },
+        {
+          "name": "keyword.control.flow.renpy",
+          "match": "\\b(?<!\\.)(?:showif|has|on|use)\\b"
+        },
+        {
+          "name": "keyword.other.renpy",
+          "match": "\\b(?<!\\.)(?:sensitive|tag|text|drag|draggroup|id|test|style)\\b[^\\.]"
+        },
+        {
+          "name": "entity.other.attribute-name.transform.renpy entity.name.tag.css.transform.renpy",
+          "match": "\\b(?<!\\.)(?:modal|style_group|style_prefix|zorder|tooltip|variant|layer|roll_forward)\\b"
+        },
+        {
+          "name": "keyword.other.renpy",
+          "match": "\\b(?<!\\.)(?:vbox|hbox|label|add|null)\\b"
+        }
+      ]
+    },
+    "screen-block-tester": {
+      "patterns": [
+        {
+          "contentName": "meta.screen.block.renpy",
+          "begin": "(?<=(^[ \\t]*)(?:screen|frame|fixed|window|viewport|drag|draggroup|(?:vp)?grid|vbox|hbox|imagemap)\\b.*?)(:)",
+          "beginCaptures": {
+            "2": {
+              "name": "punctuation.section.screen.begin.renpy"
+            }
+          },
+          "end": "^(?=(?!\\1)[ \\t]*[^\\s#]|\\1[^\\s#])",
+          "patterns": [
+            {
+              "include": "#screen-language"
+            }
+          ]
+        },
+        {
+          "contentName": "meta.atl.block.renpy",
+          "begin": "(?<=(^[ \\t]*)(?:text)\\b.*?)(:)",
+          "beginCaptures": {
+            "2": {
+              "name": "punctuation.section.atl.begin.renpy"
+            }
+          },
+          "end": "^(?=(?!\\1)[ \\t]*[^\\s#]|\\1[^\\s#])",
+          "patterns": [
+            {
+              "include": "#screen-language"
+            },
+            {
+              "include": "source.renpy.atl"
+            }
+          ]
+        }
+      ]
+    },
+    "screen-frame": {
+      "name": "meta.screen.frame.statement.renpy",
+      "match": "(?<=^[ \\t]*)(frame)\\b",
+      "captures": {
+        "1": {
+          "name": "keyword.frame.renpy"
+        }
+      }
+    },
+    "screen-fixed": {
+      "name": "meta.screen.fixed.statement.renpy",
+      "match": "(?<=^[ \\t]*)(fixed)\\b",
+      "captures": {
+        "1": {
+          "name": "keyword.fixed.renpy"
+        }
+      }
+    },
+    "screen-window": {
+      "name": "meta.screen.window.statement.renpy",
+      "match": "(?<=^[ \\t]*)(window)\\b",
+      "captures": {
+        "1": {
+          "name": "keyword.window.renpy"
+        }
+      }
+    },
+    "screen-text": {
+      "name": "meta.screen.text.renpy",
+      "begin": "(?<=^[ \\t]*)(text)\\b",
+      "beginCaptures": {
+        "1": {
+          "name": "keyword.text.renpy"
+        }
+      },
+      "end": "(?=:)|$",
+      "patterns": [
+        {
+          "include": "source.renpy#strings"
+        },
+        {
+          "match": "(?<=text[ \\t]*)\\b(?:[a-zA-Z_0-9]+)\\b(?=[ \\t]+|$)",
+          "name": "entity.name.type.text.renpy"
+        },
+        {
+          "include": "source.renpy#at-statement"
+        },
+        {
+          "include": "#screen-keywords"
+        },
+        {
+          "include": "#screen-simple-expression"
+        },
+        {
+          "include": "source.renpy#fallback-patterns"
+        }
+      ]
+    },
+    "screen-box": {
+      "patterns": [
+        {
+          "name": "meta.screen.vbox.statement.renpy",
+          "match": "(?<=^[ \\t]*)(vbox)\\b",
+          "captures": {
+            "1": {
+              "name": "keyword.vbox.renpy"
+            }
+          }
+        },
+        {
+          "name": "meta.screen.hbox.statement.renpy",
+          "match": "(?<=^[ \\t]*)(hbox)\\b",
+          "captures": {
+            "1": {
+              "name": "keyword.hbox.renpy"
+            }
+          }
+        }
+      ]
+    },
+    "screen": {
+      "patterns": [
+        {
+          "comment": "See https://www.renpy.org/doc/html/screens.html",
+          "contentName": "meta.screen.block.renpy",
+          "begin": "(?<=^[ \\t]*)(screen)\\b",
+          "beginCaptures": {
+            "1": {
+              "name": "storage.type.screen.renpy"
+            }
+          },
+          "end": "$|^",
+          "patterns": [
+            {
+              "include": "#screen-def-name"
+            },
+            {
+              "include": "source.renpy.python#parameters"
+            },
+            {
+              "include": "#screen-block-tester"
+            },
+            {
+              "include": "source.renpy#fallback-patterns"
+            }
+          ]
+        }
+      ]
+    },
+    "screen-fallback": {
+      "comment": "TODO: This is a temp fix for missing pattern references",
+      "patterns": [
+        {
+          "include": "source.renpy#base-patterns"
+        }
+      ]
+    },
+    "screen-language": {
+      "comment": "https://www.renpy.org/doc/html/screens.html#screen-language",
+      "patterns": [
+        {
+          "include": "source.renpy#define"
+        },
+        {
+          "include": "source.renpy#default-statement"
+        },
+        {
+          "include": "source.renpy#conditionals"
+        },
+        {
+          "include": "source.renpy#python-statements"
+        },
+        {
+          "include": "#screen-frame"
+        },
+        {
+          "include": "#screen-fixed"
+        },
+        {
+          "include": "#screen-window"
+        },
+        {
+          "include": "#screen-box"
+        },
+        {
+          "include": "#screen-text"
+        },
+        {
+          "include": "#screen-block-tester"
+        },
+        {
+          "include": "#screen-keywords"
+        },
+        {
+          "include": "#screen-simple-expression"
+        },
+        {
+          "include": "#screen-fallback"
+        }
+      ]
+    }
+  }
+}

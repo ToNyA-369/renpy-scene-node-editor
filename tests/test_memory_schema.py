@@ -23,6 +23,15 @@ class MemorySchemaTest(unittest.TestCase):
         with self.assertRaises(app.ApiError):
             app.validate_memories({"chapter": {"Name": "章節記憶"}})
 
+    def test_memory_bank_insertion_order_is_preserved_for_editor_sorting(self):
+        validated = app.validate_memories({
+            "chapter": {"Name": "章節"},
+            "memory": {"Name": "會被正規化"},
+            "session": {"Name": "階段"},
+        })
+
+        self.assertEqual(list(validated), ["chapter", "memory", "session"])
+
     def test_legacy_tag_rules_migrate_to_default_memory(self):
         condition = app.validate_condition({
             "type": "tag",

@@ -58,6 +58,10 @@ def main() -> int:
         production_js = sorted((ROOT / "EDITOR" / "static").rglob("*.js"))
         checks = [
             (
+                "Generated Editor assets",
+                [node, "tools/build_editor_assets.mjs", "--check"],
+            ),
+            (
                 "Python syntax",
                 [sys.executable, "-m", "compileall", "-q", "EDITOR", "tools", "tests"],
             ),

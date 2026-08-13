@@ -2,9 +2,18 @@
   "name": "renpy-scene-node-editor",
   "private": true,
   "scripts": {
+    "build:editor-assets": "node tools/build_editor_assets.mjs",
+    "check:editor-assets": "node tools/build_editor_assets.mjs --check",
     "test:browser": "playwright test"
   },
   "devDependencies": {
-    "@playwright/test": "1.62.1"
+    "@playwright/test": "1.62.1",
+    "@shikijs/monaco": "4.4.3",
+    "esbuild": "0.28.2",
+    "monaco-editor": "0.56.0",
+    "shiki": "4.4.3"
+  },
+  "overrides": {
+    "dompurify": "3.4.13"
   }
 }

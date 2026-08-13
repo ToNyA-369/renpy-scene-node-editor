@@ -203,7 +203,7 @@ class EditorTestUnitTest(unittest.TestCase):
             options = json.loads(
                 (game_root / "SCENENODE" / "options_lab" / "Options.json").read_text(encoding="utf-8")
             )
-            self.assertEqual(options["Version"], 2)
+            self.assertEqual(options["Version"], 3)
             self.assertEqual(
                 [element["Type"] for element in options["Elements"]],
                 ["TEXTBOX", "TEXTBOX", "PICTURE", "HITBOX"],

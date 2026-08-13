@@ -131,9 +131,19 @@ class RuntimeLifecycleTest(unittest.TestCase):
 
         self.assertIn('call scene_run_lifecycle(_scene_node_id, "Auto:Enter")', source)
         self.assertIn('$ _scene_event = scene_select_event(_scene_node_id, "Auto:Node")', source)
+        lifecycle_block = source.split("label scene_run_lifecycle", 1)[1].split("label scene_runtime_start", 1)[0]
+        self.assertLess(
+            lifecycle_block.index('call expression _scene_lifecycle_prepared["content"]'),
+            lifecycle_block.index("$ scene_apply_prepared(_scene_lifecycle_prepared)"),
+        )
+        runtime_block = source.split("label scene_runtime_start", 1)[1]
+        content_call = runtime_block.index('call expression _scene_prepared["content"]')
+        apply_call = runtime_block.index("$ scene_apply_prepared(_scene_prepared)")
         validate_call = source.index("$ scene_validate_prepared_transition(_scene_prepared)")
         exit_call = source.index('call scene_run_lifecycle(_scene_node_id, "Auto:Exit")')
         resolve_call = source.index("$ scene_resolve_prepared(_scene_prepared)")
+        self.assertLess(content_call, apply_call)
+        self.assertLess(apply_call, runtime_block.index("$ scene_validate_prepared_transition(_scene_prepared)"))
         self.assertLess(validate_call, exit_call)
         self.assertLess(exit_call, resolve_call)
         self.assertIn('$ _scene_enter_pending = _scene_transition in ("GOTO", "REPLACE")', source)

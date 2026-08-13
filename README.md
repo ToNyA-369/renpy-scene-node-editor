@@ -43,6 +43,8 @@ python3 "/path/to/RenPyProject/.scene-node-editor/EDITOR/app.py" \
   --project "/path/to/RenPyProject/game"
 ```
 
+安裝與更新也會同步中英文創作者文件到 `.scene-node-editor/`，讓 AI 協作工具可先讀取 `AI_CONTEXT.md`，再依需求查閱本機 User Guide 或 Reference，不必依賴網路。
+
 ## 遊戲流程模型
 
 ```mermaid

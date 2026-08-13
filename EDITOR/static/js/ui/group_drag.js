@@ -5,7 +5,7 @@
   if (typeof module === "object" && module.exports) module.exports = api;
   if (root) root.SceneGroupDrag = api;
 })(typeof globalThis !== "undefined" ? globalThis : this, () => {
-  const DEFAULT_DWELL_MS = 650;
+  const DEFAULT_DWELL_MS = 500;
 
   function insertionPosition(pointerY, rect, previousPosition = null, hysteresisRatio = 0.16) {
     const center = rect.top + rect.height / 2;
@@ -321,14 +321,16 @@
       }, dwellMs);
     };
 
-    const createPreview = (item, rect) => {
+    const createPreview = (item, rect, { groupBlock = false, collapsedHeight = rect.height } = {}) => {
       const wrapper = document.createElement("div");
       wrapper.className = "group-drag-preview";
+      if (groupBlock) wrapper.classList.add("is-group-block-preview");
       wrapper.style.width = `${rect.width}px`;
       wrapper.style.height = `${rect.height}px`;
       const clone = item.cloneNode(true);
       clone.removeAttribute("id");
       clone.classList.remove("is-group-candidate", "is-group-ready", "is-group-dragging-item");
+      if (groupBlock) clone.classList.add("is-group-preview-open");
       clone.setAttribute("aria-hidden", "true");
       clone.querySelectorAll("[id]").forEach((element) => element.removeAttribute("id"));
       clone.querySelectorAll("input, button, select, textarea, [tabindex]").forEach((element) => {
@@ -337,6 +339,15 @@
       });
       wrapper.appendChild(clone);
       document.body.appendChild(wrapper);
+      if (groupBlock) {
+        const collapse = () => {
+          clone.classList.remove("is-group-preview-open");
+          clone.classList.add("is-group-block-dragging");
+          wrapper.style.height = `${collapsedHeight}px`;
+        };
+        if (reducedMotion) collapse();
+        else window.requestAnimationFrame(collapse);
+      }
       return wrapper;
     };
 
@@ -458,12 +469,16 @@
       window.getSelection?.()?.removeAllRanges();
       previousDocumentUserSelect = document.documentElement.style.userSelect;
       document.documentElement.style.userSelect = "none";
-      if (press.kind === "group") source.classList.add("is-group-block-dragging");
       const rect = source.getBoundingClientRect();
+      const groupItems = press.kind === "group" ? groupList(source) : null;
+      const collapsedHeight = groupItems
+        ? Math.max(38, rect.height - groupItems.getBoundingClientRect().height)
+        : rect.height;
       press.handle.setPointerCapture?.(press.pointerId);
       press.grabX = press.startX - rect.left;
       press.grabY = press.startY - rect.top;
-      preview = createPreview(source, rect);
+      preview = createPreview(source, rect, { groupBlock: press.kind === "group", collapsedHeight });
+      if (press.kind === "group") source.classList.add("is-group-block-dragging");
       source.classList.add("is-group-dragging-item");
       source.style.visibility = "hidden";
       source.setAttribute("aria-grabbed", "true");

@@ -158,9 +158,11 @@
     const visited = new Set([nodeId]);
     const depths = new Map();
     const queue = [...(children.get(nodeId) || [])].map((childId) => ({ nodeId: childId, depth: 1 }));
+    let queueIndex = 0;
     let inheritedLoad = 0;
-    while (queue.length) {
-      const current = queue.shift();
+    while (queueIndex < queue.length) {
+      const current = queue[queueIndex];
+      queueIndex += 1;
       if (visited.has(current.nodeId)) continue;
       visited.add(current.nodeId);
       depths.set(current.nodeId, current.depth);
@@ -203,8 +205,10 @@
       .forEach((gotoRelationship) => {
         const visited = new Set([gotoRelationship.target]);
         const queue = [{ nodeId: gotoRelationship.target, path: [gotoRelationship.target] }];
-        while (queue.length) {
-          const current = queue.shift();
+        let queueIndex = 0;
+        while (queueIndex < queue.length) {
+          const current = queue[queueIndex];
+          queueIndex += 1;
           for (const replaceRelationship of replaceBySource.get(current.nodeId) || []) {
             const target = replaceRelationship.target;
             if (visited.has(target)) continue;
@@ -367,8 +371,10 @@
       componentDepth.set(startComponent, 0);
       if (reachable) reachableComponents.add(startComponent);
       const queue = [startComponent];
-      while (queue.length) {
-        const sourceComponent = queue.shift();
+      let queueIndex = 0;
+      while (queueIndex < queue.length) {
+        const sourceComponent = queue[queueIndex];
+        queueIndex += 1;
         for (const relationship of outgoingComponents.get(sourceComponent) || []) {
           const targetComponent = componentForNode.get(relationship.target);
           if (componentDepth.has(targetComponent)) continue;
@@ -395,12 +401,15 @@
     while (orderedComponents.some((componentId) => !componentDepth.has(componentId))) {
       const remaining = orderedComponents.filter((componentId) => !componentDepth.has(componentId));
       const remainingSet = new Set(remaining);
-      const seed = remaining.find((componentId) => (
+      const seeds = remaining.filter((componentId) => (
         [...incomingComponents.get(componentId)].every((sourceId) => !remainingSet.has(sourceId))
-      )) || remaining[0];
-      detachedRoots.push(seed);
-      componentEntryNode.set(seed, componentMembers.get(seed)[0]);
-      growTree(seed, false);
+      ));
+      (seeds.length ? seeds : [remaining[0]]).forEach((seed) => {
+        if (componentDepth.has(seed)) return;
+        detachedRoots.push(seed);
+        componentEntryNode.set(seed, componentMembers.get(seed)[0]);
+        growTree(seed, false);
+      });
     }
     componentMembers.forEach((memberIds, componentId) => {
       const entryNodeId = componentEntryNode.get(componentId);
@@ -436,9 +445,11 @@
       if (microVisited.has(seedComponent) || !sameDepthAdjacency.get(seedComponent).length) return;
       const group = [];
       const discoverQueue = [seedComponent];
+      let discoverIndex = 0;
       microVisited.add(seedComponent);
-      while (discoverQueue.length) {
-        const componentId = discoverQueue.shift();
+      while (discoverIndex < discoverQueue.length) {
+        const componentId = discoverQueue[discoverIndex];
+        discoverIndex += 1;
         group.push(componentId);
         sameDepthAdjacency.get(componentId).forEach(({ componentId: adjacentId }) => {
           if (microVisited.has(adjacentId)) return;
@@ -456,10 +467,12 @@
         )
       ))[0];
       const rankQueue = [anchor];
+      let rankIndex = 0;
       const ranked = new Set([anchor]);
       componentMicroRanks.set(anchor, 0);
-      while (rankQueue.length) {
-        const componentId = rankQueue.shift();
+      while (rankIndex < rankQueue.length) {
+        const componentId = rankQueue[rankIndex];
+        rankIndex += 1;
         sameDepthAdjacency.get(componentId).forEach(({ componentId: adjacentId }) => {
           if (ranked.has(adjacentId)) return;
           ranked.add(adjacentId);
@@ -467,7 +480,9 @@
           rankQueue.push(adjacentId);
         });
       }
-      const maximumRank = Math.max(0, ...group.map((componentId) => componentMicroRanks.get(componentId)));
+      const maximumRank = group.reduce((maximum, componentId) => (
+        Math.max(maximum, componentMicroRanks.get(componentId))
+      ), 0);
       group.forEach((componentId) => {
         if (!maximumRank) return;
         const ratio = componentMicroRanks.get(componentId) / maximumRank;
@@ -534,9 +549,11 @@
       const memberSet = new Set(memberIds);
       const queue = [entryNodeId];
       const ordered = [];
+      let queueIndex = 0;
       replacementRanks.set(entryNodeId, 0);
-      while (queue.length) {
-        const nodeId = queue.shift();
+      while (queueIndex < queue.length) {
+        const nodeId = queue[queueIndex];
+        queueIndex += 1;
         ordered.push(nodeId);
         (replaceAdjacency.get(nodeId) || []).forEach(({ nodeId: adjacentId }) => {
           if (!memberSet.has(adjacentId) || replacementRanks.has(adjacentId)) return;
@@ -549,9 +566,10 @@
         replacementRanks.set(nodeId, 0);
         ordered.push(nodeId);
       });
+      const orderedIndex = new Map(ordered.map((nodeId, index) => [nodeId, index]));
       memberIds.sort((left, right) => (
         replacementRanks.get(left) - replacementRanks.get(right)
-        || ordered.indexOf(left) - ordered.indexOf(right)
+        || orderedIndex.get(left) - orderedIndex.get(right)
         || compareNodes(nodeById.get(left), nodeById.get(right))
       ));
       replacementOrder.set(componentId, ordered);
@@ -596,10 +614,12 @@
       });
     });
 
-    const maxDepth = Math.max(0, ...levels.values());
-    const rightmostCenter = Math.max(GRAPH_MARGIN_X, ...[...positions].map(([nodeId, position]) => (
-      position.x + nodeSizes.get(nodeId).radius
-    )));
+    let maxDepth = 0;
+    levels.forEach((depth) => { maxDepth = Math.max(maxDepth, depth); });
+    let rightmostCenter = GRAPH_MARGIN_X;
+    positions.forEach((position, nodeId) => {
+      rightmostCenter = Math.max(rightmostCenter, position.x + nodeSizes.get(nodeId).radius);
+    });
     const width = Math.max(1200, rightmostCenter + GRAPH_MARGIN_X);
     const height = Math.max(820, cursorY + GRAPH_MARGIN_Y);
     const rootRadius = nodeSizes.get(configuredRoot)?.radius || BASE_NODE_RADIUS;
@@ -805,7 +825,12 @@
       let changed = tick(1);
       const strength = Math.max(0, Math.min(1, motionStrength));
       const seconds = timestamp / 1000;
-      const hasPinnedParticle = [...particles.values()].some((particle) => Boolean(particle.pinned));
+      let hasPinnedParticle = false;
+      for (const particle of particles.values()) {
+        if (!particle.pinned) continue;
+        hasPinnedParticle = true;
+        break;
+      }
       particles.forEach((particle, nodeId) => {
         const profile = motionProfiles.get(nodeId);
         if (particle.pinned || strength === 0) {
@@ -929,12 +954,13 @@
     }
 
     function isActive() {
-      return [...particles].some(([nodeId, particle]) => {
+      for (const [nodeId, particle] of particles) {
         if (particle.pinned) return true;
         const anchor = anchors.get(nodeId);
-        return Math.hypot(anchor.x - particle.x, anchor.y - particle.y) >= 0.08
-          || Math.hypot(particle.vx, particle.vy) >= 0.08;
-      });
+        if (Math.hypot(anchor.x - particle.x, anchor.y - particle.y) >= 0.08
+          || Math.hypot(particle.vx, particle.vy) >= 0.08) return true;
+      }
+      return false;
     }
 
     const crossingCount = () => countEdgeCrossings(graphRelationships, graphLayout);
@@ -985,6 +1011,26 @@
     return {
       x: position.x + radius,
       y: position.y + radius,
+    };
+  }
+
+  function compactLayout(graphLayout) {
+    return {
+      algorithm: graphLayout.algorithm,
+      nodeWidth: graphLayout.nodeWidth,
+      nodeHeight: graphLayout.nodeHeight,
+      nodeSizes: graphLayout.nodeSizes,
+      detachedNodeIds: graphLayout.detachedNodeIds,
+      detachedStartY: graphLayout.detachedStartY,
+      positions: graphLayout.positions,
+      levels: graphLayout.levels,
+      routes: graphLayout.routes,
+      revealSteps: graphLayout.revealSteps,
+      columns: graphLayout.columns,
+      center: graphLayout.center,
+      centerNodeId: graphLayout.centerNodeId,
+      width: graphLayout.width,
+      height: graphLayout.height,
     };
   }
 
@@ -1122,6 +1168,7 @@
   }
 
   return {
+    compactLayout,
     countEdgeCrossings,
     createLayoutController,
     edgeArrowPoints,
