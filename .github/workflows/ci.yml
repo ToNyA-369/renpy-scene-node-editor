@@ -26,6 +26,9 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
+          cache: npm
+      - name: Install verification dependencies
+        run: npm ci
       - name: Run repository verification
         run: python3 tools/verify.py
       - name: Check pull request whitespace
