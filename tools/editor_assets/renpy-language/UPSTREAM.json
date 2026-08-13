@@ -1,0 +1,17 @@
+{
+  "name": "Ren'Py Language (Official)",
+  "publisher": "renpy",
+  "version": "805.1.0",
+  "source": "https://marketplace.visualstudio.com/items?itemName=renpy.language-renpy",
+  "repository": "https://github.com/renpy/vscode-language-renpy",
+  "license": "MIT",
+  "imported": [
+    "syntaxes/renpy.tmLanguage.json",
+    "syntaxes/renpy.atl.tmLanguage.json",
+    "syntaxes/renpy.python.tmLanguage.json",
+    "syntaxes/renpy.screen.tmLanguage.json",
+    "syntaxes/renpy.style.tmLanguage.json",
+    "syntaxes/renpy.test.tmLanguage.json",
+    "snippets/snippets.json"
+  ]
+}

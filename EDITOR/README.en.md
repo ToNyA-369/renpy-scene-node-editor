@@ -1,6 +1,6 @@
 # Scene Node Editor Local Help
 
-[繁體中文](README.md) · [Full English guide](https://github.com/ToNyA-369/renpy-scene-node-editor/blob/main/docs/en/USER_GUIDE.md)
+[繁體中文](README.md) · [Full English guide](../docs/en/USER_GUIDE.md)
 
 This Editor is installed inside your Ren'Py project. It manages Scene Nodes, Events, Options, Content, and game state. You still author `gui.rpy`, `screens.rpy`, characters, assets, and the actual presentation in your Ren'Py project.
 
@@ -28,7 +28,9 @@ The Editor runs only on your computer. Closing the launcher's terminal window st
 4. Connect Content and Effects with Option, Keyboard, Mouse, On Enter, On Node, or On Exit Triggers; interactive Events also define End Up.
 5. Resolve reference problems in Validation, then run the game from Ren'Py.
 
-For a complete walkthrough, read [Your First Playable Flow](https://github.com/ToNyA-369/renpy-scene-node-editor/blob/main/docs/en/FIRST_PROJECT.md).
+Content includes offline Ren'Py syntax colors, line numbers, search, folding, bracket matching, official snippets, and project-aware label/asset suggestions. It is an authoring aid; Ren'Py lint and an actual game run remain the final validation.
+
+For a complete walkthrough, read [Your First Playable Flow](../docs/en/FIRST_PROJECT.md).
 
 ## Essential concepts
 
@@ -43,7 +45,7 @@ For a complete walkthrough, read [Your First Playable Flow](https://github.com/T
 - Picture and Preview Background assets come only from `game/images/`; Options Hover Sound and Click Sound come only from `game/audio/`. Subdirectories appear as nested menus, while a selected field shows only the filename.
 - Write game backgrounds, BGM, SE, transitions, and fades with native Ren'Py inside Content labels.
 
-See the [Technical Reference](https://github.com/ToNyA-369/renpy-scene-node-editor/blob/main/docs/en/REFERENCE.md) for the data and Runtime contracts.
+See the [Technical Reference](../docs/en/REFERENCE.md) for the data and Runtime contracts.
 
 ## Saving and settings
 
@@ -66,13 +68,14 @@ Updates manage these paths:
 ```text
 .scene-node-editor/EDITOR/
 .scene-node-editor/AI_CONTEXT.md
+.scene-node-editor/docs/
 game/FRAMEWORK/runtime.rpy
 game/FRAMEWORK/option_renderer.rpy
 ```
 
 Do not place custom logic in those files. You can safely maintain your own `gui.rpy`, `screens.rpy`, other `.rpy` files, assets, and the Editor-created `DATA/`, `GLOBALNODE/`, and `SCENENODE/` content. Updates do not overwrite that creator-owned data.
 
-When using AI assistance, ask it to read `.scene-node-editor/AI_CONTEXT.md` first. Prompt examples are available in the [AI-Assisted Workflow](https://github.com/ToNyA-369/renpy-scene-node-editor/blob/main/docs/en/AI_WORKFLOW.md).
+When using AI assistance, ask it to read `.scene-node-editor/AI_CONTEXT.md` first. Prompt examples are available in the local [AI-Assisted Workflow](../docs/en/AI_WORKFLOW.md).
 
 ## Troubleshooting
 

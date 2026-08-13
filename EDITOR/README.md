@@ -1,6 +1,6 @@
 # Scene Node Editor 本機說明
 
-[English](README.en.md) · [完整中文文件](https://github.com/ToNyA-369/renpy-scene-node-editor/blob/main/docs/zh-TW/USER_GUIDE.md)
+[English](README.en.md) · [完整中文文件](../docs/zh-TW/USER_GUIDE.md)
 
 這份 Editor 已安裝在你的 Ren'Py 專案中。它用來管理 Scene Node、Event、Options、Content 與遊戲狀態；`gui.rpy`、`screens.rpy`、角色、素材與實際演出仍由你在 Ren'Py 專案中撰寫。
 
@@ -28,7 +28,9 @@ Editor 只在本機運作，關閉啟動器的終端視窗就會停止服務。
 4. 在「事件」以 Option、Keyboard、Mouse、On Enter、On Node 或 On Exit Trigger 串接 Content 與 Effects；互動事件另設定 End Up。
 5. 在「檢查」修正引用問題，再從 Ren'Py 啟動遊戲測試。
 
-需要完整教學時，請閱讀[第一個可玩流程](https://github.com/ToNyA-369/renpy-scene-node-editor/blob/main/docs/zh-TW/FIRST_PROJECT.md)。
+「演出」內建離線 Ren'Py 語法上色、行號、搜尋、摺疊、括號配對、官方片段及專案 label／素材提示；它是撰寫輔助，最後仍應由 Ren'Py lint 與實際執行驗證。
+
+需要完整教學時，請閱讀[第一個可玩流程](../docs/zh-TW/FIRST_PROJECT.md)。
 
 ## 重要概念
 
@@ -43,7 +45,7 @@ Editor 只在本機運作，關閉啟動器的終端視窗就會停止服務。
 - Picture 與 Preview Background 只從 `game/images/` 選取；Options 的 Hover Sound／Click Sound 只從 `game/audio/` 選取。子資料夾會顯示為階層選單，選定後欄位只顯示檔名。
 - 遊戲背景、BGM、SE、轉場與淡入淡出請在 Content label 使用 Ren'Py 原生語法。
 
-完整資料與 Runtime 契約請見[技術參考](https://github.com/ToNyA-369/renpy-scene-node-editor/blob/main/docs/zh-TW/REFERENCE.md)。
+完整資料與 Runtime 契約請見[技術參考](../docs/zh-TW/REFERENCE.md)。
 
 ## 儲存與設定
 
@@ -66,13 +68,14 @@ Editor 會自動儲存。切換節點、文件或工作區前，也會先完成�
 ```text
 .scene-node-editor/EDITOR/
 .scene-node-editor/AI_CONTEXT.md
+.scene-node-editor/docs/
 game/FRAMEWORK/runtime.rpy
 game/FRAMEWORK/option_renderer.rpy
 ```
 
 請不要把自訂邏輯寫進這些文件。你可以安全維護自己的 `gui.rpy`、`screens.rpy`、其他 `.rpy`、素材，以及 Editor 建立的 `DATA/`、`GLOBALNODE/`、`SCENENODE/` 內容；更新不會覆寫這些創作者資料。
 
-若使用 AI 協助開發，先請它閱讀 `.scene-node-editor/AI_CONTEXT.md`。範例提示詞見 [AI 協作指南](https://github.com/ToNyA-369/renpy-scene-node-editor/blob/main/docs/zh-TW/AI_WORKFLOW.md)。
+若使用 AI 協助開發，先請它閱讀 `.scene-node-editor/AI_CONTEXT.md`。範例提示詞見本機的 [AI 協作指南](../docs/zh-TW/AI_WORKFLOW.md)。
 
 ## 常見問題
 

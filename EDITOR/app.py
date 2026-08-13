@@ -35,6 +35,8 @@ EVENT_DIR = "EVENTPOOL"
 DEFAULT_EVENT_GROUP = "Normal"
 CONTENT_DIR = "CONTENT"
 OPTIONS_FILE = "Options.json"
+TEXTBOX_PROFILE_DIR = "TEXTBOX_PROFILES"
+TEXTBOX_PROFILE_VERSION = 1
 GLOBAL_NODE_PATH = "@global"
 EDITOR_SETTINGS_FILE = "settings.json"
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".avif"}
@@ -60,6 +62,21 @@ EFFECT_OPERATORS = {
 }
 OPTION_AVAILABILITY_VALUES = ("ALWAYS", "CONTROLLED")
 OPTION_EFFECT_TARGETS = ("element", "item")
+TEXTBOX_STYLE_DEFAULTS = {
+    "Background": "#0b1118",
+    "Item Background": "#20302a",
+    "Text Color": "#ffffff",
+    "Text Size": 30,
+    "Text Align": 0.5,
+}
+TEXTBOX_FEATURE_DEFAULTS = {
+    "hover_accent": {"Enabled": False, "Color": "#5c7265", "Width": 6},
+    "hover_text_color": {"Enabled": False, "Color": "#ffffff"},
+    "item_border": {"Enabled": False, "Color": "#ffffff33", "Width": 1},
+    "text_shadow": {"Enabled": False, "Color": "#00000088", "Size": 2, "X": 0, "Y": 2},
+    "text_outline": {"Enabled": False, "Color": "#000000cc", "Size": 1},
+    "staggered_entrance": {"Enabled": False, "Distance": 18, "Delay": 0.04, "Duration": 0.22},
+}
 
 PYTHON_EN_DICTIONARY = {
     "Editor 設定必須是 object。": "Editor settings must be an object.",
@@ -118,6 +135,15 @@ PYTHON_EN_DICTIONARY = {
     "Hitbox {element_id} 的 Trigger 不可為空。": "Hitbox {element_id} Trigger cannot be empty.",
     "Options.json 必須是 object。": "Options.json must be an object.",
     "Options.json 內有重複的 Element ID。": "Options.json contains duplicate Element IDs.",
+    "Textbox 外觀設定檔必須是 object。": "Textbox appearance profile must be an object.",
+    "Textbox 外觀設定檔 {profile_id} 的檔名與 ID 不一致。": "Textbox appearance profile {profile_id} filename does not match its ID.",
+    "Textbox 外觀設定檔 {profile_id} 已經存在。": "Textbox appearance profile {profile_id} already exists.",
+    "找不到 Textbox 外觀設定檔：{profile_id}。": "Textbox appearance profile not found: {profile_id}.",
+    "Textbox 外觀設定檔 {profile_id} 仍被 {count} 個 Textbox 使用。": "Textbox appearance profile {profile_id} is still used by {count} Textbox element(s).",
+    "Textbox 外觀設定檔名稱不可為空。": "Textbox appearance profile name cannot be empty.",
+    "Textbox 外觀設定檔含有不支援的特性：{feature_id}。": "Textbox appearance profile contains an unsupported feature: {feature_id}.",
+    "Textbox 外觀設定檔排序必須是陣列。": "Textbox appearance profile order must be an array.",
+    "Textbox 外觀設定檔排序必須包含所有設定檔。": "Textbox appearance profile order must contain every profile.",
     "Option {name} 仍被 {count} 個 Event Effect 引用。": "Option {name} is still referenced by {count} Event Effects.",
     "Stat {stat_id} 的設定必須是 object。": "Stat {stat_id} settings must be an object.",
     "Stat {stat_id} 的 Min、Max、Init 必須是數字。": "Stat {stat_id} Min, Max, and Init must be numbers.",
@@ -151,10 +177,17 @@ PYTHON_EN_DICTIONARY = {
     "End up 必須是 REDO、GOTO、REPLACE 或 EXIT。": "End up must be REDO, GOTO, REPLACE, or EXIT.",
     "{end_up} Event 必須設定 Next Node。": "{end_up} Event must set Next Node.",
     "找不到要設為 Root 的 Scene Node。": "Scene Node to set as Root not found.",
+    "Scene Node 排序必須是陣列。": "Scene Node order must be an array.",
+    "Scene Node 排序必須包含所有 Scene Nodes。": "Scene Node order must contain every Scene Node.",
+    "Scene Node 群組名稱不可超過 80 個字元。": "Scene Node group names cannot exceed 80 characters.",
+    "Scene Node 群組指派必須是 object。": "Scene Node group assignments must be an object.",
+    "找不到 Scene Node：{path}。": "Scene Node not found: {path}.",
     "新的 Event ID 已經存在。": "New Event ID already exists.",
     "這個 Event ID 已經存在。": "This Event ID already exists.",
     "Content 內容必須是文字。": "Content body must be text.",
     "Content 名稱已經存在。": "Content name already exists.",
+    "Content 排序必須是陣列。": "Content order must be an array.",
+    "Content 排序必須包含目前作用域的所有文件。": "Content order must contain every file in the current scope.",
     "Global Node 是固定的全局作用域，不可刪除。": "Global Node is a fixed global scope and cannot be deleted.",
     "仍有 {count} 個 Event 指向這個節點。": "There are still {count} Events pointing to this node.",
     "請先將其他 Scene Node 設為 Root，才能刪除目前的起始節點。": "Please set another Scene Node as Root before deleting current root node.",
@@ -206,6 +239,7 @@ def ensure_project_structure():
     stats_path = PROJECT_ROOT / DATA_DIR / "Stats.json"
     if not stats_path.exists():
         write_json(stats_path, {})
+    textbox_profiles_path().mkdir(parents=True, exist_ok=True)
     initialize_scene_project(PROJECT_ROOT)
 
 
@@ -288,6 +322,10 @@ def memories_path():
     return PROJECT_ROOT / MEMORIES_RELATIVE
 
 
+def textbox_profiles_path():
+    return PROJECT_ROOT / DATA_DIR / TEXTBOX_PROFILE_DIR
+
+
 def editor_settings_path():
     return PROJECT_ROOT.parent / ".scene-node-editor" / EDITOR_SETTINGS_FILE
 
@@ -314,13 +352,20 @@ def scene_project_config():
     return read_json(scene_project_path(), {}) or {}
 
 
+def project_display_name():
+    """Return the Ren'Py project folder name, not its conventional game/ child."""
+    if PROJECT_ROOT.name.casefold() == "game":
+        return PROJECT_ROOT.parent.name or PROJECT_ROOT.name
+    return PROJECT_ROOT.name
+
+
 def configured_root_node():
     return str(scene_project_config().get("Root Node") or "").strip() or None
 
 
 def default_options():
     return {
-        "Version": 2,
+        "Version": 3,
         "Canvas": {
             "Width": 1920,
             "Height": 1080,
@@ -352,6 +397,204 @@ def number_setting(value, fallback, field, minimum=None, maximum=None, integer=F
     if integer:
         return int(result)
     return int(result) if result.is_integer() else result
+
+
+def validate_textbox_style(value, partial=False):
+    raw = value if isinstance(value, dict) else {}
+    result = {} if partial else dict(TEXTBOX_STYLE_DEFAULTS)
+    for field in ("Background", "Item Background", "Text Color"):
+        if field in raw:
+            result[field] = str(raw[field])
+    if "Text Size" in raw:
+        result["Text Size"] = number_setting(
+            raw["Text Size"], 30, "Text Size", minimum=8, maximum=160, integer=True
+        )
+    if "Text Align" in raw:
+        result["Text Align"] = number_setting(
+            raw["Text Align"], 0.5, "Text Align", minimum=0, maximum=1
+        )
+    return result
+
+
+def validate_textbox_feature(feature_id, value):
+    if feature_id not in TEXTBOX_FEATURE_DEFAULTS:
+        raise ApiError(
+            HTTPStatus.BAD_REQUEST,
+            tr("Textbox 外觀設定檔含有不支援的特性：{feature_id}。", feature_id=feature_id),
+        )
+    raw = value if isinstance(value, dict) else {}
+    result = dict(TEXTBOX_FEATURE_DEFAULTS[feature_id])
+    result["Enabled"] = bool(raw.get("Enabled", result["Enabled"]))
+    if feature_id in ("hover_accent", "item_border"):
+        result["Color"] = str(raw.get("Color") or result["Color"])
+        field = "Hover Accent Width" if feature_id == "hover_accent" else "Item Border Width"
+        result["Width"] = number_setting(raw.get("Width", result["Width"]), result["Width"], field, minimum=1, maximum=40, integer=True)
+    elif feature_id == "hover_text_color":
+        result["Color"] = str(raw.get("Color") or result["Color"])
+    elif feature_id == "text_shadow":
+        result["Color"] = str(raw.get("Color") or result["Color"])
+        result["Size"] = number_setting(raw.get("Size", result["Size"]), result["Size"], "Text Shadow Size", minimum=0, maximum=20, integer=True)
+        result["X"] = number_setting(raw.get("X", result["X"]), result["X"], "Text Shadow X", minimum=-40, maximum=40, integer=True)
+        result["Y"] = number_setting(raw.get("Y", result["Y"]), result["Y"], "Text Shadow Y", minimum=-40, maximum=40, integer=True)
+    elif feature_id == "text_outline":
+        result["Color"] = str(raw.get("Color") or result["Color"])
+        result["Size"] = number_setting(raw.get("Size", result["Size"]), result["Size"], "Text Outline Size", minimum=0, maximum=20, integer=True)
+    else:
+        result["Distance"] = number_setting(raw.get("Distance", result["Distance"]), result["Distance"], "Entrance Distance", minimum=-200, maximum=200, integer=True)
+        result["Delay"] = number_setting(raw.get("Delay", result["Delay"]), result["Delay"], "Entrance Delay", minimum=0, maximum=1)
+        result["Duration"] = number_setting(raw.get("Duration", result["Duration"]), result["Duration"], "Entrance Duration", minimum=0, maximum=3)
+    return result
+
+
+def validate_textbox_profile(value, expected_id=None):
+    if not isinstance(value, dict):
+        raise ApiError(HTTPStatus.BAD_REQUEST, tr("Textbox 外觀設定檔必須是 object。"))
+    profile_id = clean_file_name(value.get("ID") or expected_id, "")
+    if expected_id is not None and profile_id != expected_id:
+        raise ApiError(
+            HTTPStatus.BAD_REQUEST,
+            tr("Textbox 外觀設定檔 {profile_id} 的檔名與 ID 不一致。", profile_id=profile_id),
+        )
+    name = str(value.get("Name") or "").strip()
+    if not name:
+        raise ApiError(HTTPStatus.BAD_REQUEST, tr("Textbox 外觀設定檔名稱不可為空。"))
+    raw_features = value.get("Features") if isinstance(value.get("Features"), dict) else {}
+    unsupported = sorted(set(raw_features) - set(TEXTBOX_FEATURE_DEFAULTS))
+    if unsupported:
+        raise ApiError(
+            HTTPStatus.BAD_REQUEST,
+            tr("Textbox 外觀設定檔含有不支援的特性：{feature_id}。", feature_id=unsupported[0]),
+        )
+    result = {
+        "Version": TEXTBOX_PROFILE_VERSION,
+        "ID": profile_id,
+        "Name": name,
+        "Style": validate_textbox_style(value.get("Style")),
+        "Features": {
+            feature_id: validate_textbox_feature(feature_id, raw_features.get(feature_id))
+            for feature_id in TEXTBOX_FEATURE_DEFAULTS
+        },
+    }
+    if "Order" in value:
+        result["Order"] = validate_editor_order(value.get("Order"), "Textbox Profile Order")
+    return result
+
+
+def textbox_profile_file(profile_id):
+    profile_id = clean_file_name(profile_id, ".json")
+    return textbox_profiles_path() / f"{profile_id}.json"
+
+
+def scan_textbox_profiles():
+    root = textbox_profiles_path()
+    if not root.exists():
+        return []
+    profiles = []
+    for fallback_order, path in enumerate(sorted(root.glob("*.json"), key=lambda item: item.name.casefold())):
+        try:
+            profile = validate_textbox_profile(read_json(path, {}), path.stem)
+            profile["Order"] = profile.get("Order", fallback_order)
+            profiles.append(profile)
+        except ApiError:
+            continue
+    return sorted(profiles, key=lambda item: (item.get("Order", 0), item["ID"].casefold()))
+
+
+def save_textbox_profile_order(payload):
+    profiles = scan_textbox_profiles()
+    order = payload.get("order")
+    ids = [profile["ID"] for profile in profiles]
+    if not isinstance(order, list) or not all(isinstance(profile_id, str) for profile_id in order):
+        raise ApiError(HTTPStatus.BAD_REQUEST, tr("Textbox 外觀設定檔排序必須是陣列。"))
+    if len(order) != len(set(order)) or set(order) != set(ids):
+        raise ApiError(HTTPStatus.BAD_REQUEST, tr("Textbox 外觀設定檔排序必須包含所有設定檔。"))
+    updates = []
+    for index, profile_id in enumerate(order):
+        profile = next(profile for profile in profiles if profile["ID"] == profile_id)
+        profile["Order"] = index
+        updates.append((textbox_profile_file(profile_id), validate_textbox_profile(profile, profile_id)))
+    originals = {path: path.read_text(encoding="utf-8") for path, _ in updates}
+    written = []
+    try:
+        for path, profile in updates:
+            write_json(path, profile)
+            written.append(path)
+    except Exception:
+        for path in written:
+            atomic_write(path, originals[path])
+        raise
+    return {"profiles": [profile for _, profile in updates]}
+
+
+def textbox_profile_references(profile_id):
+    references = []
+    for summary in [global_node_summary(False)] + scan_nodes(False):
+        directory = authoring_directory(summary["path"])
+        try:
+            options = validate_options(read_json(directory / OPTIONS_FILE, default_options()))
+        except ApiError:
+            continue
+        for element in options.get("Elements", []):
+            if element.get("Type") != "TEXTBOX":
+                continue
+            if element.get("Appearance", {}).get("Profile") == profile_id:
+                references.append({
+                    "nodeId": summary["id"],
+                    "nodeName": summary["name"],
+                    "nodePath": summary["path"],
+                    "elementId": element["ID"],
+                    "elementName": element.get("Name") or element["ID"],
+                })
+    return references
+
+
+def create_textbox_profile(payload):
+    raw = dict(payload.get("profile") if isinstance(payload.get("profile"), dict) else payload)
+    raw.setdefault("ID", generate_id("textbox_profile"))
+    raw.setdefault("Name", raw["ID"])
+    raw.setdefault("Order", max((-1, *(
+        profile.get("Order", -1) if isinstance(profile.get("Order"), int) else -1
+        for profile in scan_textbox_profiles()
+    ))) + 1)
+    profile = validate_textbox_profile(raw)
+    path = textbox_profile_file(profile["ID"])
+    if path.exists():
+        raise ApiError(
+            HTTPStatus.CONFLICT,
+            tr("Textbox 外觀設定檔 {profile_id} 已經存在。", profile_id=profile["ID"]),
+        )
+    write_json(path, profile)
+    return profile
+
+
+def save_textbox_profile(payload):
+    profile = validate_textbox_profile(payload.get("profile"))
+    path = textbox_profile_file(profile["ID"])
+    if not path.exists():
+        raise ApiError(
+            HTTPStatus.NOT_FOUND,
+            tr("找不到 Textbox 外觀設定檔：{profile_id}。", profile_id=profile["ID"]),
+        )
+    write_json(path, profile)
+    return profile
+
+
+def delete_textbox_profile(profile_id):
+    profile_id = clean_file_name(profile_id, ".json")
+    path = textbox_profile_file(profile_id)
+    if not path.exists():
+        raise ApiError(
+            HTTPStatus.NOT_FOUND,
+            tr("找不到 Textbox 外觀設定檔：{profile_id}。", profile_id=profile_id),
+        )
+    references = textbox_profile_references(profile_id)
+    if references:
+        raise ApiError(
+            HTTPStatus.CONFLICT,
+            tr("Textbox 外觀設定檔 {profile_id} 仍被 {count} 個 Textbox 使用。", profile_id=profile_id, count=len(references)),
+        )
+    path.unlink()
+    return {"deleted": True, "id": profile_id}
 
 
 def validate_condition(condition, field="Condition"):
@@ -535,14 +778,21 @@ def validate_option_element(element):
             "Padding": number_setting(raw_list.get("Padding", 16), 16, "Padding", minimum=0, maximum=200, integer=True),
             "Show Scrollbar": bool(raw_list.get("Show Scrollbar", True)),
         }
-        raw_style = element.get("Style") if isinstance(element.get("Style"), dict) else {}
-        result["Style"] = {
-            "Background": str(raw_style.get("Background") or "#0b1118"),
-            "Item Background": str(raw_style.get("Item Background") or "#20302a"),
-            "Text Color": str(raw_style.get("Text Color") or "#ffffff"),
-            "Text Size": number_setting(raw_style.get("Text Size", 30), 30, "Text Size", minimum=8, maximum=160, integer=True),
-            "Text Align": number_setting(raw_style.get("Text Align", 0.5), 0.5, "Text Align", minimum=0, maximum=1),
-        }
+        result["Style"] = validate_textbox_style(element.get("Style"))
+        raw_appearance = element.get("Appearance") if isinstance(element.get("Appearance"), dict) else {}
+        profile_id = str(raw_appearance.get("Profile") or "").strip()
+        if profile_id:
+            profile_id = clean_file_name(profile_id, "")
+            raw_feature_overrides = raw_appearance.get("Features") if isinstance(raw_appearance.get("Features"), dict) else {}
+            result["Appearance"] = {
+                "Profile": profile_id,
+                "Features": {
+                    feature_id: bool(enabled)
+                    for feature_id, enabled in raw_feature_overrides.items()
+                    if feature_id in TEXTBOX_FEATURE_DEFAULTS
+                },
+                "Style Overrides": validate_textbox_style(raw_appearance.get("Style Overrides"), partial=True),
+            }
         items = element.get("Items") if isinstance(element.get("Items"), list) else []
         result["Items"] = [validate_option_item(item) for item in items]
         item_ids = [item["ID"] for item in result["Items"]]
@@ -585,7 +835,7 @@ def validate_options(data):
     raw_canvas = data.get("Canvas") if isinstance(data.get("Canvas"), dict) else {}
     elements = data.get("Elements") if isinstance(data.get("Elements"), list) else []
     result = {
-        "Version": 2,
+        "Version": 3,
         "Canvas": {
             "Width": number_setting(raw_canvas.get("Width", 1920), 1920, "Canvas Width", minimum=320, maximum=7680, integer=True),
             "Height": number_setting(raw_canvas.get("Height", 1080), 1080, "Canvas Height", minimum=180, maximum=4320, integer=True),
@@ -725,7 +975,7 @@ def scan_audio_assets():
     return scan_assets("audio", AUDIO_EXTENSIONS)
 
 
-def node_summary(directory):
+def node_summary(directory, include_editor_details=True):
     node_file = directory / "Node.json"
     parse_error = None
     try:
@@ -735,6 +985,17 @@ def node_summary(directory):
         parse_error = exc.message
     relative = directory.relative_to(PROJECT_ROOT / NODE_DIR).as_posix()
     events = list((directory / EVENT_DIR).glob("*.json")) if (directory / EVENT_DIR).exists() else []
+    result = {
+        "path": relative,
+        "id": data.get("ID", directory.name),
+        "name": data.get("Name", data.get("ID", directory.name)),
+        "eventCount": len(events),
+        "order": data.get("Order"),
+        "group": validate_node_group(data.get("Group")),
+        "parseError": parse_error,
+    }
+    if not include_editor_details:
+        return result
     contents = list((directory / CONTENT_DIR).glob("*.rpy")) if (directory / CONTENT_DIR).exists() else []
     try:
         raw_options = read_json(directory / OPTIONS_FILE, default_options()) or default_options()
@@ -742,18 +1003,15 @@ def node_summary(directory):
         raw_options = default_options()
         parse_error = f"{parse_error}; {exc.message}" if parse_error else exc.message
     option_elements = raw_options.get("Elements", []) if isinstance(raw_options, dict) else []
-    return {
-        "path": relative,
-        "id": data.get("ID", directory.name),
-        "name": data.get("Name", data.get("ID", directory.name)),
-        "eventCount": len(events),
+    result.update({
         "contentCount": len(contents),
         "optionCount": len(option_elements),
         "parseError": parse_error,
-    }
+    })
+    return result
 
 
-def global_node_summary():
+def global_node_summary(include_editor_details=True):
     directory = global_node_path()
     node_file = directory / "Node.json"
     parse_error = None
@@ -763,6 +1021,17 @@ def global_node_summary():
         data = {}
         parse_error = exc.message
     events = list((directory / EVENT_DIR).glob("*.json")) if (directory / EVENT_DIR).exists() else []
+    result = {
+        "path": GLOBAL_NODE_PATH,
+        "id": data.get("ID", GLOBAL_NODE_ID),
+        "name": data.get("Name", "GLOBAL"),
+        "eventCount": len(events),
+        "parseError": parse_error,
+        "isGlobal": True,
+        "isRoot": False,
+    }
+    if not include_editor_details:
+        return result
     contents = list((directory / CONTENT_DIR).glob("*.rpy")) if (directory / CONTENT_DIR).exists() else []
     try:
         raw_options = read_json(directory / OPTIONS_FILE, default_options()) or default_options()
@@ -770,34 +1039,37 @@ def global_node_summary():
         raw_options = default_options()
         parse_error = f"{parse_error}; {exc.message}" if parse_error else exc.message
     option_elements = raw_options.get("Elements", []) if isinstance(raw_options, dict) else []
-    return {
-        "path": GLOBAL_NODE_PATH,
-        "id": data.get("ID", GLOBAL_NODE_ID),
-        "name": data.get("Name", "GLOBAL"),
-        "eventCount": len(events),
+    result.update({
         "contentCount": len(contents),
         "optionCount": len(option_elements),
         "parseError": parse_error,
-        "isGlobal": True,
-        "isRoot": False,
-    }
+    })
+    return result
 
 
-def scan_nodes():
+def scan_nodes(include_editor_details=True):
     root = PROJECT_ROOT / NODE_DIR
-    nodes = [node_summary(path.parent) for path in root.rglob("Node.json")]
+    nodes = [node_summary(path.parent, include_editor_details) for path in root.rglob("Node.json")]
     try:
         root_node = configured_root_node()
     except ApiError:
         root_node = None
     for node in nodes:
         node["isRoot"] = bool(root_node and node["id"] == root_node)
-    return sorted(nodes, key=lambda item: (item["path"].casefold(), item["id"].casefold()))
+    fallback = {
+        node["path"]: index
+        for index, node in enumerate(sorted(nodes, key=lambda item: (item["path"].casefold(), item["id"].casefold())))
+    }
+    return sorted(nodes, key=lambda item: (
+        item["order"] if isinstance(item.get("order"), int) and item["order"] >= 0 else fallback[item["path"]],
+        fallback[item["path"]],
+    ))
 
 
-def project_graph():
+def project_graph(node_summaries=None):
     edges = []
-    for node in [global_node_summary()] + scan_nodes():
+    nodes = scan_nodes(False) if node_summaries is None else node_summaries
+    for node in [global_node_summary(False)] + list(nodes):
         event_root = authoring_directory(node["path"]) / EVENT_DIR
         if not event_root.exists():
             continue
@@ -842,9 +1114,23 @@ def project_graph():
     }
 
 
+def graph_snapshot(project=None, include_editor_details=False):
+    project = scene_project_config() if project is None else project
+    nodes = scan_nodes(include_editor_details)
+    return {
+        "rootNodeId": str(project.get("Root Node") or "").strip() or None,
+        "globalNode": global_node_summary(include_editor_details),
+        "nodes": nodes,
+        "graph": project_graph(nodes),
+    }
+
+
 def scan_content_files(root):
     if not root.exists():
         return []
+    node_data = read_json(root.parent / "Node.json", {}) or {}
+    saved_order = node_data.get("Content Order") if isinstance(node_data.get("Content Order"), list) else []
+    order_indexes = {str(name): index for index, name in enumerate(saved_order)}
     files = []
     for path in sorted(root.glob("*.rpy"), key=lambda value: value.name.casefold()):
         source = path.read_text(encoding="utf-8")
@@ -854,7 +1140,11 @@ def scan_content_files(root):
             "file": path.name,
             "labels": LABEL_RE.findall(source),
         })
-    return files
+    fallback_offset = len(order_indexes)
+    return sorted(files, key=lambda item: (
+        order_indexes.get(item["name"], fallback_offset),
+        item["name"].casefold(),
+    ))
 
 
 def read_node(relative):
@@ -1081,6 +1371,19 @@ def all_rpy_symbols():
 
 def validate_project():
     issues = []
+    textbox_profiles = {}
+    profile_root = textbox_profiles_path()
+    if profile_root.exists():
+        for path in sorted(profile_root.glob("*.json"), key=lambda item: item.name.casefold()):
+            try:
+                profile = validate_textbox_profile(read_json(path, {}), path.stem)
+                textbox_profiles[profile["ID"]] = profile
+            except ApiError as exc:
+                issues.append({
+                    "level": "error",
+                    "location": f"{DATA_DIR}/{TEXTBOX_PROFILE_DIR}/{path.name}",
+                    "message": exc.message,
+                })
     try:
         stats = read_json(stats_path(), {}) or {}
         stats = validate_stats(stats)
@@ -1169,6 +1472,15 @@ def validate_project():
                     "message": tr("選項 Trigger {trigger} 沒有對應的 Event。", trigger=trigger),
                 })
 
+        for element in detail["options"].get("Elements", []):
+            profile_id = element.get("Appearance", {}).get("Profile")
+            if profile_id and profile_id not in textbox_profiles:
+                issues.append({
+                    "level": "warning",
+                    "location": f"{location}/{OPTIONS_FILE}",
+                    "message": tr("找不到 Textbox 外觀設定檔：{profile_id}。", profile_id=profile_id),
+                })
+
         for entry in detail["events"]:
             event_location = f"{location}/{EVENT_DIR}/{entry['file']}"
             try:
@@ -1245,12 +1557,19 @@ def create_node(payload):
         raise ApiError(HTTPStatus.CONFLICT, tr("這個 Scene Node 路徑已經存在。"))
 
     node_name = str(payload.get("name") or node_id).strip() or node_id
+    existing_nodes = scan_nodes(False)
+    next_order = max((len(existing_nodes) - 1, *(
+        node.get("order", -1) if isinstance(node.get("order"), int) else -1
+        for node in existing_nodes
+    ))) + 1
     directory.mkdir(parents=True, exist_ok=True)
     (directory / EVENT_DIR).mkdir(exist_ok=True)
     (directory / CONTENT_DIR).mkdir(exist_ok=True)
     write_json(directory / "Node.json", {
         "ID": node_id,
         "Name": node_name,
+        "Group": DEFAULT_EVENT_GROUP,
+        "Order": next_order,
     })
     write_json(directory / OPTIONS_FILE, default_options())
     return node_summary(directory)
@@ -1266,11 +1585,113 @@ def save_node(payload):
     node_id = GLOBAL_NODE_ID if global_scope else clean_file_name(node.get("ID"), "")
     if not global_scope and node_id == GLOBAL_NODE_ID:
         raise ApiError(HTTPStatus.CONFLICT, tr("{id} 是 Global Node 的保留 ID。", id=GLOBAL_NODE_ID))
-    write_json(directory / "Node.json", {
+    previous = read_json(directory / "Node.json", {}) or {}
+    updated = {
         "ID": node_id,
         "Name": str(node.get("Name") or node_id),
-    })
+    }
+    if "Order" in previous:
+        updated["Order"] = validate_editor_order(previous.get("Order"), "Scene Node Order")
+    if "Group" in previous:
+        updated["Group"] = validate_node_group(previous.get("Group"))
+    if isinstance(previous.get("Content Order"), list):
+        updated["Content Order"] = previous["Content Order"]
+    write_json(directory / "Node.json", updated)
     return global_node_summary() if global_scope else node_summary(directory)
+
+
+def save_node_order(payload):
+    nodes = scan_nodes(False)
+    order = payload.get("order")
+    paths = [node["path"] for node in nodes]
+    if not isinstance(order, list) or not all(isinstance(path, str) for path in order):
+        raise ApiError(HTTPStatus.BAD_REQUEST, tr("Scene Node 排序必須是陣列。"))
+    if len(order) != len(set(order)) or set(order) != set(paths):
+        raise ApiError(HTTPStatus.BAD_REQUEST, tr("Scene Node 排序必須包含所有 Scene Nodes。"))
+    updates = []
+    for index, relative in enumerate(order):
+        path = node_path(relative) / "Node.json"
+        data = read_json(path, {}) or {}
+        data["Order"] = index
+        updates.append((path, data))
+    write_event_updates(updates)
+    return {"nodes": scan_nodes()}
+
+
+def validate_node_group(value):
+    group = str(value or DEFAULT_EVENT_GROUP).strip() or DEFAULT_EVENT_GROUP
+    if len(group) > 80:
+        raise ApiError(HTTPStatus.BAD_REQUEST, tr("Scene Node 群組名稱不可超過 80 個字元。"))
+    return group
+
+
+def save_node_groups(payload):
+    nodes = scan_nodes(False)
+    paths = {node["path"] for node in nodes}
+    assignments = payload.get("assignments", {})
+    order = payload.get("order")
+    if not isinstance(assignments, dict):
+        raise ApiError(HTTPStatus.BAD_REQUEST, tr("Scene Node 群組指派必須是 object。"))
+    order_indexes = {}
+    if order is not None:
+        if (
+            not isinstance(order, list)
+            or not all(isinstance(path, str) for path in order)
+            or len(order) != len(set(order))
+            or set(order) != paths
+        ):
+            raise ApiError(HTTPStatus.BAD_REQUEST, tr("Scene Node 排序必須包含所有 Scene Nodes。"))
+        order_indexes = {path: index for index, path in enumerate(order)}
+    updates = []
+    for raw_path in set(assignments) | set(order_indexes):
+        relative = clean_node_path(raw_path)
+        if relative not in paths:
+            raise ApiError(HTTPStatus.NOT_FOUND, tr("找不到 Scene Node：{path}。", path=relative))
+        path = node_path(relative) / "Node.json"
+        data = read_json(path, {}) or {}
+        if raw_path in assignments:
+            data["Group"] = validate_node_group(assignments[raw_path])
+        if relative in order_indexes:
+            data["Order"] = order_indexes[relative]
+        updates.append((path, data))
+    write_event_updates(updates)
+    return {"nodes": scan_nodes()}
+
+
+def dissolve_singleton_node_groups():
+    grouped = {}
+    for node in scan_nodes(False):
+        group = validate_node_group(node.get("group"))
+        if group != DEFAULT_EVENT_GROUP:
+            grouped.setdefault(group, []).append(node)
+    updates = []
+    for entries in grouped.values():
+        if len(entries) != 1:
+            continue
+        path = node_path(entries[0]["path"]) / "Node.json"
+        data = read_json(path, {}) or {}
+        data["Group"] = DEFAULT_EVENT_GROUP
+        updates.append((path, data))
+    write_event_updates(updates)
+    return scan_nodes()
+
+
+def save_content_order(payload):
+    directory = authoring_directory(payload.get("node"))
+    if not (directory / "Node.json").exists():
+        raise ApiError(HTTPStatus.NOT_FOUND, tr("找不到指定的 authoring scope。"))
+    files = scan_content_files(directory / CONTENT_DIR)
+    names = [file["name"] for file in files]
+    order = payload.get("order")
+    if not isinstance(order, list) or not all(isinstance(name, str) for name in order):
+        raise ApiError(HTTPStatus.BAD_REQUEST, tr("Content 排序必須是陣列。"))
+    if len(order) != len(set(order)) or set(order) != set(names):
+        raise ApiError(HTTPStatus.BAD_REQUEST, tr("Content 排序必須包含目前作用域的所有文件。"))
+    node_file = directory / "Node.json"
+    node = read_json(node_file, {}) or {}
+    node["Content Order"] = order
+    write_json(node_file, node)
+    return {"contents": scan_content_files(directory / CONTENT_DIR)}
 
 
 def save_root_node(payload):
@@ -1449,6 +1870,22 @@ def save_content_file(root, payload):
     atomic_write(target, source.rstrip() + "\n")
     if old_path_to_remove and old_path_to_remove.exists():
         old_path_to_remove.unlink()
+    node_file = root.parent / "Node.json"
+    node = read_json(node_file, {}) or {}
+    existing_order = node.get("Content Order") if isinstance(node.get("Content Order"), list) else []
+    normalized_order = []
+    old_name = clean_file_name(original, ".rpy") if original else None
+    for entry in existing_order:
+        entry = str(entry)
+        if old_name and entry == old_name:
+            entry = name
+        if entry not in normalized_order:
+            normalized_order.append(entry)
+    if name not in normalized_order:
+        normalized_order.append(name)
+    existing_names = {path.stem for path in root.glob("*.rpy")}
+    node["Content Order"] = [entry for entry in normalized_order if entry in existing_names]
+    write_json(node_file, node)
     return {"name": name, "displayName": display_name, "file": target.name}
 
 
@@ -1510,7 +1947,7 @@ def delete_node(relative):
     stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S-%f")
     target = trash_root / f"{stamp}-{node.get('ID', directory.name)}"
     shutil.move(str(directory), str(target))
-    return {"deleted": True, "backup": str(target)}
+    return {"deleted": True, "backup": str(target), "nodes": dissolve_singleton_node_groups()}
 
 
 class EditorHandler(BaseHTTPRequestHandler):
@@ -1545,24 +1982,29 @@ class EditorHandler(BaseHTTPRequestHandler):
                 return
             if parsed.path == "/api/project":
                 project = scene_project_config()
+                graph_data = graph_snapshot(project, include_editor_details=True)
                 self.send_json({
-                    "projectName": PROJECT_ROOT.name,
+                    "projectName": project_display_name(),
                     "projectPath": str(PROJECT_ROOT),
                     "project": project,
-                    "rootNodeId": str(project.get("Root Node") or "").strip() or None,
+                    **graph_data,
                     "stats": read_json(stats_path(), {}) or {},
                     "memories": read_json(memories_path(), {}) or {},
-                    "globalNode": global_node_summary(),
-                    "nodes": scan_nodes(),
-                    "graph": project_graph(),
                     "images": scan_image_assets(),
                     "audio": scan_audio_assets(),
+                    "textboxProfiles": scan_textbox_profiles(),
                     "optionTargets": scan_option_targets(),
                     "issues": validate_project(),
                 })
                 return
+            if parsed.path == "/api/graph":
+                self.send_json(graph_snapshot())
+                return
             if parsed.path == "/api/nodes":
                 self.send_json({"nodes": scan_nodes()})
+                return
+            if parsed.path == "/api/textbox-profiles":
+                self.send_json({"profiles": scan_textbox_profiles()})
                 return
             if parsed.path == "/api/node":
                 self.send_json(read_node(self.query_value("path")))
@@ -1616,6 +2058,9 @@ class EditorHandler(BaseHTTPRequestHandler):
             if parsed.path == "/api/events":
                 self.send_json(save_event(payload))
                 return
+            if parsed.path == "/api/textbox-profiles":
+                self.send_json(create_textbox_profile(payload), HTTPStatus.CREATED)
+                return
             if parsed.path == "/api/content":
                 directory = authoring_directory(payload.get("node"))
                 if not (directory / "Node.json").exists():
@@ -1652,6 +2097,12 @@ class EditorHandler(BaseHTTPRequestHandler):
             if parsed.path == "/api/node":
                 self.send_json(save_node(payload))
                 return
+            if parsed.path == "/api/nodes/order":
+                self.send_json(save_node_order(payload))
+                return
+            if parsed.path == "/api/node-groups":
+                self.send_json(save_node_groups(payload))
+                return
             if parsed.path == "/api/project/root":
                 self.send_json(save_root_node(payload))
                 return
@@ -1672,6 +2123,15 @@ class EditorHandler(BaseHTTPRequestHandler):
                     result["optionTargets"] = scan_option_targets()
                 self.send_json(result)
                 return
+            if parsed.path == "/api/textbox-profiles":
+                self.send_json(save_textbox_profile(payload))
+                return
+            if parsed.path == "/api/textbox-profiles/order":
+                self.send_json(save_textbox_profile_order(payload))
+                return
+            if parsed.path == "/api/content/order":
+                self.send_json(save_content_order(payload))
+                return
             if parsed.path == "/api/event-groups":
                 self.send_json(rename_event_group(payload))
                 return
@@ -1691,6 +2151,9 @@ class EditorHandler(BaseHTTPRequestHandler):
             elif parsed.path == "/api/nodes":
                 self.send_json(delete_node(self.query_value("path")))
                 return
+            elif parsed.path == "/api/textbox-profiles":
+                self.send_json(delete_textbox_profile(self.query_value("id")))
+                return
             elif parsed.path == "/api/content":
                 directory = authoring_directory(self.query_value("node")) / CONTENT_DIR
                 name = clean_file_name(self.query_value("name"), ".rpy")
@@ -1700,6 +2163,12 @@ class EditorHandler(BaseHTTPRequestHandler):
             if not target.exists():
                 raise ApiError(HTTPStatus.NOT_FOUND, tr("找不到要刪除的文件。"))
             target.unlink()
+            if parsed.path == "/api/content":
+                node_file = directory.parent / "Node.json"
+                node = read_json(node_file, {}) or {}
+                order = node.get("Content Order") if isinstance(node.get("Content Order"), list) else []
+                node["Content Order"] = [entry for entry in order if entry != name]
+                write_json(node_file, node)
             response = {"deleted": True}
             if parsed.path == "/api/events":
                 response["events"] = dissolve_singleton_event_groups(directory.parent)

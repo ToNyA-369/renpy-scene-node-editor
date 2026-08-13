@@ -1,6 +1,6 @@
 # Scene Node Editor 專案交接
 
-最後整理日期：2026-08-08
+最後整理日期：2026-08-11
 
 這份文件提供給新開啟的 Codex 對話。開始修改前，先閱讀本文件及「規格來源」列出的文件，不要重新設計已經定案的遊戲架構。
 
@@ -40,8 +40,8 @@ Action / Keyboard / Mouse / Auto:Node Trigger + Global State
 -> 檢查 Conditions
 -> 選擇最低 Priority 的候選層
 -> 依 Weight 選出唯一 Event
--> 套用 Effects
 -> 播放 Content（可為 None）
+-> Content 返回後套用 Once 記錄與 Effects
 -> 依 REDO / GOTO / REPLACE / EXIT 決定節點流程
 ```
 
@@ -68,7 +68,7 @@ EXIT  離開目前節點並回到父節點
 
 GOTO 子節點不視為父節點 `Auto:Exit`；子節點 EXIT 回到父節點也不重新執行父節點 `Auto:Enter`。
 
-REPLACE 是 `[父, 目前] → [父, 目標]` 的單一 Stack 操作。它先跑主 Event Effects／Content並確認 prepare 階段選出的目標存在，再執行目前節點 `Auto:Exit`、替換頂端、執行目標 `Auto:Enter`，最後進入目標 `Auto:Node`／Options。父節點在過程中不得執行任何生命週期、`Auto:Node` 或 Options；目標 EXIT 後回到原本父節點。父層限制依實際 Stack 深度判斷，不依 Root Node ID、資料夾或靜態 Parent 欄位。
+REPLACE 是 `[父, 目前] → [父, 目標]` 的單一 Stack 操作。它先跑主 Event Content，返回後套用 Once／Effects 並確認 prepare 階段選出的目標存在，再執行目前節點 `Auto:Exit`、替換頂端、執行目標 `Auto:Enter`，最後進入目標 `Auto:Node`／Options。父節點在過程中不得執行任何生命週期、`Auto:Node` 或 Options；目標 EXIT 後回到原本父節點。父層限制依實際 Stack 深度判斷，不依 Root Node ID、資料夾或靜態 Parent 欄位。
 
 ### 3.3 Event 決策
 
@@ -80,6 +80,7 @@ REPLACE 是 `[父, 目前] → [父, 目標]` 的單一 Stack 操作。它先跑
 - Global Once 使用 `once:global:<event_id>`，避免與一般節點 Event 混用。
 - `Auto:Enter`／`Auto:Exit` 先以同一份狀態快照篩選 Conditions 與 Once，再依 Priority、Event ID 執行所有符合 Events。
 - `Auto:Enter`／`Auto:Exit` 不含 Weight、End up 或 Next Node；保留 Conditions、Priority、Once、Effects 與 Content。
+- 所有 Event 都在 Content label 正常 `return` 後才寫入 Once 並套用 Effects；生命週期批次仍先完成整批 Conditions 快照，再逐筆執行 Content → Once／Effects。
 
 ### 3.4 Memories
 
@@ -104,6 +105,8 @@ DATA/
   SceneProject.json
   Stats.json
   Memories.json
+  TEXTBOX_PROFILES/
+    <profile_id>.json
 
 GLOBALNODE/
   Node.json
@@ -152,9 +155,11 @@ TEXTBOX 支援：
 
 三種 Element 共用 `Hover.Enabled`、可調透明度的 `Hover.Color`、`Hover Sound` 與 `Click Sound`。Picture 可額外指定 Hover 圖片。Options 不保存 Tooltip、Icon、Cursor 或個別捲動模式。
 
-Options 工作區分成兩種共用同一份草稿的模式。表單採左小右大布局，左側管理 Element，右側以獨立卡片分開內容與音效；畫布採左大右小布局，左側預覽、點選與拖曳，右側負責版面、共同 Hover 視覺及外觀。切換由單一連續進度同時驅動兩側欄框寬度與新舊內容透明度；兩個欄框本身是 `overflow: hidden` 遮罩，過場底層也有不透明遮罩覆蓋兩框中央，內容保持各自座標且不會溢出欄框。拖曳進度逐幀取最新游標位置並依完整行程計算；點擊沿用同一控制器，但使用加速後減速的 ease-in-out 補間。完成時先在遮罩後方停用 transition 並顯示正式工作區，再移除遮罩，下一幀才恢復一般 transition，避免結尾閃爍。Options 側欄寬度與 Event 側欄一致。
+Options 工作區分成兩種共用同一份草稿的模式。表單採左小右大布局，左側管理 Element，右側以獨立卡片分開內容與音效；畫布採約 4:3 的預覽／調整區比例，左側預覽、點選與拖曳，右側負責版面、共同 Hover 視覺及外觀。窄於 760px 時才改為上下堆疊。切換由單一連續進度同時驅動兩側欄框寬度與新舊內容透明度；兩個欄框本身是 `overflow: hidden` 遮罩，過場底層也有不透明遮罩覆蓋兩框中央，內容保持各自座標且不會溢出欄框。拖曳進度逐幀取最新游標位置並依完整行程計算；點擊沿用同一控制器，但使用加速後減速的 ease-in-out 補間。完成時先在遮罩後方停用 transition 並顯示正式工作區，再移除遮罩，下一幀才恢復一般 transition，避免結尾閃爍。Options 側欄寬度與 Event 側欄一致。
 
-Options 沒有條件運算式、不可操作狀態或 CUSTOM Screen 來源。所有顯示的選項都可操作；條件、fallback 與節點分流統一由 Events 和 Scene Nodes 負責。`Options.json` Version 2 在 Element 與 TEXTBOX Item 增加 `Availability: ALWAYS | CONTROLLED`；Version 1／缺值讀作 ALWAYS 並在下次儲存正規化。PICTURE／HITBOX 只控制 Element；TEXTBOX 可控制整列及個別 Item。Item 顯示需要父 Element 與自身都可用，父層停用保留子狀態，空 TEXTBOX 自動隱藏。
+Options 沒有條件運算式、不可操作狀態或 CUSTOM Screen 來源。所有顯示的選項都可操作；條件、fallback 與節點分流統一由 Events 和 Scene Nodes 負責。`Options.json` Version 2 在 Element 與 TEXTBOX Item 增加 `Availability: ALWAYS | CONTROLLED`；Version 3 新增可選的 TEXTBOX `Appearance`，引用 `DATA/TEXTBOX_PROFILES/<profile_id>.json`。Version 1／2 在下次儲存正規化為 Version 3，未套用設定檔時外觀不變。PICTURE／HITBOX 只控制 Element；TEXTBOX 可控制整列及個別 Item。Item 顯示需要父 Element 與自身都可用，父層停用保留子狀態，空 TEXTBOX 自動隱藏。
+
+Textbox 外觀設定檔是專案共用、創作者擁有的 Version 1 JSON，每檔保存穩定 ID、Name、完整基礎 Style 與六種特性設定：`hover_accent`、`hover_text_color`、`item_border`、`text_shadow`、`text_outline`、`staggered_entrance`。新增特性在舊檔缺值時必須預設停用。TEXTBOX 只保存 Profile ID、Feature enabled override 與稀疏 `Style Overrides`；解析順序是預設 → Profile → Element override → Item `Style Override`。Editor 預覽與 Runtime 必須共用這個優先序。缺失／壞檔回退 Element `Style` 並由 Validation 回報；引用中的 Profile 不可刪除。Installer 只建立 `DATA/TEXTBOX_PROFILES/`，不得覆寫內容。這仍是資料化 Options Renderer，不能藉設定檔加入條件、Event 選擇或任意 Ren'Py 程式碼。
 
 Runtime 以獨立 `scene_enabled_options` 保存受控目標，不污染 Stats／Memories。狀態採 reassignment 以支援 Ren'Py save／rollback，不因 REDO、GOTO、REPLACE、EXIT 自動重設，`scene_reset_state()` 開新遊戲時清空。Option Effect 只能控制 Event 所屬 Options 作用域：實際 Scene Node Event 只能控制同一節點，Global Event 只能控制 `__global__`；所有跨作用域引用都由 Editor、API 與 Runtime 拒絕。Editor 的 Effect 階層選單只顯示目前作用域的 Element／Item Name，JSON 仍保存穩定 Node／Element／Item ID。API 專案檢查及 Element／Item 刪除保護都必須包含 Option Effect。
 
@@ -166,22 +171,30 @@ Runtime 以獨立 `scene_enabled_options` 保存受控目標，不污染 Stats�
 - 單一 Memory 架構：預設 `Memory`、自訂記憶庫、標籤 add/remove/clear、Runtime API 與舊 Tag 延遲遷移。
 - Scene Node、Event、Stats、Memory Banks 與 Content 的建立與編輯。
 - Global Node 擁有與 Scene Node 相同的 Options 工作區；Runtime 在任何實際節點互動時疊加目前節點與 Global Options。Global Event 可使用 Option Trigger，Option Effect 只能控制 `__global__` 作用域目標。
-- Stats 工作區只保留一個新增 Stat 按鈕，`Normal` 在畫面上是不帶標題的未群組排序流。`js/ui/group_drag.js` 提供與 Event 共用的 Pointer 拖移控制器：fixed preview 逐 Pointer 事件緊貼游標，插入判定與 DOM 重排以 `requestAnimationFrame` 合併為每幀一次；真實元素作為即時插入間隙，其他 Stat／群組區塊以可中斷的 160ms FLIP 位移讓位。拖移生命週期由 `window` 持續接收，避免元素跨容器重排時遺失 pointer capture；元素中線帶小幅遲滯以避免前後反覆跳動，靠近最近可捲動祖先的上下邊緣時依距離漸進自動捲動。排序流末端永遠保留自然落點，因此即使畫面只有群組也可直接移出，停留 650ms 至框線展開才建立群組，來源只剩一個 Stat 時自動解散。Stat 整列外框與欄位間留白是拖移面，不設獨立把手；輸入框與刪除按鈕維持原操作，拖移期間以 `user-select: none` 防止掃過文字被標記。Stat 群組名稱旁的無圖示留白可將整組作為單一排序區塊拖移，成員與內部順序保持不變。Name／Min／Init／Max 只在 Stats 頂部顯示一次，所有未群組列及群組內列使用同一 CSS Grid 欄寬；群組框以外擴配合內距，讓列不貼邊且不破壞全域欄位對齊。順序保存於可選、非負整數的 Editor-only `Order`；舊資料缺值時依現有穩定順序讀取，首次排序後正規化。所有成功拖移只更新同步狀態，不顯示完成 Toast；失敗仍顯示錯誤。State 外框與 Event／Options 一樣使用完整工作區寬度，Stats 左框與 Memory 右框直接對齊分頁邊界；Event 的 Stat Condition／Effect 共用 Group → Stat 階層選單。Group／Order 僅為 authoring metadata，Runtime 與存檔維持平面 Stat ID。
+- Stats 工作區只保留一個新增 Stat 按鈕，`Normal` 在畫面上是不帶標題的未群組排序流。`js/ui/group_drag.js` 提供與 Event 共用的 Pointer 拖移控制器：fixed preview 逐 Pointer 事件緊貼游標，插入判定與 DOM 重排以 `requestAnimationFrame` 合併為每幀一次；真實元素作為即時插入間隙，其他 Stat／群組區塊以可中斷的 160ms FLIP 位移讓位。拖移生命週期由 `window` 持續接收，避免元素跨容器重排時遺失 pointer capture；元素中線帶小幅遲滯以避免前後反覆跳動，靠近最近可捲動祖先的上下邊緣時依距離漸進自動捲動。排序流末端永遠保留自然落點，因此即使畫面只有群組也可直接移出，停留 500ms 至預留群組空間展開才建立群組，來源只剩一個 Stat 時自動解散。Stat 整列外框與欄位間留白是拖移面，不設獨立把手；輸入框與刪除按鈕維持原操作，拖移期間以 `user-select: none` 防止掃過文字被標記。Stat 群組名稱旁的無圖示留白可將整組作為單一排序區塊拖移，成員與內部順序保持不變。Name／Min／Init／Max 只在 Stats 頂部顯示一次，所有未群組列及群組內列使用同一 CSS Grid 欄寬；群組框以外擴配合內距，讓列不貼邊且不破壞全域欄位對齊。順序保存於可選、非負整數的 Editor-only `Order`；舊資料缺值時依現有穩定順序讀取，首次排序後正規化。所有成功拖移只更新同步狀態，不顯示完成 Toast；失敗仍顯示錯誤。State 外框與 Event／Options 一樣使用完整工作區寬度，Stats 左框與 Memory 右框直接對齊分頁邊界；Event 的 Stat Condition／Effect 共用 Group → Stat 階層選單。Group／Order 僅為 authoring metadata，Runtime 與存檔維持平面 Stat ID。
 - Options Picture 與 Preview Background 只掃描 `game/images/`，並以子目錄階層選單呈現；選定欄位只顯示葉節點檔名。Preview Background 留空時不顯示預覽圖，也不影響遊戲場景。
 - Node Schema 不保存 Background 或 Screen；兩者與音訊、轉場一樣由 Content 使用 Ren'Py 原生語法管理。
 - Editor 不提供 Screen 文件工作區或 CRUD API；Installer 也不管理創作者的 `gui.rpy`、`screens.rpy` 與其他介面文件。
 - 中文顯示名稱與穩定技術 ID 映射。
 - Event Conditions、Effects、Content、Next Node 與權重表單。
+- Event Conditions／Effects／Content 權重／Next Node 權重都以獨立卡片呈現，並共用無群組 Pointer 排序；Conditions／Effects 直接保存陣列順序，權重 object 只保存 Editor 顯示順序而不改變機率。
+- Content 文件與 Textbox Profile 管理清單共用無群組 Pointer 排序。Scene Node 選單則組合 `js/ui/group_drag.js`，以 Node.json 的可選 `Group` 與 `Order` 保存停留成組、跨框移入／移出及整組排序，並由 `PUT /api/node-groups` 原子寫入；Global Node 固定在群組流之外。共用群組意圖停留時間為 500ms，未群組候選會向下展開 48px 的真實預留空間；Event／Node 群組內排序後以暫時 pinned-open 狀態保持展開至 pointerleave，整組預覽則以 220ms 從目前高度縮合。Node.json 的可選 `Content Order` 與 Profile 的可選 `Order` 同樣是 Editor-only metadata。缺值時保持既有穩定順序，首次拖移後才正規化，不得改變 ROOT、Stack、圖面布局或 Runtime。
+- 刪除 Content 權重列時，最後一列必須正規化為 `null`，不可保存空 object；空 object 會被 API 視為不合法權重表並造成正常刪除顯示 autosave 錯誤。
 - Event Trigger 的 Options 來源在 UI 顯示為 `Option`，JSON／Runtime 契約仍是 `Action:<id>`；Auto 顯示為 On Enter／On Node／On Exit，保存為 `Auto:Enter`／`Auto:Node`／`Auto:Exit`。
 - Event Content 使用創作者命名的文件第一層與 label 第二層的階層選單；只有一個 label 的文件在 UI 直接映射為創作者名稱，實際保存值仍是技術 label。
-- Event 的 `Group` 是單層 authoring metadata；缺值／空值正規化為固定 `Normal`，不參與 Runtime、Priority／Weight、生命週期或關聯圖。Event Pool 只保留一個展滿側欄的新增 Event 按鈕；未群組 Event 與群組卡片依 `Order` 共用同一排序流，末端永遠保留自然落點，可將 Event 排在最末群組之後。Pointer 拖移以真實元素即時騰出插入間隙並用 FLIP 位移推開 Event／群組；只有游標仍位於候選項目或群組的目前幾何邊界內，650ms 停留才可成組，讓位移開後立即取消。普通點擊在 7px 拖移門檻前不得改動 DOM或阻擋 Event 選取。群組預設收起為較短的可改名欄位與數量，hover、鍵盤 focus、拖移進入時展開；名稱與數量之間的無圖示留白可將群組當成單一排序區塊拖移，起拖時內容強制收起，成員歸屬與內部順序不變。群組剩一個 Event 時自動解散；順序保存於可選、非負整數的 Editor-only `Order`，舊資料缺值時依現有穩定順序讀取。成功拖移只更新同步狀態、不顯示 Toast；批次群組與排序經 `/api/event-groups` 一次保存，失敗不得提交畫面狀態且仍需顯示錯誤。
+- Event 的 `Group` 是單層 authoring metadata；缺值／空值正規化為固定 `Normal`，不參與 Runtime、Priority／Weight、生命週期或關聯圖。Event Pool 只保留一個展滿側欄的新增 Event 按鈕；未群組 Event 與群組卡片依 `Order` 共用同一排序流，末端永遠保留自然落點，可將 Event 排在最末群組之後。Pointer 拖移以真實元素即時騰出插入間隙並用 FLIP 位移推開 Event／群組；只有游標仍位於候選項目或群組的目前幾何邊界內，500ms 停留才可成組，未群組候選會向下展開 48px 預留空間，讓位移開後立即取消。普通點擊在 7px 拖移門檻前不得改動 DOM或阻擋 Event 選取。群組預設收起為較短的可改名欄位與數量，hover、鍵盤 focus、拖移進入時展開；群組內排序後保持展開至 pointerleave。名稱與數量之間的無圖示留白可將群組當成單一排序區塊拖移，浮動預覽以 220ms 從目前高度縮合，成員歸屬與內部順序不變。群組剩一個 Event 時自動解散；順序保存於可選、非負整數的 Editor-only `Order`，舊資料缺值時依現有穩定順序讀取。成功拖移只更新同步狀態、不顯示 Toast；批次群組與排序經 `/api/event-groups` 一次保存，失敗不得提交畫面狀態且仍需顯示錯誤。
 - 所有固定選項 `<select>` 由前端提升為共用自訂選單；長清單可在選單內捲動。圖片與音訊依路徑資料建立任意深度的父子選單，父子框之間固定保留間隔與透明滑鼠通道，並支援方向鍵、Enter、Esc；欄位只顯示檔名。原始欄位仍保留在表單內，確保既有表單讀取與 API payload 不變。
 - Options 的 Hover Sound 與 Click Sound 只掃描 `game/audio/`。Event 不提供 BGM／SE Effect 或 Persistent；音訊演出由 Content 使用 Ren'Py 原生語法。
 - TEXTBOX、PICTURE、HITBOX 選項表單。
+- TEXTBOX 專案共用外觀設定檔：獨立檔案 CRUD、Profile 選擇、Feature 開關、稀疏局部覆寫、Editor 預覽、Runtime hover accent／text shadow／staggered entrance，以及缺檔回退與引用刪除保護。
+- Textbox 套用設定檔時清空舊的 Element 局部覆寫；若之後另有覆寫，外觀區明示數量並提供「改用設定檔外觀」。每次 `scene_begin()` 會先重載 catalog，讓同一 Ren'Py process 從主選單重新開始時取得 Editor 最新保存的 Options 與設定檔。
+- Options 畫布右側是共用的即時 Inspector：固定標題呈現目前 Element、類型與外觀摘要，TEXTBOX 使用「佈局／樣式／效果／Item」，PICTURE／HITBOX 使用「佈局／樣式」。內容區一次只渲染目前分類，畫布保持可見並在欄位輸入時即時刷新；點擊畫布 Textbox Item 會直接選取該 Item 並切到 Item 分類。Inspector 仍直接操作現有 Options 草稿，不建立獨立 Dialog、保存端點或第二份狀態。
+- Runtime 的 Textbox Profile JSON 驗證必須使用 `collections.abc.Mapping`，不可用 `isinstance(value, dict)`；Ren'Py store 內的 `dict` 名稱是 `RevertableDict`，但 `json.load()` 會回傳原生 Python `dict`，直接比較會把所有合法設定檔誤判為壞檔。
 - Options 拖曳把手式表單／畫布切換，以及畫布拖曳、縮放、格線與吸附。
 - 自動儲存採遞增 revision；過期請求不得覆蓋較新的草稿、狀態或儲存提示。切換節點、分頁或文件前先完成目前 revision，刪除則先取消並等待舊寫入，避免刪除後的競態與假失敗。
 - 自動儲存排程與競態控制已抽成可獨立測試的 `autosave_coordinator.js`；Node 測試覆蓋連續編輯、切換前 flush、刪除前 cancel-and-wait、網路重試與失敗阻擋。
-- 前端已開始漸進式模組化：API Client、Editor Settings、Event Trigger／End up 契約、Event 規則與權重表單、Event／Stats 排序流區塊模型、共用 Pointer 即時插入與停留群組控制器、共用階層下拉選單及關聯圖純資料模型都有獨立模組與 Node 測試；`app.js` 保留組裝、渲染與跨模組協調。
+- 前端已開始漸進式模組化：API Client、Editor Settings、Event Trigger／End up 契約、Event 規則與權重表單、Event／Stats 排序流區塊模型、共用 Pointer 即時插入與停留群組控制器、無群組清單排序控制器、共用階層下拉選單、Content 程式碼提示轉換及關聯圖純資料模型都有獨立模組與 Node 測試；`app.js` 保留組裝、渲染與跨模組協調。
+- Content 的 Monaco／Shiki 瀏覽器資產由 `tools/build_editor_assets.mjs` 依鎖定 npm 版本與 `tools/editor_assets/renpy-language/` 的官方 grammar／snippets 產生至 `EDITOR/static/vendor/`。安裝包只帶生成資產，不需要 Node 或網路；`python3 tools/verify.py` 會檢查生成物沒有過期。進階編輯器透過隱藏 textarea 的既有 `input`／autosave 契約接線，載入失敗必須回退到可用 textarea，不可改變 Content API 或 `.rpy` 格式。第三方聲明位於 `EDITOR/THIRD_PARTY_NOTICES.md`。
 - Condition／Effect 類型、操作與預設資料形狀集中於 `state_rule_contract.js`；跨層測試會直接比較前端 registry、Editor API registry 與 Runtime 分支，新增操作不得只修改表單。
 - CSS 的設計 token 與瀏覽器基礎規則已分離至 `css/tokens.css`、`css/base.css`；其餘工作區樣式仍在 `styles.css` 漸進整理，不在搬移時改變視覺。
 - 節點刪除引用檢查與 `.scene-node-trash/` 可復原區。
@@ -192,6 +205,7 @@ Runtime 以獨立 `scene_enabled_options` 保存受控目標，不污染 Stats�
 - 節點半徑仍以 cycle-safe 唯一後代遍歷繼承空間需求，深層後代逐層衰減並以 `log2` 壓縮；半徑增幅係數為 3.25、上限為 32 graph units，使 hub 可辨識但不過度放大。這項 metric 不再參與座標計算，因此相同資料與 ROOT 立即得到相同位置，沒有初始收斂或持續力場。
 - 主幹、cross、REPLACE、management 與 Cycle 使用不同的 deterministic cubic routes；同深度 GOTO／Cycle 與 REPLACE 都依來源—目標向量建立有界局部法向彎曲，只有跨正式深度的回邊才繞向外側。所有路徑仍由來源圓心連到目標圓心，手工 SVG polygon 箭頭尖端停在接收端圓周；箭頭隨圖面縮放，Node Name 依 viewBox／viewport 比例反向補償。背景不渲染深度色帶、欄名或左上圖例。`countEdgeCrossings()` 與 SVG `data-edge-crossings` 保留為診斷值，不再驅動節點移動。
 - 關聯圖開啟時以 deterministic reveal step 從 ROOT 沿正式深度與局部 rank 依序延展連線、彈出節點；任一 pointer／wheel／keyboard 操作可立即完成進場。進場後 `createLayoutController().frame()` 以 Node ID 決定的呼吸偏移作為強錨點目標，只讓真實 GOTO／REPLACE 配對以弱彈簧耦合 offset，並讓結構錨點相距 210 graph units 內的預先計算配對產生對稱斥力；MANAGEMENT／Global 關係不參與。拖曳時 pinned 節點的實際 anchor displacement 會加入彈簧差值，且 pinned 節點會與所有目前靠近的節點動態檢查斥力；力只施加於未 pinned 端，確保被抓節點維持 1:1。每個未拖曳節點的總顯示偏移硬限制為 7 graph units，線段跟隨顯示位置，結構座標與穩定互動命中區不動。`prefers-reduced-motion` 會停用兩者；這不是力導向收斂，也不得重新影響布局、儲存或 crossing 診斷。
+- 關聯圖只在工作區實際開啟時建立 SVG；切離工作區或文件進入背景時必須停止 idle `requestAnimationFrame`。`/api/graph` 只重新掃描 Root、Node summaries 與 GOTO／REPLACE edges，避免為切換圖面重讀 Stats、素材、Options targets 與完整 Validation。新的 topology 由 `graph_layout_worker.js` 在 Web Worker 計算並快取；crossing 診斷同樣在 worker 完成，主執行緒只負責 SVG。idle 微動依節點數限制為約 30／18／12 fps，拖曳與回位仍可回到逐幀更新。不得為效能快取而保存或改寫任何節點位置。
 - 空白平移不限邊界，縮放寬度安全範圍為 120–250000 graph units；初始畫面與圓形按鈕改為 fit 完整圖面。節點仍可用 Pointer Events 暫時拖離位置以查看線路；被抓節點緊貼游標，相連或靠近的其他節點只做有界視覺響應，放開後拖曳節點以阻尼控制器回到結構 slot，其他節點回復錨點附近的閒置物理，所有位置都不保存。雙向 REPLACE 合成一條雙箭頭虛線，雙向 GOTO 保留兩條高對比反向弧線；管理邊遞迴追蹤完整 REPLACE 鏈且不寫入 Parent Schema。節點 hover／鍵盤 focus、搜尋降噪、縮放、無邊平移與節點切換行為維持不變。
 - 編輯器快捷鍵與自訂設定。
 - 編輯器設定透過 `/api/editor-settings` 寫入專案根目錄 `.scene-node-editor/settings.json`，不可退回只依賴隨機連接埠來源的 `localStorage`。
@@ -298,7 +312,10 @@ EDITOR/static/js/ui/choice_picker.js
   所有原生 select 的共用階層選單、任意目錄深度、鍵盤操作與定位。
 
 EDITOR/static/js/ui/group_drag.js
-  Event／Stats 共用 Pointer 拖移、即時插入間隙、FLIP 讓位、跨群組歸屬與 650ms 停留成組；純資料排序／解散規劃可由 Node 測試直接呼叫。
+  Event／Stats／Node 共用 Pointer 拖移、即時插入間隙、FLIP 讓位、跨群組歸屬與 500ms 停留成組；純資料排序／解散規劃可由 Node 測試直接呼叫。
+
+EDITOR/static/js/ui/list_reorder.js
+  Scene Nodes、Event Conditions／Effects／Content／Next Node、Options Elements／Textbox Items、Content 文件、Textbox Profiles 與 Memory Banks 共用的無群組 Pointer 排序；提供 7px 起拖門檻、1:1 預覽、表格列 colgroup 幾何複製、即時插入間隙、中線遲滯、FLIP 讓位、邊緣自動捲動與 reduced-motion 回退，並以依賴注入的 `onDrop` 保存各工作區既有資料順序。
 
 EDITOR/static/js/workspaces/event_editor.js
   Event Group 正規化／分組、Condition／Effect 列、Content／Next Node 權重表單、DOM 回讀與規則型別切換；依賴由 app.js 建立時明確注入。
@@ -308,6 +325,22 @@ EDITOR/static/js/workspaces/state_editor.js
 
 EDITOR/static/js/workspaces/graph_model.js
   關聯圖 GOTO／REPLACE／遞迴管理關係、雙向關係正規化、Stack 深度／同深度 GOTO local progression／REPLACE parity lanes／分支泳道布局、拖曳回位控制器、Cycle route 與 SVG edge path 的可測試資料邏輯。
+
+EDITOR/static/js/workspaces/graph_layout_client.js
+  關聯圖 topology signature、Web Worker 任務／取消／fallback 與精簡 layout 快取的前端邊界。
+
+EDITOR/static/js/workspaces/graph_layout_worker.js
+  在背景執行 deterministic graph layout 與 crossing 診斷；結果仍由 app.js 組裝成 SVG，worker 不持有 DOM 或保存位置。
+
+EDITOR/static/js/workspaces/textbox_profiles.js
+  Textbox Profile 查找、Style／Feature 解析優先序、缺檔回退與解除 Profile 時的樣式實體化；不持有 DOM 或發送 API。
+
+EDITOR/static/js/workspaces/content_editor_support.js
+  官方 Ren'Py snippets 的四格縮排正規化、completion context 判斷及目前節點 label／專案素材／Runtime API 建議；保持 Node 可直接測試。
+
+tools/editor_assets/content_editor_entry.js
+tools/build_editor_assets.mjs
+  Monaco／Shiki 的瀏覽器入口與可重現建置；輸出 `EDITOR/static/vendor/content_editor.{js,css}` 與 worker，輸出需提交並由 verify 檢查同步。
 
 EDITOR/static/styles.css
   尚待逐步拆分的既有元件、工作區版面、響應式規則與互動狀態。
@@ -323,7 +356,7 @@ INTEGRATION/TestGame/FRAMEWORK/option_renderer.rpy
   Options.json 的 Ren'Py Screen Renderer。
 
 tools/install.py
-  將 Editor 與 Framework 安裝或更新到 Ren'Py 專案。
+  將 Editor 與 Framework 安裝或更新到 Ren'Py 專案；同時管理 `.scene-node-editor/AI_CONTEXT.md` 與 `docs/{zh-TW,en}/` 創作者文件包，並由 Editor 內的 README 作本機入口。更新可覆寫這些 Installer-owned 文件，但不可碰觸創作者資料。
 
 tools/create_editor_test_unit.py
   只對全新空白專案建立可拋棄的 Editor／Runtime 綜合測試內容；安全閘門會拒絕既有 Editor 資料。
@@ -344,7 +377,11 @@ tests/test_runtime_memory.py
   Runtime Memory API、舊存檔 Tag 合併與舊 Event 相容測試。
 
 tests/test_option_availability.py
-  Options Version 2 遷移、Option Effect schema／引用／刪除保護，以及 Runtime Element／Item 組合、冪等操作與錯誤訊息測試。
+  Options Availability 遷移、Option Effect schema／引用／刪除保護，以及 Runtime Element／Item 組合、冪等操作與錯誤訊息測試。
+
+tests/test_textbox_profiles.py
+tests/js/textbox_profiles.test.js
+  Profile schema／獨立檔案／引用保護／缺檔回退、Editor 與 Runtime 解析優先序，以及三種 Renderer 特性的回歸測試。
 
 tests/js/autosave_coordinator.test.js
   自動儲存、切換與刪除競態的獨立 JavaScript 回歸測試。

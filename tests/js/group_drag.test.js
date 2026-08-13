@@ -5,6 +5,10 @@ const test = require("node:test");
 
 const SceneGroupDrag = require("../../EDITOR/static/js/ui/group_drag.js");
 
+test("group intent dwell is brief without becoming an accidental hover", () => {
+  assert.equal(SceneGroupDrag.DEFAULT_DWELL_MS, 500);
+});
+
 test("dwelling one ungrouped item over another creates a unique group", () => {
   const items = [
     { id: "a", group: "Normal" },

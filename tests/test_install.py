@@ -38,11 +38,25 @@ class InstallerTest(unittest.TestCase):
             self.assertTrue(launcher.exists())
             self.assertTrue(os.access(launcher, os.X_OK))
             self.assertTrue((project_root / ".scene-node-editor" / "EDITOR" / "app.py").exists())
+            for asset in (
+                "content_editor.js",
+                "content_editor.css",
+                "content_editor.worker.js",
+            ):
+                self.assertTrue(
+                    (project_root / ".scene-node-editor" / "EDITOR" / "static" / "vendor" / asset).is_file()
+                )
             installed_context = project_root / ".scene-node-editor" / "AI_CONTEXT.md"
             self.assertEqual(
                 installed_context.read_text(encoding="utf-8"),
                 install.AI_CONTEXT_SOURCE.read_text(encoding="utf-8"),
             )
+            for relative_target, source in install.MANAGED_CONTEXT_SOURCES:
+                installed_document = project_root / ".scene-node-editor" / relative_target
+                self.assertEqual(
+                    installed_document.read_text(encoding="utf-8"),
+                    source.read_text(encoding="utf-8"),
+                )
             self.assertFalse(
                 (project_root / ".scene-node-editor" / "EDITOR" / "HANDOFF.md").exists()
             )
@@ -63,7 +77,7 @@ class InstallerTest(unittest.TestCase):
             self.assertEqual(
                 json.loads((game_root / "GLOBALNODE" / "Options.json").read_text(encoding="utf-8")),
                 {
-                    "Version": 2,
+                    "Version": 3,
                     "Canvas": {"Width": 1920, "Height": 1080, "Preview Background": ""},
                     "Elements": [],
                 },
@@ -73,6 +87,8 @@ class InstallerTest(unittest.TestCase):
                 json.loads(memories_file.read_text(encoding="utf-8")),
                 {"memory": {"Name": "Memory"}},
             )
+            textbox_profile_root = game_root / "DATA" / "TEXTBOX_PROFILES"
+            self.assertTrue(textbox_profile_root.is_dir())
             root_node = game_root / "SCENENODE" / "root"
             self.assertTrue((root_node / "Node.json").exists())
             self.assertEqual(
@@ -114,6 +130,10 @@ class InstallerTest(unittest.TestCase):
             content_marker.parent.mkdir(parents=True)
             content_marker.write_text("preserve me\n", encoding="utf-8")
             installed_context.write_text("outdated managed context\n", encoding="utf-8")
+            installed_user_guide = (
+                project_root / ".scene-node-editor" / "docs" / "zh-TW" / "USER_GUIDE.md"
+            )
+            installed_user_guide.write_text("outdated managed guide\n", encoding="utf-8")
             stale_handoff = project_root / ".scene-node-editor" / "EDITOR" / "HANDOFF.md"
             stale_handoff.write_text("stale internal handoff\n", encoding="utf-8")
             custom_memories = {
@@ -122,6 +142,12 @@ class InstallerTest(unittest.TestCase):
             }
             memories_file.write_text(
                 json.dumps(custom_memories, ensure_ascii=False, indent=2) + "\n",
+                encoding="utf-8",
+            )
+            custom_textbox_profile = {"Version": 1, "ID": "creator_style", "Name": "Creator Style"}
+            textbox_profile_file = textbox_profile_root / "creator_style.json"
+            textbox_profile_file.write_text(
+                json.dumps(custom_textbox_profile, ensure_ascii=False, indent=2) + "\n",
                 encoding="utf-8",
             )
             global_options_file = game_root / "GLOBALNODE" / "Options.json"
@@ -176,8 +202,13 @@ class InstallerTest(unittest.TestCase):
                 installed_context.read_text(encoding="utf-8"),
                 install.AI_CONTEXT_SOURCE.read_text(encoding="utf-8"),
             )
+            self.assertEqual(
+                installed_user_guide.read_text(encoding="utf-8"),
+                (ROOT / "docs" / "zh-TW" / "USER_GUIDE.md").read_text(encoding="utf-8"),
+            )
             self.assertFalse(stale_handoff.exists())
             self.assertEqual(json.loads(memories_file.read_text(encoding="utf-8")), custom_memories)
+            self.assertEqual(json.loads(textbox_profile_file.read_text(encoding="utf-8")), custom_textbox_profile)
             self.assertEqual(json.loads(global_options_file.read_text(encoding="utf-8")), custom_global_options)
             self.assertTrue(global_event_file.exists())
             self.assertIn("screen creator_hud", custom_screens.read_text(encoding="utf-8"))
@@ -227,7 +258,7 @@ class InstallerTest(unittest.TestCase):
             )
             try:
                 project_data = self.wait_for_project(port, process)
-                self.assertEqual(project_data["projectName"], "game")
+                self.assertEqual(project_data["projectName"], project_root.name)
                 self.assertEqual(project_data["stats"], custom_stats)
                 self.assertEqual(project_data["memories"], custom_memories)
                 self.assertEqual(project_data["rootNodeId"], "root")
@@ -240,6 +271,14 @@ class InstallerTest(unittest.TestCase):
                 self.assertEqual(project_data["graph"], {"edges": []})
                 self.assertNotIn("screenNames", project_data)
                 self.assertEqual(project_data["issues"], [])
+
+                graph_data = self.request_json(port, "/api/graph")
+                self.assertEqual(graph_data["rootNodeId"], "root")
+                self.assertEqual(graph_data["globalNode"]["id"], "__global__")
+                self.assertEqual([node["id"] for node in graph_data["nodes"]], ["root"])
+                self.assertEqual(graph_data["graph"], {"edges": []})
+                self.assertNotIn("optionCount", graph_data["globalNode"])
+                self.assertNotIn("optionCount", graph_data["nodes"][0])
 
                 with self.assertRaises(urllib.error.HTTPError) as screen_api_error:
                     self.request_json(port, "/api/screen?name=creator_hud")

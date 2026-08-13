@@ -1,14 +1,16 @@
 # 使用 AI 協助開發 Scene Node 遊戲
 
-[繁體中文](AI_WORKFLOW.md) · [English](../en/AI_WORKFLOW.md) · [回到首頁](../../README.md)
+[繁體中文](AI_WORKFLOW.md) · [English](../en/AI_WORKFLOW.md) · [回到首頁](../../EDITOR/README.md)
 
-Installer 會將一份精簡契約放在：
+Installer 會把精簡契約與中英文創作者文件放在：
 
 ```text
 <RenPy Project>/.scene-node-editor/AI_CONTEXT.md
+<RenPy Project>/.scene-node-editor/docs/zh-TW/
+<RenPy Project>/.scene-node-editor/docs/en/
 ```
 
-開始任何 AI 工作前，先要求它閱讀該文件。這比把整份 Reference 貼進提示更穩定，也能避免 AI 誤改 Framework 或把 Options 當成自訂 Screen。
+開始任何 AI 工作前，先要求它閱讀 `AI_CONTEXT.md`；需要細節時，再閱讀專案內同語言的 Reference 或 User Guide。這比把文件貼進提示更穩定，也能避免 AI 誤改 Framework 或把 Options 當成自訂 Screen。這些文件由 Installer 管理，更新 Editor 時會一起刷新。
 
 ## 通用提示模板
 

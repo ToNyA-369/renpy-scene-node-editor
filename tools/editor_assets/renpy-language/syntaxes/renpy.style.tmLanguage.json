@@ -1,0 +1,187 @@
+{
+  "information_for_contributors": [
+    "This file is generated from syntaxes/renpy.style.tmLanguage.yaml. Please edit that file instead.",
+    "Please remember to regenerate the ts token patterns using the 'syntax-to-token-pattern.py' python script"
+  ],
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "Ren'Py Style",
+  "scopeName": "source.renpy.style",
+  "patterns": [
+    {
+      "include": "#style"
+    }
+  ],
+  "repository": {
+    "builtin-styles": {
+      "patterns": [
+        {
+          "name": "support.type.builtin.style.renpy",
+          "match": "\\b(?<!\\.)(?:(alt)?ruby_style)\\b"
+        }
+      ]
+    },
+    "style-block-tester": {
+      "patterns": [
+        {
+          "contentName": "meta.style-block.renpy",
+          "begin": "(?<=(^[ \\t]*)(?:style)\\b.*?)(:)",
+          "beginCaptures": {
+            "2": {
+              "name": "punctuation.section.style.begin.renpy"
+            }
+          },
+          "end": "^(?=(?!\\1)[ \\t]*[^\\s#]|\\1[^\\s#])",
+          "patterns": [
+            {
+              "include": "#style-clause"
+            },
+            {
+              "include": "source.renpy#fallback-patterns"
+            }
+          ]
+        }
+      ]
+    },
+    "style-property": {
+      "patterns": [
+        {
+          "comment": "ON EDIT: If you update this list, also update it in style-clause",
+          "name": "support.constant.property-key.renpy entity.name.tag.css.style.renpy",
+          "match": "\\b(?<!\\.)(?:(?:selected_)?(?:hover_|idle_|insensitive_|activate_)?(?:activate_sound|adjust_spacing|aft_bar|aft_gutter|align|alt|altruby_style|anchor|antialias|area|axis|background|bar_invert|bar_resizing|bar_vertical|base_bar|black_color|bold|bottom_bar|bottom_gutter|bottom_margin|bottom_padding|box_align|box_first_spacing|box_justify|box_layout|box_reverse|box_spacing|box_wrap|box_wrap_spacing|caret|child|clipping|color|debug|drop_shadow|drop_shadow_color|emoji_font|enable_hover|extra_alt|first_indent|first_spacing|fit_first|focus_mask|focus_rect|font|font_features|fore_bar|fore_gutter|foreground|group_alt|hinting|hover_sound|hyperlink_functions|instance|italic|justify|kerning|key_events|keyboard_focus|keyboard_focus_insets|language|layout|left_bar|left_gutter|left_margin|left_padding|line_leading|line_overlap_split|line_spacing|margin|maximum|min_width|minimum|minwidth|mipmap|modal|mouse|newline_indent|offset|order_reverse|outline_scaling|outlines|padding|pos|prefer_emoji|reading_order|rest_indent|right_bar|right_gutter|right_margin|right_padding|ruby_line_leading|ruby_style|shaper|size|size_group|slow_abortable|slow_cps|slow_cps_multiplier|slow_speed|spacing|strikethrough|subpixel|subtitle_width|text_align|text_y_fudge|textalign|textshader|thumb|thumb_align|thumb_offset|thumb_shadow|time_policy|top_bar|top_gutter|top_margin|top_padding|underline|unscrollable|vertical|xalign|xanchor|xcenter|xfill|xfit|xmargin|xmaximum|xminimum|xoffset|xpadding|xpos|xsize|xspacing|xycenter|xysize|yalign|yanchor|ycenter|yfill|yfit|ymargin|ymaximum|yminimum|yoffset|ypadding|ypos|ysize|yspacing))\\b"
+        },
+        {
+          "name": "support.type.builtin.style.renpy",
+          "match": "\\b(?<!\\.)(?:(alt)?ruby_style)\\b"
+        },
+        {
+          "name": "support.constant.property-key.renpy entity.name.tag.css.style.renpy",
+          "match": "\\b(?<!\\.)(?:properties)\\b"
+        },
+        {
+          "comment": "Any other tokens are invalid",
+          "match": ".+",
+          "name": "invalid.illegal.style-property.name.renpy"
+        }
+      ]
+    },
+    "style-clause": {
+      "patterns": [
+        {
+          "comment": "is statement",
+          "begin": "\\b(?<!\\.)(is)\\b",
+          "beginCaptures": {
+            "1": {
+              "name": "keyword.operator.logical.python"
+            }
+          },
+          "end": "(?!\\G)(?<=[^ \\t])|$",
+          "patterns": [
+            {
+              "name": "entity.name.type.style.base.renpy",
+              "match": "\\b[\\p{XID_Start}_]\\p{XID_Continue}*\\b"
+            },
+            {
+              "include": "source.renpy#fallback-patterns"
+            }
+          ]
+        },
+        {
+          "match": "\\b(?<!\\.)clear\\b",
+          "name": "keyword.clear.renpy"
+        },
+        {
+          "begin": "\\b(?<!\\.)(take)\\b",
+          "beginCaptures": {
+            "1": {
+              "name": "keyword.take.renpy"
+            }
+          },
+          "end": "(?!\\G)(?<=[^ \\t])|$",
+          "patterns": [
+            {
+              "include": "source.renpy#name"
+            },
+            {
+              "include": "source.renpy#fallback-patterns"
+            }
+          ]
+        },
+        {
+          "match": "\\b(?<!\\.)(del)\\b[ \\t]*(\\w*)",
+          "captures": {
+            "1": {
+              "name": "keyword.del.renpy"
+            },
+            "2": {
+              "patterns": [
+                {
+                  "include": "#style-property"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "begin": "\\b(?<!\\.)(variant)\\b",
+          "end": "(?!\\G)",
+          "beginCaptures": {
+            "1": {
+              "name": "keyword.variant.renpy"
+            }
+          },
+          "patterns": [
+            {
+              "include": "source.renpy#simple-expression"
+            }
+          ]
+        },
+        {
+          "comment": "ON EDIT: If you update this list, also update it in style-property",
+          "begin": "\\b(?<!\\.)(properties|(?:(?:selected_)?(?:hover_|idle_|insensitive_|activate_)?(?:activate_sound|adjust_spacing|aft_bar|aft_gutter|align|alt|altruby_style|anchor|antialias|area|axis|background|bar_invert|bar_resizing|bar_vertical|base_bar|black_color|bold|bottom_bar|bottom_gutter|bottom_margin|bottom_padding|box_align|box_first_spacing|box_justify|box_layout|box_reverse|box_spacing|box_wrap|box_wrap_spacing|caret|child|clipping|color|debug|drop_shadow|drop_shadow_color|emoji_font|enable_hover|extra_alt|first_indent|first_spacing|fit_first|focus_mask|focus_rect|font|font_features|fore_bar|fore_gutter|foreground|group_alt|hinting|hover_sound|hyperlink_functions|instance|italic|justify|kerning|key_events|keyboard_focus|keyboard_focus_insets|language|layout|left_bar|left_gutter|left_margin|left_padding|line_leading|line_overlap_split|line_spacing|margin|maximum|min_width|minimum|minwidth|mipmap|modal|mouse|newline_indent|offset|order_reverse|outline_scaling|outlines|padding|pos|prefer_emoji|reading_order|rest_indent|right_bar|right_gutter|right_margin|right_padding|ruby_line_leading|ruby_style|shaper|size|size_group|slow_abortable|slow_cps|slow_cps_multiplier|slow_speed|spacing|strikethrough|subpixel|subtitle_width|text_align|text_y_fudge|textalign|textshader|thumb|thumb_align|thumb_offset|thumb_shadow|time_policy|top_bar|top_gutter|top_margin|top_padding|underline|unscrollable|vertical|xalign|xanchor|xcenter|xfill|xfit|xmargin|xmaximum|xminimum|xoffset|xpadding|xpos|xsize|xspacing|xycenter|xysize|yalign|yanchor|ycenter|yfill|yfit|ymargin|ymaximum|yminimum|yoffset|ypadding|ypos|ysize|yspacing)))\\b",
+          "end": "(?!\\G)|$",
+          "beginCaptures": {
+            "1": {
+              "name": "support.constant.property-key.renpyx entity.name.tag.css.style.renpy"
+            }
+          },
+          "patterns": [
+            {
+              "include": "source.renpy#simple-expression"
+            }
+          ]
+        }
+      ]
+    },
+    "style": {
+      "comment": "See https://www.renpy.org/doc/html/styles.html",
+      "name": "meta.style.statement.renpy",
+      "contentName": "meta.style.parameters.renpy",
+      "begin": "(?<=^[ \\t]*)(style)\\b",
+      "beginCaptures": {
+        "1": {
+          "name": "storage.type.style.renpy"
+        }
+      },
+      "end": "$|^",
+      "patterns": [
+        {
+          "include": "#builtin-styles"
+        },
+        {
+          "comment": "Only the first identifier is a style name",
+          "name": "entity.name.type.style.renpy",
+          "match": "(?<=\\bstyle[ \\t]*)\\b[\\p{XID_Start}_]\\p{XID_Continue}*\\b"
+        },
+        {
+          "include": "#style-clause"
+        },
+        {
+          "include": "#style-block-tester"
+        },
+        {
+          "include": "source.renpy#fallback-patterns"
+        }
+      ]
+    }
+  }
+}

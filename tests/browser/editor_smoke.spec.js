@@ -51,7 +51,7 @@ async function waitForEventSave(page, action) {
   ));
   await action();
   await response;
-  await expect(page.getByRole("status")).toHaveText("已自動儲存");
+  await expect(page.locator("#saveState")).toHaveText("已自動儲存");
 }
 
 async function waitForOptionsSave(page, action) {
@@ -62,7 +62,7 @@ async function waitForOptionsSave(page, action) {
   ));
   await action();
   await response;
-  await expect(page.getByRole("status")).toHaveText("已自動儲存");
+  await expect(page.locator("#saveState")).toHaveText("已自動儲存");
 }
 
 async function waitForStateSave(page, action) {
@@ -88,7 +88,20 @@ async function reloadAndWaitForProject(page) {
   ));
   await page.reload();
   await projectResponse;
-  await expect(page.getByRole("status")).toHaveText(/^(已同步|Synced)$/);
+  await expect(page.locator("#saveState")).toHaveText(/^(已同步|已自動儲存|Synced|Autosaved)$/);
+}
+
+async function openNodeSidebar(page) {
+  await expect(page.getByRole("navigation", { name: /編輯器分頁|Editor tabs/ })).toBeVisible();
+  await expect(page.locator("#saveState")).toHaveText(/^(已同步|已自動儲存|Synced|Autosaved)$/);
+  const body = page.locator("body");
+  if (!await body.evaluate((element) => element.classList.contains("sidebar-open"))) {
+    await page.locator("#openSidebar").click();
+  }
+  await expect(page.locator("#openSidebar")).toHaveAttribute("aria-expanded", "true");
+  const sidebar = page.locator(".sidebar");
+  await expect(sidebar).toBeVisible();
+  await expect.poll(() => sidebar.evaluate((element) => getComputedStyle(element).transform)).toMatch(/^(none|matrix\(1, 0, 0, 1, 0, 0\))$/);
 }
 
 async function dragStartPoint(source, box) {
@@ -182,6 +195,38 @@ async function dragToLiveTarget(page, sourceSelector, targetSelector, beforeDrop
   await page.mouse.up();
 }
 
+async function dragListItemBefore(page, source, target, beforeDrop = null) {
+  const sourceElement = source.first();
+  const targetElement = target.first();
+  await sourceElement.scrollIntoViewIfNeeded();
+  const sourceBox = await sourceElement.boundingBox();
+  const targetBox = await targetElement.boundingBox();
+  if (!sourceBox || !targetBox) throw new Error("List reorder source or target is not visible");
+  await page.mouse.move(sourceBox.x + 2, sourceBox.y + sourceBox.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(targetBox.x + 2, targetBox.y + Math.min(12, targetBox.height * 0.2), { steps: 12 });
+  await expect(page.locator(".list-reorder-preview")).toBeVisible();
+  await page.waitForTimeout(180);
+  if (beforeDrop) await beforeDrop();
+  await page.mouse.up();
+}
+
+async function dragListItemBeforeFromCenter(page, source, target, beforeDrop = null) {
+  const sourceElement = source.first();
+  const targetElement = target.first();
+  await sourceElement.scrollIntoViewIfNeeded();
+  const sourceBox = await sourceElement.boundingBox();
+  const targetBox = await targetElement.boundingBox();
+  if (!sourceBox || !targetBox) throw new Error("List reorder source or target is not visible");
+  await page.mouse.move(sourceBox.x + sourceBox.width / 2, sourceBox.y + sourceBox.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(targetBox.x + targetBox.width / 2, targetBox.y + Math.min(12, targetBox.height * 0.2), { steps: 12 });
+  await expect(page.locator(".list-reorder-preview")).toBeVisible();
+  await page.waitForTimeout(180);
+  if (beforeDrop) await beforeDrop();
+  await page.mouse.up();
+}
+
 test.beforeAll(async () => {
   projectRoot = fs.mkdtempSync(path.join(os.tmpdir(), "scene-node-browser-smoke-"));
   const gameRoot = path.join(projectRoot, "game");
@@ -229,6 +274,8 @@ test("critical editor interactions survive reload without browser errors", async
   await page.setViewportSize({ width: 1680, height: 900 });
   await page.goto(editorUrl);
   await expect(page.getByRole("navigation", { name: "編輯器分頁" })).toBeVisible();
+  await expect(page.locator("#projectName")).toHaveText(path.basename(projectRoot));
+  await expect(page.locator("#projectGraphSvg")).toHaveCount(0);
 
   await page.getByRole("button", { name: "狀態", exact: true }).click();
   await expect(page.locator("#statsGroups")).toBeVisible();
@@ -382,11 +429,16 @@ test("critical editor interactions survive reload without browser errors", async
   });
   await expect(page.locator(".effect-row")).toHaveCount(1);
   await waitForEventSave(page, async () => {
+    await page.locator('[data-remove-weighted^="content:"]').click();
+  });
+  await expect(page.locator('[data-remove-weighted^="content:"]')).toHaveCount(0);
+  await expect(page.locator(".toast.error")).toHaveCount(0);
+  await waitForEventSave(page, async () => {
     await changeSelect(page, "EndUp", "GOTO");
   });
   const refreshedGraphTarget = await page.locator('select[name="nextWeightedId"]').inputValue();
   const graphRefreshResponse = page.waitForResponse((candidate) => (
-    candidate.url().endsWith("/api/project")
+    candidate.url().endsWith("/api/graph")
     && candidate.request().method() === "GET"
     && candidate.ok()
   ));
@@ -1049,14 +1101,20 @@ test("graph refreshes newly created nodes without a page reload", async ({ page 
 
   await page.evaluate(() => { window.__graphRefreshDidNotReload = true; });
   const graphRefreshResponse = page.waitForResponse((candidate) => (
-    candidate.url().endsWith("/api/project")
+    candidate.url().endsWith("/api/graph")
     && candidate.request().method() === "GET"
     && candidate.ok()
   ));
   await page.getByRole("button", { name: "關聯圖", exact: true }).click();
   await graphRefreshResponse;
   await expect(page.locator(".graph-node-name", { hasText: "即時更新節點" })).toHaveCount(1);
+  await expect(page.locator("#projectGraphSvg")).toHaveAttribute("data-layout-source", /^(worker|cache)$/);
+  await expect(page.locator("#projectGraphSvg")).toHaveAttribute("data-edge-crossings", /^\d+$/);
   await expect.poll(() => page.evaluate(() => window.__graphRefreshDidNotReload)).toBe(true);
+
+  await expect(page.locator("#projectGraphSvg")).toHaveAttribute("data-animation-active", "true");
+  await page.getByRole("button", { name: "節點", exact: true }).click();
+  await expect(page.locator("#projectGraphSvg")).toHaveCount(0);
 });
 
 test("Event groups form through dwell-drag and dissolve when one item remains", async ({ page }) => {
@@ -1093,9 +1151,11 @@ test("Event groups form through dwell-drag and dissolve when one item remains", 
     }
     await route.continue();
   });
-  await dragWithDwell(page, savedEvent, backEvent, 720, async () => {
+  await dragWithDwell(page, savedEvent, backEvent, 520, async () => {
     await expect(backEvent).toHaveClass(/is-group-ready/);
     await expect(page.locator(".group-drag-preview")).toBeVisible();
+    await expect.poll(() => backEvent.evaluate((item) => Number.parseFloat(getComputedStyle(item).marginBottom)))
+      .toBeGreaterThan(40);
   });
   await expect(page.locator(".event-group")).toHaveCount(0);
   await expect(page.locator('.event-pool-flow > [data-group-item-id="branch_random"]')).toBeVisible();
@@ -1136,6 +1196,43 @@ test("Event groups form through dwell-drag and dissolve when one item remains", 
   await expect.poll(() => renamedGroup.locator(".event-group-items-shell").evaluate((shell) => (
     shell.getBoundingClientRect().height
   ))).toBeGreaterThan(20);
+
+  const reorderInsideGroupResponse = page.waitForResponse((candidate) => (
+    candidate.url().endsWith("/api/event-groups")
+    && candidate.request().method() === "PUT"
+    && candidate.ok()
+  ));
+  const groupItemIds = await page.locator('[data-group-drop="主線流程"] [data-group-item-id]').evaluateAll((items) => (
+    items.map((item) => item.dataset.groupItemId)
+  ));
+  await dispatchImmediateDrag(
+    page,
+    `[data-group-drop="主線流程"] [data-group-item-id="${groupItemIds[1]}"]`,
+    `[data-group-drop="主線流程"] [data-group-item-id="${groupItemIds[0]}"]`,
+  );
+  await reorderInsideGroupResponse;
+  await expect(page.locator('[data-group-drop="主線流程"]')).toHaveClass(/is-group-pinned-open/);
+  await expect.poll(() => page.locator('[data-group-drop="主線流程"] .event-group-items-shell').evaluate((shell) => (
+    shell.getBoundingClientRect().height
+  ))).toBeGreaterThan(20);
+
+  const expandedGroupHeight = await page.locator('[data-group-drop="主線流程"] .event-group-items-shell').evaluate((shell) => (
+    shell.getBoundingClientRect().height
+  ));
+  const groupDragSpace = page.locator('[data-group-drop="主線流程"] .event-group-drag-space');
+  const groupDragSpaceBox = await groupDragSpace.boundingBox();
+  if (!groupDragSpaceBox) throw new Error("Event group drag space is not visible");
+  await page.mouse.move(groupDragSpaceBox.x + groupDragSpaceBox.width / 2, groupDragSpaceBox.y + groupDragSpaceBox.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(groupDragSpaceBox.x + groupDragSpaceBox.width / 2 + 12, groupDragSpaceBox.y + groupDragSpaceBox.height / 2, { steps: 1 });
+  const groupPreview = page.locator(".group-drag-preview.is-group-block-preview");
+  await expect(groupPreview).toBeVisible();
+  await page.waitForTimeout(45);
+  const shrinkingHeight = await groupPreview.boundingBox().then((box) => box?.height || 0);
+  expect(shrinkingHeight).toBeGreaterThan(38);
+  expect(shrinkingHeight).toBeLessThan(expandedGroupHeight + 50);
+  await page.keyboard.press("Escape");
+  await page.mouse.up();
 
   const moveGroupResponse = page.waitForResponse((candidate) => (
     candidate.url().endsWith("/api/event-groups")
@@ -1322,6 +1419,89 @@ test("language switch stays put when flushing the current draft fails", async ({
   await page.reload();
 });
 
+test("textbox appearance profiles are reusable, previewed, and persisted", async ({ page }) => {
+  await page.setViewportSize({ width: 1680, height: 900 });
+  await page.goto(editorUrl);
+  await expect(page.getByRole("status")).toHaveText(/^(已同步|Synced)$/);
+  const optionsLabNode = page.locator('#nodeList [data-node-path="options_lab"]');
+  await optionsLabNode.dispatchEvent("click");
+  await page.getByRole("button", { name: "選項", exact: true }).click();
+  await page.locator(".option-workspace-divider").click();
+  await expect(page.locator('.option-builder[data-workspace-mode="canvas"]')).toBeVisible();
+  await expect(page.locator(".option-transition-overlay")).toHaveCount(0);
+  await expect(page.locator(".option-live-inspector")).toBeVisible();
+  await expect(page.locator("#optionStageShell")).toBeVisible();
+  const canvasInspectorRatio = await page.locator('.option-builder[data-workspace-mode="canvas"]').evaluate((builder) => {
+    const canvasWidth = builder.querySelector(".option-canvas-column")?.getBoundingClientRect().width || 0;
+    const inspectorWidth = builder.querySelector(".option-visual-inspector")?.getBoundingClientRect().width || 1;
+    return canvasWidth / inspectorWidth;
+  });
+  expect(canvasInspectorRatio).toBeGreaterThan(1.31);
+  expect(canvasInspectorRatio).toBeLessThan(1.36);
+  await expect(page.locator("#textboxAppearanceDialog")).toHaveCount(0);
+
+  await page.locator('[data-option-inspector-tab="style"]').click();
+  await page.locator("#manageTextboxProfiles").click();
+  const createResponse = page.waitForResponse((candidate) => (
+    candidate.url().endsWith("/api/textbox-profiles")
+    && candidate.request().method() === "POST"
+    && candidate.ok()
+  ));
+  await page.locator("#newTextboxProfile").click();
+  const created = await (await createResponse).json();
+  await page.locator('[data-textbox-profile-path="Name"]').fill("Smoke Glass");
+  await page.locator('[data-textbox-profile-path="Style.Background"]').fill("#102030cc");
+  await page.locator('[data-textbox-profile-path="Features.hover_accent.Enabled"]').check({ force: true });
+  const profileSave = page.waitForResponse((candidate) => (
+    candidate.url().endsWith("/api/textbox-profiles")
+    && candidate.request().method() === "PUT"
+    && candidate.ok()
+  ));
+  await page.locator("#saveTextboxProfile").click();
+  await profileSave;
+  await expect(page.locator(".toast").last()).toContainText("設定檔已儲存");
+  await page.locator('[data-close-dialog="textboxProfileDialog"]').last().click();
+
+  await waitForOptionsSave(page, async () => {
+    await page.locator("[data-textbox-profile-select]").selectOption(created.ID, { force: true });
+  });
+  await expect(page.locator(".option-text-item.has-hover-accent").first()).toBeVisible();
+  await page.locator('[data-option-inspector-tab="effects"]').click();
+  await waitForOptionsSave(page, async () => {
+    await page.locator('[data-textbox-feature="staggered_entrance"] + .boolean-display').click();
+  });
+  await expect(page.locator(".option-text-item.has-entrance").first()).toBeVisible();
+
+  const secondStageItem = page.locator("#optionStage [data-option-item-select]").nth(1);
+  const secondItemId = await secondStageItem.getAttribute("data-option-item-select");
+  await secondStageItem.dispatchEvent("pointerdown", { button: 0 });
+  await expect(page.locator('[data-option-inspector-tab="item"]')).toHaveClass(/active/);
+  await expect(page.locator(`.option-item-segment [data-option-item-select="${secondItemId}"]`)).toHaveClass(/active/);
+
+  await page.locator("#optionStage .option-stage-element.type-picture").click();
+  await expect(page.locator("[data-option-inspector-tab]")).toHaveCount(2);
+  await expect(page.locator('[data-option-inspector-tab="layout"]')).toHaveClass(/active/);
+  await page.locator('[data-option-inspector-tab="style"]').click();
+  await expect(page.locator(".option-inspector-section-heading h3").first()).toHaveText("互動回饋");
+
+  await page.locator("#optionStage .option-stage-element.type-hitbox").click();
+  await expect(page.locator("[data-option-inspector-tab]")).toHaveCount(2);
+  await expect(page.locator('[data-option-inspector-tab="style"]')).toHaveClass(/active/);
+  await expect(page.locator(".option-inspector-section-heading h3").last()).toHaveText("編輯器顯示");
+
+  const nodeResponse = await page.request.get(`${editorUrl}/api/node?path=options_lab`);
+  const node = await nodeResponse.json();
+  const textbox = node.options.Elements.find((element) => element.Type === "TEXTBOX");
+  expect(node.options.Version).toBe(3);
+  expect(textbox.Appearance.Profile).toBe(created.ID);
+  expect(textbox.Appearance["Style Overrides"]).toEqual({});
+  expect(textbox.Appearance.Features.staggered_entrance).toBe(true);
+
+  const profilesResponse = await page.request.get(`${editorUrl}/api/textbox-profiles`);
+  const profileData = await profilesResponse.json();
+  expect(profileData.profiles.find((profile) => profile.ID === created.ID).Name).toBe("Smoke Glass");
+});
+
 test("dynamic English surfaces render localized strings correctly across all workspaces", async ({ page }) => {
   await page.setViewportSize({ width: 1680, height: 900 });
   await page.goto(editorUrl);
@@ -1381,6 +1561,300 @@ test("dynamic English surfaces render localized strings correctly across all wor
   await langSelectEn.selectOption("zh-Hant", { force: true });
   await restoreSaveResponse;
   await page.waitForLoadState("networkidle");
+});
+
+test("shared drag sorting persists Event rules, Options, and Memory order", async ({ page }) => {
+  await page.setViewportSize({ width: 1680, height: 1100 });
+  const branchResponse = await page.request.get(`${editorUrl}/api/node?path=branch_lab`);
+  const branch = await branchResponse.json();
+  const event = branch.events.find((entry) => entry.data.ID === "branch_success").data;
+  event.Effects = [
+    { type: "stat", id: "test_actions", op: "+", value: 1 },
+    { type: "memory", bank: "test_session", id: "sorted_effect", op: "add" },
+  ];
+  event.Content = { test_branch_success: 2, test_branch_random: 1 };
+  event["Next Node"] = { outcome_success: 2, outcome_fallback: 1 };
+  const seedResponse = await page.request.post(`${editorUrl}/api/events`, {
+    data: { node: "branch_lab", originalId: event.ID, event },
+  });
+  expect(seedResponse.ok()).toBe(true);
+
+  await page.goto(editorUrl);
+  await openNodeSidebar(page);
+  await page.locator('#nodeList [data-node-path="branch_lab"]').click();
+  await page.getByRole("button", { name: /^事件 / }).click();
+  await page.locator('[data-event-id="branch_success"]').click();
+  await expect(page.locator("#conditionList .condition-row")).toHaveCount(2);
+  await expect(page.locator("#effectList .effect-row")).toHaveCount(2);
+  await expect(page.locator('.weighted-choice-table:has([name="contentRepresentation"]) .weight-row')).toHaveCount(2);
+  await expect(page.locator('.weighted-choice-table:has([name="nextRepresentation"]) .weight-row')).toHaveCount(2);
+  await expect.poll(() => page.locator("#conditionList .condition-row").first().evaluate((row) => getComputedStyle(row).backgroundColor))
+    .not.toBe("rgb(255, 255, 255)");
+
+  const conditionSave = page.waitForResponse((candidate) => (
+    candidate.url().endsWith("/api/events") && candidate.request().method() === "POST" && candidate.ok()
+  ));
+  await dragListItemBefore(
+    page,
+    page.locator("#conditionList .condition-row").nth(1),
+    page.locator("#conditionList .condition-row").nth(0),
+  );
+  await conditionSave;
+  await expect(page.locator("#conditionList .condition-row").first().locator('[name="conditionType"]')).toHaveValue("memory");
+
+  const effectSave = page.waitForResponse((candidate) => (
+    candidate.url().endsWith("/api/events") && candidate.request().method() === "POST" && candidate.ok()
+  ));
+  await dragListItemBefore(
+    page,
+    page.locator("#effectList .effect-row").nth(1),
+    page.locator("#effectList .effect-row").nth(0),
+  );
+  await effectSave;
+  await expect(page.locator("#effectList .effect-row").first().locator('[name="effectType"]')).toHaveValue("memory");
+
+  const contentRows = page.locator('.weighted-choice-table:has([name="contentRepresentation"]) .weight-row');
+  const contentSave = page.waitForResponse((candidate) => (
+    candidate.url().endsWith("/api/events") && candidate.request().method() === "POST" && candidate.ok()
+  ));
+  await dragListItemBefore(page, contentRows.nth(1), contentRows.nth(0));
+  await contentSave;
+
+  const nextRows = page.locator('.weighted-choice-table:has([name="nextRepresentation"]) .weight-row');
+  const nextSave = page.waitForResponse((candidate) => (
+    candidate.url().endsWith("/api/events") && candidate.request().method() === "POST" && candidate.ok()
+  ));
+  await dragListItemBefore(page, nextRows.nth(1), nextRows.nth(0));
+  await nextSave;
+
+  await openNodeSidebar(page);
+  await page.locator('#nodeList [data-node-path="options_lab"]').click();
+  await page.getByRole("button", { name: "選項", exact: true }).click();
+  const optionElementSave = page.waitForResponse((candidate) => (
+    candidate.url().endsWith("/api/options") && candidate.request().method() === "PUT" && candidate.ok()
+  ));
+  await dragListItemBefore(
+    page,
+    page.locator('[data-option-element-select="hitbox_mark"]'),
+    page.locator('[data-option-element-select="data_actions"]'),
+  );
+  await optionElementSave;
+  await expect(page.locator("[data-option-element-select]").first()).toHaveAttribute("data-option-element-select", "hitbox_mark");
+
+  await page.locator('[data-option-element-select="data_actions"]').click();
+  const optionItemSave = page.waitForResponse((candidate) => (
+    candidate.url().endsWith("/api/options") && candidate.request().method() === "PUT" && candidate.ok()
+  ));
+  await dragListItemBeforeFromCenter(
+    page,
+    page.locator('[data-option-item-order-id="hide_controlled_list"]'),
+    page.locator('[data-option-item-order-id="gain_one"]'),
+    async () => {
+      const preview = page.locator(".list-reorder-preview.is-option-item-preview");
+      await expect(preview).toBeVisible();
+      await expect.poll(() => preview.evaluate((element) => ({
+        border: getComputedStyle(element).borderTopWidth,
+        shadow: getComputedStyle(element).boxShadow,
+      }))).toEqual({ border: "0px", shadow: "none" });
+    },
+  );
+  await optionItemSave;
+  await expect(page.locator("[data-option-item-order-id]").first()).toHaveAttribute("data-option-item-order-id", "hide_controlled_list");
+
+  await page.getByRole("button", { name: "狀態", exact: true }).click();
+  const memorySave = page.waitForResponse((candidate) => (
+    candidate.url().endsWith("/api/state") && candidate.request().method() === "PUT" && candidate.ok()
+  ));
+  await dragListItemBefore(
+    page,
+    page.locator('.memory-row[data-memory-id="test_session"]'),
+    page.locator('.memory-row[data-memory-id="memory"]'),
+    async () => {
+      const sourceBox = await page.locator('#memoriesBody .memory-row[data-memory-id="test_session"]').boundingBox();
+      const preview = page.locator(".list-reorder-preview.is-table-row-preview");
+      const previewBox = await preview.boundingBox();
+      expect(sourceBox).not.toBeNull();
+      expect(previewBox).not.toBeNull();
+      expect(Math.abs(previewBox.width - sourceBox.width)).toBeLessThan(2);
+      expect(Math.abs(previewBox.height - sourceBox.height)).toBeLessThan(2);
+      await expect(preview.locator('input[name="memoryName"]')).toHaveValue("測試階段記憶");
+    },
+  );
+  await memorySave;
+  await expect(page.locator(".memory-row").first()).toHaveAttribute("data-memory-id", "test_session");
+
+  const savedBranch = await (await page.request.get(`${editorUrl}/api/node?path=branch_lab`)).json();
+  const savedEvent = savedBranch.events.find((entry) => entry.data.ID === "branch_success").data;
+  expect(savedEvent.Conditions.map((entry) => entry.type)).toEqual(["memory", "stat"]);
+  expect(savedEvent.Effects.map((entry) => entry.type)).toEqual(["memory", "stat"]);
+  expect(Object.keys(savedEvent.Content)).toEqual(["test_branch_random", "test_branch_success"]);
+  expect(Object.keys(savedEvent["Next Node"])).toEqual(["outcome_fallback", "outcome_success"]);
+  const savedOptions = await (await page.request.get(`${editorUrl}/api/node?path=options_lab`)).json();
+  expect(savedOptions.options.Elements.map((entry) => entry.ID).slice(0, 2)).toEqual(["hitbox_mark", "data_actions"]);
+  expect(savedOptions.options.Elements.find((entry) => entry.ID === "data_actions").Items[0].ID).toBe("hide_controlled_list");
+  const savedProject = await (await page.request.get(`${editorUrl}/api/project`)).json();
+  expect(Object.keys(savedProject.memories).slice(0, 2)).toEqual(["test_session", "memory"]);
+});
+
+test("creator-managed Node, Content, and Textbox Profile lists persist drag order", async ({ page }) => {
+  for (const profile of [
+    { ID: "sort_profile_a", Name: "Sort Profile A" },
+    { ID: "sort_profile_b", Name: "Sort Profile B" },
+  ]) {
+    const response = await page.request.post(`${editorUrl}/api/textbox-profiles`, { data: { profile } });
+    expect(response.ok()).toBe(true);
+  }
+
+  await page.setViewportSize({ width: 1680, height: 1100 });
+  await page.goto(editorUrl);
+  await openNodeSidebar(page);
+  const nodeItems = page.locator('#nodeList .node-item:not(.global-node-item)');
+  const firstNodePath = await nodeItems.nth(0).getAttribute("data-node-path");
+  const secondNodePath = await nodeItems.nth(1).getAttribute("data-node-path");
+  const nodeOrderSave = page.waitForResponse((candidate) => (
+    candidate.url().endsWith("/api/node-groups") && candidate.request().method() === "PUT" && candidate.ok()
+  ));
+  await dispatchImmediateDrag(
+    page,
+    `#nodeList [data-node-path="${secondNodePath}"]`,
+    `#nodeList [data-node-path="${firstNodePath}"]`,
+  );
+  await nodeOrderSave;
+  await expect(nodeItems.first()).toHaveAttribute("data-node-path", secondNodePath);
+
+  await page.locator('#nodeList [data-node-path="root"]').click();
+  await page.getByRole("button", { name: "演出", exact: true }).click();
+  const contentItems = page.locator("[data-content-file]");
+  await expect(contentItems).toHaveCount(3);
+  const firstContent = await contentItems.nth(0).getAttribute("data-content-file");
+  const secondContent = await contentItems.nth(1).getAttribute("data-content-file");
+  const contentOrderSave = page.waitForResponse((candidate) => (
+    candidate.url().endsWith("/api/content/order") && candidate.request().method() === "PUT" && candidate.ok()
+  ));
+  await dragListItemBefore(page, contentItems.nth(1), contentItems.nth(0));
+  await contentOrderSave;
+  await expect(page.locator("[data-content-file]").first()).toHaveAttribute("data-content-file", secondContent);
+
+  await openNodeSidebar(page);
+  await page.locator('#nodeList [data-node-path="options_lab"]').click();
+  await page.getByRole("button", { name: "選項", exact: true }).click();
+  await page.locator('[data-option-element-select="data_actions"]').click();
+  await page.locator(".option-workspace-divider").click();
+  await expect(page.locator(".option-transition-overlay")).toHaveCount(0);
+  await page.locator('.option-builder[data-workspace-mode="canvas"] [data-option-inspector-tab="style"]').click();
+  await page.locator("#manageTextboxProfiles").click();
+  const profileOrderSave = page.waitForResponse((candidate) => (
+    candidate.url().endsWith("/api/textbox-profiles/order") && candidate.request().method() === "PUT" && candidate.ok()
+  ));
+  await dragListItemBefore(
+    page,
+    page.locator('[data-textbox-profile-id="sort_profile_b"]'),
+    page.locator('[data-textbox-profile-id="sort_profile_a"]'),
+  );
+  await profileOrderSave;
+  const profileIds = await page.locator("[data-textbox-profile-id]").evaluateAll((items) => items.map((item) => item.dataset.textboxProfileId));
+  expect(profileIds.indexOf("sort_profile_b")).toBeLessThan(profileIds.indexOf("sort_profile_a"));
+
+  const rootDetail = await (await page.request.get(`${editorUrl}/api/node?path=root`)).json();
+  expect(rootDetail.contents.slice(0, 2).map((entry) => entry.name)).toEqual([secondContent, firstContent]);
+  const project = await (await page.request.get(`${editorUrl}/api/project`)).json();
+  expect(project.nodes[0].path).toBe(secondNodePath);
+  expect(project.nodes.map((entry) => entry.path)).toContain(firstNodePath);
+  const persistedProfileIds = project.textboxProfiles.map((profile) => profile.ID);
+  expect(persistedProfileIds.indexOf("sort_profile_b")).toBeLessThan(persistedProfileIds.indexOf("sort_profile_a"));
+  await page.locator("#textboxProfileDialog").evaluate((dialog) => dialog.close());
+
+  await openNodeSidebar(page);
+  const nodeGroupSave = page.waitForResponse((candidate) => (
+    candidate.url().endsWith("/api/node-groups") && candidate.request().method() === "PUT" && candidate.ok()
+  ));
+  await dragWithDwell(
+    page,
+    page.locator('#nodeList [data-node-path="outcome_success"]'),
+    page.locator('#nodeList [data-node-path="outcome_fallback"]'),
+    520,
+    async () => {
+      const target = page.locator('#nodeList [data-node-path="outcome_fallback"]');
+      await expect(target).toHaveClass(/is-group-ready/);
+      await expect.poll(() => target.evaluate((item) => Number.parseFloat(getComputedStyle(item).marginBottom)))
+        .toBeGreaterThan(40);
+    },
+  );
+  await nodeGroupSave;
+  const nodeGroup = page.locator("#nodeList .node-group").filter({ has: page.locator('[data-node-path="outcome_success"]') });
+  await expect(nodeGroup).toHaveCount(1);
+  await expect(nodeGroup.locator(".node-item")).toHaveCount(2);
+  await expect.poll(() => nodeGroup.locator(".node-item").first().evaluate((item) => getComputedStyle(item).backgroundColor))
+    .toBe("rgba(0, 0, 0, 0)");
+  const nodeReorderSave = page.waitForResponse((candidate) => (
+    candidate.url().endsWith("/api/node-groups") && candidate.request().method() === "PUT" && candidate.ok()
+  ));
+  await dispatchImmediateDrag(
+    page,
+    '#nodeList .node-group [data-node-path="outcome_success"]',
+    '#nodeList .node-group [data-node-path="outcome_fallback"]',
+  );
+  await nodeReorderSave;
+  await expect(page.locator("#nodeList .node-group")).toHaveClass(/is-group-pinned-open/);
+  await expect.poll(() => page.locator("#nodeList .node-group .event-group-items-shell").evaluate((shell) => (
+    shell.getBoundingClientRect().height
+  ))).toBeGreaterThan(20);
+  const groupedProject = await (await page.request.get(`${editorUrl}/api/project`)).json();
+  expect(groupedProject.nodes.filter((node) => ["outcome_success", "outcome_fallback"].includes(node.path)).map((node) => node.group))
+    .toEqual(["新群組", "新群組"]);
+});
+
+test("Content mounts the offline Ren'Py editor and keeps autosave persistence", async ({ page }) => {
+  const browserErrors = [];
+  page.on("console", (message) => {
+    if (message.type() === "error" || message.type() === "warning") {
+      browserErrors.push(`${message.type()}: ${message.text()}`);
+    }
+  });
+  page.on("pageerror", (error) => browserErrors.push(`pageerror: ${error.message}`));
+
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto(editorUrl);
+  await expect(page.getByRole("navigation", { name: /編輯器分頁|Editor tabs/ })).toBeVisible();
+  await expect(page.getByRole("status")).toHaveText(/^(已同步|Synced)$/);
+  await page.getByRole("button", { name: "演出", exact: true }).click();
+  await expect(page.locator("#contentEditorHost .monaco-editor")).toBeVisible({ timeout: 10_000 });
+  await expect(page.locator("#contentEditorStatus")).toHaveText("語法支援已啟用");
+  await expect(page.locator("#contentEditor")).toBeHidden();
+  await expect(page.locator("#contentEditorHost .line-numbers").first()).toBeVisible();
+
+  const fallback = page.locator("#contentEditor");
+  const original = await fallback.inputValue();
+  const marker = "# content editor browser persistence";
+  const changed = `${original.replace(/\s*$/, "")}\n${marker}\n`;
+  const saveResponse = page.waitForResponse((candidate) => (
+    candidate.url().endsWith("/api/content")
+      && candidate.request().method() === "POST"
+      && candidate.ok()
+  ));
+  await fallback.evaluate((textarea, value) => {
+    textarea.value = value;
+    textarea.dispatchEvent(new Event("input", { bubbles: true }));
+  }, changed);
+  await saveResponse;
+  await reloadAndWaitForProject(page);
+  await page.getByRole("button", { name: "演出", exact: true }).click();
+  await expect(page.locator("#contentEditorHost .monaco-editor")).toBeVisible({ timeout: 10_000 });
+  await expect(page.locator("#contentEditor")).toHaveValue(new RegExp(`${marker}\\n$`));
+  await expect(page.locator("#contentEditorHost")).toContainText(marker);
+
+  const restoreResponse = page.waitForResponse((candidate) => (
+    candidate.url().endsWith("/api/content")
+      && candidate.request().method() === "POST"
+      && candidate.ok()
+  ));
+  await page.locator("#contentEditor").evaluate((textarea, value) => {
+    textarea.value = value;
+    textarea.dispatchEvent(new Event("input", { bubbles: true }));
+  }, original);
+  await restoreResponse;
+
+  expect(browserErrors, browserErrors.join("\n")).toEqual([]);
 });
 
 test("interaction details expose keyboard focus and honor reduced motion", async ({ page }) => {

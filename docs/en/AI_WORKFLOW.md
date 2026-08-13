@@ -1,14 +1,16 @@
 # AI-assisted Scene Node development
 
-[繁體中文](../zh-TW/AI_WORKFLOW.md) · [English](AI_WORKFLOW.md) · [Home](../../README.en.md)
+[繁體中文](../zh-TW/AI_WORKFLOW.md) · [English](AI_WORKFLOW.md) · [Home](../../EDITOR/README.en.md)
 
-The installer places a compact project contract at:
+The installer places a compact project contract and bilingual creator documentation at:
 
 ```text
 <RenPy Project>/.scene-node-editor/AI_CONTEXT.md
+<RenPy Project>/.scene-node-editor/docs/zh-TW/
+<RenPy Project>/.scene-node-editor/docs/en/
 ```
 
-Ask an AI assistant to read that file before doing project work. It is more reliable than pasting the entire Reference and helps prevent accidental Framework edits or attempts to replace Options with a custom Screen.
+Ask an AI assistant to read `AI_CONTEXT.md` before doing project work, then consult the matching project-local Reference or User Guide when more detail is needed. This is more reliable than pasting documentation and helps prevent accidental Framework edits or attempts to replace Options with a custom Screen. The installer manages and refreshes these documents whenever the Editor is updated.
 
 ## General prompt template
 

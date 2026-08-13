@@ -1,9 +1,11 @@
 init -100 python:
     import json
+    from collections.abc import Mapping
 
     SCENE_PROJECT_FILE = "DATA/SceneProject.json"
     SCENE_STATS_FILE = "DATA/Stats.json"
     SCENE_MEMORIES_FILE = "DATA/Memories.json"
+    SCENE_TEXTBOX_PROFILE_ROOT = "DATA/TEXTBOX_PROFILES/"
     SCENE_DEFAULT_MEMORY = "memory"
     SCENE_GLOBAL_NODE_ID = "__global__"
     SCENE_GLOBAL_NODE_FILE = "GLOBALNODE/Node.json"
@@ -13,6 +15,21 @@ init -100 python:
     SCENE_NODE_FILE = "/Node.json"
     SCENE_OPTIONS_FILE = "/Options.json"
     SCENE_EVENT_MARKER = "/EVENTPOOL/"
+    SCENE_TEXTBOX_STYLE_DEFAULTS = {
+        "Background": "#0b1118",
+        "Item Background": "#20302a",
+        "Text Color": "#ffffff",
+        "Text Size": 30,
+        "Text Align": 0.5,
+    }
+    SCENE_TEXTBOX_FEATURE_DEFAULTS = {
+        "hover_accent": {"Enabled": False, "Color": "#5c7265", "Width": 6},
+        "hover_text_color": {"Enabled": False, "Color": "#ffffff"},
+        "item_border": {"Enabled": False, "Color": "#ffffff33", "Width": 1},
+        "text_shadow": {"Enabled": False, "Color": "#00000088", "Size": 2, "X": 0, "Y": 2},
+        "text_outline": {"Enabled": False, "Color": "#000000cc", "Size": 1},
+        "staggered_entrance": {"Enabled": False, "Distance": 18, "Delay": 0.04, "Duration": 0.22},
+    }
     SCENE_MOUSE_KEYSYMS = {
         "Left": "mouseup_1",
         "Middle": "mouseup_2",
@@ -29,6 +46,67 @@ init -100 python:
             handle.close()
 
 
+    def scene_textbox_profile_number(value, minimum, maximum, integer=False):
+        if isinstance(value, bool):
+            raise ValueError("boolean is not a profile number")
+        result = float(value)
+        if result < minimum or result > maximum:
+            raise ValueError("profile number is out of range")
+        return int(result) if integer else result
+
+
+    def scene_normalize_textbox_profile(profile, filename_id):
+        # Ren'Py replaces the name ``dict`` with RevertableDict inside store
+        # Python, while json.load() returns a native Python dict. Checking
+        # against ``dict`` therefore rejects valid JSON at runtime. Mapping
+        # accepts both native JSON objects and Ren'Py's revertable mappings.
+        if not isinstance(profile, Mapping):
+            return None
+        profile_id = str(profile.get("ID") or "").strip()
+        if not profile_id or profile_id != filename_id or not str(profile.get("Name") or "").strip():
+            return None
+        try:
+            raw_style = profile.get("Style", {})
+            raw_features = profile.get("Features", {})
+            if not isinstance(raw_style, Mapping) or not isinstance(raw_features, Mapping):
+                return None
+            style = dict(SCENE_TEXTBOX_STYLE_DEFAULTS)
+            for key in ("Background", "Item Background", "Text Color"):
+                if key in raw_style:
+                    style[key] = str(raw_style[key])
+            style["Text Size"] = scene_textbox_profile_number(raw_style.get("Text Size", 30), 8, 160, True)
+            style["Text Align"] = scene_textbox_profile_number(raw_style.get("Text Align", 0.5), 0, 1)
+
+            features = {}
+            for feature_id, defaults in SCENE_TEXTBOX_FEATURE_DEFAULTS.items():
+                raw = raw_features.get(feature_id, {})
+                if not isinstance(raw, Mapping):
+                    return None
+                feature = dict(defaults)
+                feature["Enabled"] = bool(raw.get("Enabled", feature["Enabled"]))
+                if feature_id in ("hover_accent", "item_border"):
+                    feature["Color"] = str(raw.get("Color") or feature["Color"])
+                    feature["Width"] = scene_textbox_profile_number(raw.get("Width", feature["Width"]), 1, 40, True)
+                elif feature_id == "hover_text_color":
+                    feature["Color"] = str(raw.get("Color") or feature["Color"])
+                elif feature_id == "text_shadow":
+                    feature["Color"] = str(raw.get("Color") or feature["Color"])
+                    feature["Size"] = scene_textbox_profile_number(raw.get("Size", feature["Size"]), 0, 20, True)
+                    feature["X"] = scene_textbox_profile_number(raw.get("X", feature["X"]), -40, 40, True)
+                    feature["Y"] = scene_textbox_profile_number(raw.get("Y", feature["Y"]), -40, 40, True)
+                elif feature_id == "text_outline":
+                    feature["Color"] = str(raw.get("Color") or feature["Color"])
+                    feature["Size"] = scene_textbox_profile_number(raw.get("Size", feature["Size"]), 0, 20, True)
+                else:
+                    feature["Distance"] = scene_textbox_profile_number(raw.get("Distance", feature["Distance"]), -200, 200, True)
+                    feature["Delay"] = scene_textbox_profile_number(raw.get("Delay", feature["Delay"]), 0, 1)
+                    feature["Duration"] = scene_textbox_profile_number(raw.get("Duration", feature["Duration"]), 0, 3)
+                features[feature_id] = feature
+            return {"Version": 1, "ID": profile_id, "Name": str(profile["Name"]), "Style": style, "Features": features}
+        except (TypeError, ValueError):
+            return None
+
+
     def scene_load_catalog():
         files = set(renpy.list_files())
         project = scene_read_json(SCENE_PROJECT_FILE) if SCENE_PROJECT_FILE in files else {}
@@ -36,6 +114,18 @@ init -100 python:
         memories = scene_read_json(SCENE_MEMORIES_FILE) if SCENE_MEMORIES_FILE in files else {
             SCENE_DEFAULT_MEMORY: {"Name": "Memory"},
         }
+        textbox_profiles = {}
+        for path in sorted(files):
+            if not path.startswith(SCENE_TEXTBOX_PROFILE_ROOT) or not path.endswith(".json"):
+                continue
+            try:
+                profile = scene_read_json(path)
+            except Exception:
+                continue
+            filename_id = path[len(SCENE_TEXTBOX_PROFILE_ROOT):-5]
+            normalized = scene_normalize_textbox_profile(profile, filename_id)
+            if normalized is not None:
+                textbox_profiles[normalized["ID"]] = normalized
         nodes = {}
         node_directories = {}
         global_node = (
@@ -75,7 +165,7 @@ init -100 python:
             SCENE_GLOBAL_NODE_ID: (
                 scene_read_json(SCENE_GLOBAL_OPTIONS_FILE)
                 if SCENE_GLOBAL_OPTIONS_FILE in files
-                else {"Version": 2, "Canvas": {}, "Elements": []}
+                else {"Version": 3, "Canvas": {}, "Elements": []}
             )
         }
         for directory, node_id in node_directories.items():
@@ -83,12 +173,13 @@ init -100 python:
             if options_path in files:
                 options[node_id] = scene_read_json(options_path)
             else:
-                options[node_id] = {"Version": 2, "Canvas": {}, "Elements": []}
+                options[node_id] = {"Version": 3, "Canvas": {}, "Elements": []}
 
         return {
             "project": project,
             "stats": stats,
             "memories": memories,
+            "textbox_profiles": textbox_profiles,
             "nodes": nodes,
             "events": events,
             "global_node": global_node,
@@ -133,7 +224,7 @@ init -100 python:
         global scene_memories
         global scene_memory_legacy_migrated
 
-        current = scene_memories if isinstance(scene_memories, dict) else {}
+        current = scene_memories if isinstance(scene_memories, Mapping) else {}
         updated = dict((bank_id, list(tags)) for bank_id, tags in current.items())
         for bank_id in scene_catalog["memories"]:
             updated.setdefault(bank_id, [])
@@ -575,6 +666,11 @@ init -100 python:
     def scene_begin(root_node=None):
         global scene_stack
 
+        # Editor data and reusable Textbox profiles can change while the Ren'Py
+        # process is still open (for example, after returning to the main menu).
+        # A new Scene Runtime session must begin from the latest project files,
+        # rather than the catalog captured during Ren'Py init.
+        scene_reload_catalog()
         scene_reset_state()
         if root_node is None:
             root_node = scene_default_root_node()
@@ -602,7 +698,7 @@ init -100 python:
     def scene_option_data(node_id):
         return scene_catalog["options"].get(
             node_id,
-            {"Version": 2, "Canvas": {}, "Elements": []},
+            {"Version": 3, "Canvas": {}, "Elements": []},
         )
 
 
@@ -662,9 +758,68 @@ init -100 python:
         return max(1, int(round(float(value) * scale)))
 
 
+    def scene_option_textbox_profile(element):
+        appearance = element.get("Appearance", {})
+        profile_id = str(appearance.get("Profile") or "").strip()
+        return scene_catalog.get("textbox_profiles", {}).get(profile_id)
+
+
+    def scene_option_textbox_style(element):
+        result = dict(SCENE_TEXTBOX_STYLE_DEFAULTS)
+        profile = scene_option_textbox_profile(element)
+        if profile is None:
+            result.update(element.get("Style", {}))
+            return result
+        result.update(profile.get("Style", {}))
+        result.update(element.get("Appearance", {}).get("Style Overrides", {}))
+        return result
+
+
+    def scene_option_textbox_feature(element, feature_id):
+        profile = scene_option_textbox_profile(element)
+        if profile is None:
+            return {"Enabled": False}
+        result = dict(profile.get("Features", {}).get(feature_id, {}))
+        override = element.get("Appearance", {}).get("Features", {}).get(feature_id)
+        if isinstance(override, bool):
+            result["Enabled"] = override
+        else:
+            result["Enabled"] = bool(result.get("Enabled", False))
+        return result
+
+
     def scene_option_item_style(element, item, key, default):
         override = item.get("Style Override", {}) if item else {}
-        return override.get(key, element.get("Style", {}).get(key, default))
+        return override.get(key, scene_option_textbox_style(element).get(key, default))
+
+
+    def scene_option_text_outlines(element):
+        result = []
+        outline = scene_option_textbox_feature(element, "text_outline")
+        if outline.get("Enabled", False) and int(outline.get("Size", 1)) > 0:
+            result.append((int(outline.get("Size", 1)), outline.get("Color", "#000000cc"), 0, 0))
+        shadow = scene_option_textbox_feature(element, "text_shadow")
+        if shadow.get("Enabled", False) and int(shadow.get("Size", 2)) > 0:
+            result.append((
+                int(shadow.get("Size", 2)),
+                shadow.get("Color", "#00000088"),
+                int(shadow.get("X", 0)),
+                int(shadow.get("Y", 2)),
+            ))
+        return result
+
+
+    def scene_option_item_background(color, border, width, height):
+        if not border.get("Enabled", False):
+            return Solid(color)
+        border_width = max(1, min(int(border.get("Width", 1)), width // 2, height // 2))
+        inner_width = max(1, width - border_width * 2)
+        inner_height = max(1, height - border_width * 2)
+        return Composite(
+            (width, height),
+            (0, 0), Solid(border.get("Color", "#ffffff33"), xsize=width, ysize=height),
+            (border_width, border_width), Solid(color, xsize=inner_width, ysize=inner_height),
+        )
 
 
     def scene_option_composite_color(base, overlay):
@@ -767,10 +922,11 @@ label scene_run_lifecycle(node_id, trigger):
     while _scene_lifecycle_queue:
         $ _scene_lifecycle_prepared = _scene_lifecycle_queue[0]
         $ _scene_lifecycle_queue = _scene_lifecycle_queue[1:]
-        $ scene_apply_prepared(_scene_lifecycle_prepared)
 
         if _scene_lifecycle_prepared["content"]:
             call expression _scene_lifecycle_prepared["content"]
+
+        $ scene_apply_prepared(_scene_lifecycle_prepared)
 
     return
 
@@ -796,11 +952,11 @@ label scene_runtime_start(root_node=None):
                 $ scene_missing_event(_scene_node_id, _scene_trigger)
 
         $ _scene_prepared = scene_prepare_event(_scene_node_id, _scene_event)
-        $ scene_apply_prepared(_scene_prepared)
 
         if _scene_prepared["content"]:
             call expression _scene_prepared["content"]
 
+        $ scene_apply_prepared(_scene_prepared)
         $ scene_validate_prepared_transition(_scene_prepared)
 
         if _scene_prepared["end_up"] in ("EXIT", "REPLACE"):

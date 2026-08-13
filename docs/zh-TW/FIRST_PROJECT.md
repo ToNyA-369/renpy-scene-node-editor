@@ -1,6 +1,6 @@
 # 建立第一個 Scene Node 專案
 
-[繁體中文](FIRST_PROJECT.md) · [English](../en/FIRST_PROJECT.md) · [回到首頁](../../README.md)
+[繁體中文](FIRST_PROJECT.md) · [English](../en/FIRST_PROJECT.md) · [回到首頁](../../EDITOR/README.md)
 
 這份教學會建立一個最小但完整的互動：玩家看到「打開門」，選擇後增加行動次數、播放一段 Content，最後前往第二個節點。
 

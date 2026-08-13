@@ -37,6 +37,13 @@ class ReleasePackageTests(unittest.TestCase):
             }
             with zipfile.ZipFile(first_archive) as archive:
                 self.assertEqual(set(archive.namelist()), expected)
+                for asset in (
+                    "EDITOR/static/vendor/content_editor.js",
+                    "EDITOR/static/vendor/content_editor.css",
+                    "EDITOR/static/vendor/content_editor.worker.js",
+                    "EDITOR/THIRD_PARTY_NOTICES.md",
+                ):
+                    self.assertIn("{}/{}".format(package_root, asset), archive.namelist())
                 for member in archive.infolist():
                     relative = member.filename[len(package_root) + 1 :]
                     mode = stat.S_IMODE(member.external_attr >> 16)

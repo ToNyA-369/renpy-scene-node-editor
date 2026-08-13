@@ -17,7 +17,18 @@ FRAMEWORK_SOURCE = PACKAGE_ROOT / "INTEGRATION" / "TestGame" / "FRAMEWORK"
 AI_CONTEXT_SOURCE = PACKAGE_ROOT / "docs" / "AI_CONTEXT.md"
 VERSION_FILE = PACKAGE_ROOT / "VERSION"
 RUNTIME_FILES = ("runtime.rpy", "option_renderer.rpy")
-MANAGED_CONTEXT_FILES = ("AI_CONTEXT.md",)
+MANAGED_CONTEXT_SOURCES = (
+    ("AI_CONTEXT.md", AI_CONTEXT_SOURCE),
+    ("docs/zh-TW/AI_WORKFLOW.md", PACKAGE_ROOT / "docs" / "zh-TW" / "AI_WORKFLOW.md"),
+    ("docs/zh-TW/FIRST_PROJECT.md", PACKAGE_ROOT / "docs" / "zh-TW" / "FIRST_PROJECT.md"),
+    ("docs/zh-TW/REFERENCE.md", PACKAGE_ROOT / "docs" / "zh-TW" / "REFERENCE.md"),
+    ("docs/zh-TW/USER_GUIDE.md", PACKAGE_ROOT / "docs" / "zh-TW" / "USER_GUIDE.md"),
+    ("docs/en/AI_WORKFLOW.md", PACKAGE_ROOT / "docs" / "en" / "AI_WORKFLOW.md"),
+    ("docs/en/FIRST_PROJECT.md", PACKAGE_ROOT / "docs" / "en" / "FIRST_PROJECT.md"),
+    ("docs/en/REFERENCE.md", PACKAGE_ROOT / "docs" / "en" / "REFERENCE.md"),
+    ("docs/en/USER_GUIDE.md", PACKAGE_ROOT / "docs" / "en" / "USER_GUIDE.md"),
+)
+MANAGED_CONTEXT_FILES = tuple(target for target, _source in MANAGED_CONTEXT_SOURCES)
 PROJECT_MARKERS = ("options.rpy", "gui.rpy", "script.rpy")
 PROJECT_LAUNCHER = "啟動 Scene Node 編輯器.command"
 
@@ -102,7 +113,7 @@ wait "$SERVER_PID"
 def install(raw_target):
     project_root, game_root = resolve_project(raw_target)
 
-    for source in (EDITOR_SOURCE, FRAMEWORK_SOURCE, AI_CONTEXT_SOURCE):
+    for source in (EDITOR_SOURCE, FRAMEWORK_SOURCE, *(source for _target, source in MANAGED_CONTEXT_SOURCES)):
         if not source.exists():
             raise InstallError("安裝包不完整：缺少 {}。".format(source.relative_to(PACKAGE_ROOT)))
     for filename in RUNTIME_FILES:
@@ -121,13 +132,16 @@ def install(raw_target):
         ignore=ignored_editor_files,
     )
     (installed_editor / "HANDOFF.md").unlink(missing_ok=True)
-    shutil.copy2(AI_CONTEXT_SOURCE, install_root / "AI_CONTEXT.md")
+    for relative_target, source in MANAGED_CONTEXT_SOURCES:
+        target = install_root / relative_target
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, target)
 
     installed_framework.mkdir(parents=True, exist_ok=True)
     for filename in RUNTIME_FILES:
         shutil.copy2(FRAMEWORK_SOURCE / filename, installed_framework / filename)
 
-    for directory in ("DATA", "SCENENODE"):
+    for directory in ("DATA", "DATA/TEXTBOX_PROFILES", "SCENENODE"):
         (game_root / directory).mkdir(parents=True, exist_ok=True)
     stats_file = game_root / "DATA" / "Stats.json"
     if not stats_file.exists():

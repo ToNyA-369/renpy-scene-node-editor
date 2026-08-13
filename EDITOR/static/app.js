@@ -26,6 +26,18 @@ const {
   normalizeEditorSettings,
 } = SceneEditorSettings;
 const {
+  createTask: createGraphComputation,
+  signature: graphTopologySignature,
+} = SceneGraphLayoutClient;
+const {
+  FEATURE_DEFAULTS: TEXTBOX_FEATURE_DEFAULTS,
+  FEATURE_IDS: TEXTBOX_FEATURE_IDS,
+  resolveFeature: resolveTextboxFeature,
+  resolveStyle: resolveTextboxStyle,
+  selectedProfile: selectedTextboxProfile,
+  withProfile: textboxWithProfile,
+} = SceneTextboxProfiles;
+const {
   AUTO_TRIGGER_CHOICES,
   END_UP_CHOICES,
   EVENT_TRIGGER_MODES,
@@ -57,10 +69,14 @@ const state = {
   graph: { edges: [] },
   graphViewBox: null,
   graphLayoutSignature: "",
+  graphLayoutCache: null,
+  graphRenderRevision: 0,
+  graphCancelComputation: null,
   graphSearch: "",
   graphStopLayoutAnimation: null,
   images: [],
   audio: [],
+  textboxProfiles: [],
   optionTargets: [],
   stats: {},
   statsDraft: {},
@@ -76,7 +92,10 @@ const state = {
   selectedOptionElementId: null,
   selectedOptionItemId: null,
   optionWorkspaceMode: "form",
+  optionInspectorTab: "layout",
   optionWorkspaceTransitioning: false,
+  selectedTextboxProfileId: null,
+  textboxProfileDraft: null,
   optionResizeObserver: null,
   selectedContent: null,
   selectedContentDisplayName: "",
@@ -92,10 +111,21 @@ let editorSettingsSave = Promise.resolve(true);
 let editorSettingsSaveFailureNotified = false;
 let workspaceAnimationTimer = null;
 let pendingTabPreview = null;
+let pendingNodeGroupFocus = null;
 let pendingEventGroupFocus = null;
+let expandedNodeGroup = null;
+let expandedEventGroup = null;
 let pendingStatGroupFocus = null;
 let eventGroupDragController = null;
 let statGroupDragController = null;
+let eventRuleReorderControllers = [];
+let optionReorderControllers = [];
+let memoryReorderController = null;
+let nodeGroupDragController = null;
+let contentReorderController = null;
+let textboxProfileReorderController = null;
+let contentEditorController = null;
+let contentEditorMountRevision = 0;
 
 const dom = {
   workspace: document.querySelector("#workspace"),
@@ -123,6 +153,10 @@ const dom = {
   nameDialogForm: document.querySelector("#nameDialogForm"),
   nameDialogInput: document.querySelector("#nameDialogInput"),
   settingsDialog: document.querySelector("#settingsDialog"),
+  textboxProfileDialog: document.querySelector("#textboxProfileDialog"),
+  textboxProfileForm: document.querySelector("#textboxProfileForm"),
+  textboxProfileList: document.querySelector("#textboxProfileList"),
+  textboxProfileEditor: document.querySelector("#textboxProfileEditor"),
   settingsForm: document.querySelector("#settingsForm"),
   autosaveEnabled: document.querySelector("#autosaveEnabled"),
   autosaveDelay: document.querySelector("#autosaveDelay"),
@@ -610,7 +644,33 @@ function updateEmptyState() {
   dom.workspace.classList.toggle("no-node", !state.nodeDetail && needsNode);
 }
 
+function normalizeNodeGroup(value) {
+  return SceneGroupDrag.normalizeGroup(value, DEFAULT_EVENT_GROUP);
+}
+
+function nodeListBlocks(nodes) {
+  return eventPoolBlocks(nodes.map((node) => ({ ...node, Group: normalizeNodeGroup(node.group) })))
+    .map((block) => block.type === "item"
+      ? { type: "item", node: block.event }
+      : { type: "group", name: block.name, nodes: block.events });
+}
+
+function nodeListItemHtml(node) {
+  return `
+    <button class="node-item group-drag-item ${node.path === state.selectedNodePath ? "active" : ""}" type="button" data-node-path="${escapeHtml(node.path)}" data-group-item-id="${escapeHtml(node.path)}" data-group-item-group="${escapeHtml(normalizeNodeGroup(node.group))}" aria-grabbed="false">
+      <span class="node-accent" aria-hidden="true"></span>
+      <span class="node-item-copy">
+        <strong>${escapeHtml(node.name || node.id)}${node.isRoot ? '<span class="root-node-badge is-compact">ROOT</span>' : ""}</strong>
+        <span>${escapeHtml(node.path)}</span>
+      </span>
+      <span class="node-event-count" title="${escapeHtml(t("Event 數量"))}">${node.eventCount}</span>
+    </button>
+  `;
+}
+
 function renderNodeList() {
+  nodeGroupDragController?.destroy();
+  nodeGroupDragController = null;
   const query = dom.nodeSearch.value.trim().toLocaleLowerCase();
   const globalNode = state.globalNode;
   const globalMatches = globalNode && (
@@ -636,17 +696,113 @@ function renderNodeList() {
       </button>
     </div>
   ` : "";
-  const nodesHtml = nodes.map((node) => `
-    <button class="node-item ${node.path === state.selectedNodePath ? "active" : ""}" type="button" data-node-path="${escapeHtml(node.path)}">
-      <span class="node-accent" aria-hidden="true"></span>
-      <span class="node-item-copy">
-        <strong>${escapeHtml(node.name || node.id)}${node.isRoot ? '<span class="root-node-badge is-compact">ROOT</span>' : ""}</strong>
-        <span>${escapeHtml(node.path)}</span>
-      </span>
-      <span class="node-event-count" title="${escapeHtml(t("Event 數量"))}">${node.eventCount}</span>
-    </button>
-  `).join("");
-  dom.nodeList.innerHTML = globalHtml + nodesHtml;
+  const blocksHtml = nodeListBlocks(nodes).map((block) => {
+    if (block.type === "item") return nodeListItemHtml(block.node);
+    return `
+      <section class="event-group node-group ${expandedNodeGroup === block.name ? "is-group-pinned-open" : ""}" data-group-drop="${escapeHtml(block.name)}" aria-label="${escapeHtml(block.name)}">
+        <div class="event-group-header node-group-header">
+          <input class="event-group-name node-group-name" value="${escapeHtml(block.name)}" data-node-group-name="${escapeHtml(block.name)}" aria-label="${escapeHtml(t("群組名稱"))}">
+          <div class="group-block-drag-space node-group-drag-space" aria-hidden="true"></div>
+          <span class="event-group-count">${block.nodes.length}</span>
+        </div>
+        <div class="event-group-items-shell"><div class="event-group-items node-group-items">${block.nodes.map(nodeListItemHtml).join("")}</div></div>
+      </section>
+    `;
+  }).join("");
+  dom.nodeList.innerHTML = `${globalHtml}<div class="node-pool-flow" data-node-ungrouped-drop>${blocksHtml}<div class="group-loose-drop-tail node-loose-drop-tail" aria-hidden="true"></div></div>`;
+  if (!query && nodes.length > 1) {
+    nodeGroupDragController = SceneGroupDrag.createController({
+      root: dom.nodeList.querySelector(".node-pool-flow"),
+      itemSelector: "[data-group-item-id]",
+      groupSelector: ".node-group[data-group-drop]",
+      ungroupedSelector: "[data-node-ungrouped-drop]",
+      groupHandleSelector: ".node-group-drag-space",
+      listSelector: ".node-group-items",
+      onDrop: applyNodeGroupDrop,
+      onGroupDrop: applyNodeGroupBlockDrop,
+      onError: (error) => toast(error.message, "error"),
+    });
+  }
+  dom.nodeList.querySelectorAll("[data-node-group-name]").forEach((input) => {
+    const source = input.dataset.nodeGroupName;
+    input.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        input.blur();
+      } else if (event.key === "Escape") {
+        input.value = source;
+        input.blur();
+      }
+    });
+    input.addEventListener("change", () => renameNodeGroup(source, input.value));
+  });
+  dom.nodeList.querySelectorAll(".node-group[data-group-drop]").forEach((group) => {
+    group.addEventListener("pointerleave", () => {
+      if (expandedNodeGroup !== group.dataset.groupDrop) return;
+      expandedNodeGroup = null;
+      group.classList.remove("is-group-pinned-open");
+    });
+  });
+  if (pendingNodeGroupFocus) {
+    const input = dom.nodeList.querySelector(`[data-node-group-name="${CSS.escape(pendingNodeGroupFocus)}"]`);
+    pendingNodeGroupFocus = null;
+    input?.focus({ preventScroll: true });
+    input?.select();
+  }
+}
+
+async function assignNodeGroups(assignments, { focusGroup = null, order = null } = {}) {
+  if (!Object.keys(assignments || {}).length && !order) return true;
+  if (!await flushAutosave()) return false;
+  try {
+    const result = await api("/api/node-groups", { method: "PUT", body: { assignments, order } });
+    state.nodes = result.nodes || state.nodes;
+    pendingNodeGroupFocus = focusGroup;
+    renderNodeList();
+    return true;
+  } catch (error) {
+    renderNodeList();
+    toast(error.message, "error");
+    return false;
+  }
+}
+
+async function renameNodeGroup(source, rawTarget) {
+  const target = normalizeNodeGroup(rawTarget);
+  if (!rawTarget.trim() || source === target) {
+    renderNodeList();
+    return source === target;
+  }
+  const assignments = Object.fromEntries(
+    state.nodes.filter((node) => normalizeNodeGroup(node.group) === source).map((node) => [node.path, target]),
+  );
+  return assignNodeGroups(assignments);
+}
+
+async function applyNodeGroupDrop({ mode, sourceId, targetId, targetGroup, position }) {
+  const items = state.nodes.map((node) => ({ id: node.path, group: normalizeNodeGroup(node.group) }));
+  const settings = { sourceId, targetId, targetGroup, position, defaultGroup: DEFAULT_EVENT_GROUP };
+  const plan = mode === "group"
+    ? SceneGroupDrag.planGroupDrop(items, { ...settings, newGroupName: t("新群組") })
+    : SceneGroupDrag.planReorder(items, settings);
+  if (!plan) return false;
+  expandedNodeGroup = plan.destination === DEFAULT_EVENT_GROUP ? null : plan.destination;
+  if (expandedNodeGroup) {
+    dom.nodeList.querySelector(`[data-group-drop="${CSS.escape(expandedNodeGroup)}"]`)?.classList.add("is-group-pinned-open");
+  }
+  return assignNodeGroups(plan.assignments, { focusGroup: plan.createdGroup, order: plan.order });
+}
+
+async function applyNodeGroupBlockDrop({ sourceGroup, targetId, position }) {
+  const items = state.nodes.map((node) => ({ id: node.path, group: normalizeNodeGroup(node.group) }));
+  const plan = SceneGroupDrag.planGroupBlockReorder(items, {
+    sourceGroup,
+    targetId,
+    position,
+    defaultGroup: DEFAULT_EVENT_GROUP,
+  });
+  if (!plan) return false;
+  return assignNodeGroups({}, { order: plan.order });
 }
 
 async function loadProject({ preserveNode = true } = {}) {
@@ -662,6 +818,7 @@ async function loadProject({ preserveNode = true } = {}) {
     state.graph = data.graph || { edges: [] };
     state.images = data.images || [];
     state.audio = data.audio || [];
+    state.textboxProfiles = data.textboxProfiles || [];
     state.optionTargets = data.optionTargets || [];
     state.stats = SceneStateEditor.withStatOrders(data.stats || {});
     state.statsDraft = clone(state.stats);
@@ -731,7 +888,7 @@ function renderAll() {
   renderOptionsPanel();
   renderContentPanel();
   renderStatsPanel();
-  renderGraphPanel();
+  if (state.activeTab === "graph") renderGraphPanel();
   renderValidationPanel();
   switchTab(state.activeTab, { render: false });
   updateEmptyState();
@@ -764,11 +921,20 @@ function playWorkspaceAnimation(className) {
 
 function switchTab(tab, { render = true } = {}) {
   const isSwitchingTab = state.activeTab !== tab;
+  if (isSwitchingTab && state.activeTab === "graph") {
+    state.graphRenderRevision += 1;
+    state.graphCancelComputation?.();
+    state.graphCancelComputation = null;
+    state.graphStopLayoutAnimation?.();
+    state.graphStopLayoutAnimation = null;
+    dom.graphPanel.replaceChildren();
+  }
   state.activeTab = tab;
   document.querySelectorAll(".tab").forEach((button) => button.classList.toggle("active", button.dataset.tab === tab));
   document.querySelectorAll(".tab-panel").forEach((panel) => panel.classList.toggle("active", panel.dataset.panel === tab));
   syncTabFocusIndicator({ immediate: !dom.tabFocusIndicator?.classList.contains("ready") });
   if (render) {
+    if (tab === "node") renderNodePanel();
     if (tab === "options") renderOptionsPanel();
     if (tab === "stats") renderStatsPanel();
     if (tab === "graph") renderGraphPanel();
@@ -779,7 +945,7 @@ function switchTab(tab, { render = true } = {}) {
 }
 
 async function refreshGraphSnapshot() {
-  const project = await api("/api/project");
+  const project = await api("/api/graph");
   state.rootNodeId = project.rootNodeId || null;
   state.globalNode = project.globalNode || null;
   state.nodes = project.nodes || [];
@@ -787,7 +953,6 @@ async function refreshGraphSnapshot() {
   updateHeader();
   updateDatalists();
   renderNodeList();
-  renderNodePanel();
 }
 
 async function requestTabSwitch(tab, options = {}) {
@@ -795,14 +960,19 @@ async function requestTabSwitch(tab, options = {}) {
   if (isSwitchingTab && !await flushAutosave()) return false;
   if (isSwitchingTab && tab === "graph") {
     setSaveState(t("讀取中"), "saving");
+    switchTab(tab, { ...options, render: false });
+    dom.graphPanel.innerHTML = `<div class="panel-page wide"><div class="success-state">${escapeHtml(t("讀取中"))}</div></div>`;
     try {
       await refreshGraphSnapshot();
       setSaveState(t("已同步"));
     } catch (error) {
       setSaveState(t("讀取失敗"), "error");
+      dom.graphPanel.innerHTML = `<div class="panel-page wide"><div class="success-state">${escapeHtml(t("讀取失敗"))}</div></div>`;
       toast(error.message, "error");
       return false;
     }
+    renderGraphPanel();
+    return true;
   }
   switchTab(tab, options);
   return true;
@@ -1117,7 +1287,7 @@ function eventListHtml() {
       ${eventPoolBlocks(events).map((block) => block.type === "item"
         ? eventListItemHtml(block.event, DEFAULT_EVENT_GROUP)
         : `
-          <section class="event-group" data-group-drop="${escapeHtml(block.name)}">
+          <section class="event-group ${expandedEventGroup === block.name ? "is-group-pinned-open" : ""}" data-group-drop="${escapeHtml(block.name)}">
             <div class="event-group-header">
               <input class="event-group-name" data-event-group-name="${escapeHtml(block.name)}" aria-label="${escapeHtml(t("群組名稱"))}" maxlength="80" value="${escapeHtml(block.name)}">
               <div class="group-block-drag-space event-group-drag-space" title="${escapeHtml(t("拖移群組"))}" aria-label="${escapeHtml(t("拖移群組"))}"></div>
@@ -1174,6 +1344,8 @@ function restoreEventPanelView(view) {
 
 function renderEventsPanel({ preserveView = false } = {}) {
   const view = preserveView ? captureEventPanelView() : null;
+  eventRuleReorderControllers.forEach((controller) => controller.destroy());
+  eventRuleReorderControllers = [];
   eventGroupDragController?.destroy();
   eventGroupDragController = null;
   if (!state.nodeDetail) {
@@ -1344,6 +1516,13 @@ function bindEventPanel() {
       await renameEventGroup(source, target);
     });
   });
+  dom.eventsPanel.querySelectorAll(".event-group[data-group-drop]").forEach((group) => {
+    group.addEventListener("pointerleave", () => {
+      if (expandedEventGroup !== group.dataset.groupDrop) return;
+      expandedEventGroup = null;
+      group.classList.remove("is-group-pinned-open");
+    });
+  });
   eventGroupDragController = SceneGroupDrag.createController({
     root: dom.eventsPanel.querySelector(".event-pool-flow"),
     itemSelector: "[data-group-item-id]",
@@ -1357,6 +1536,25 @@ function bindEventPanel() {
   });
   const form = document.querySelector("#eventForm");
   if (!form) return;
+  const reorderRoots = [
+    document.querySelector("#conditionList"),
+    document.querySelector("#effectList"),
+    ...document.querySelectorAll("#eventForm .weighted-choice-table .repeat-list"),
+  ];
+  reorderRoots.forEach((root) => {
+    if (!root || root.querySelectorAll(".list-reorder-item").length < 2) return;
+    eventRuleReorderControllers.push(SceneListReorder.createController({
+      root,
+      itemSelector: ".list-reorder-item[data-reorder-id]",
+      onDrop: () => {
+        state.eventDraft = readEventForm();
+        scheduleEventAutosave({ useDraft: true });
+        renderEventsPanel({ preserveView: true });
+        return true;
+      },
+      onError: (error) => toast(error.message, "error"),
+    }));
+  });
   form.addEventListener("submit", saveEvent);
   const keyboardTriggerInput = form.querySelector("[data-keyboard-trigger]");
   keyboardTriggerInput?.addEventListener("focus", () => keyboardTriggerInput.select());
@@ -1701,6 +1899,10 @@ async function applyEventGroupDrop({ mode, sourceId, targetId, targetGroup, posi
     ? SceneGroupDrag.planGroupDrop(items, { ...settings, newGroupName: t("新群組") })
     : SceneGroupDrag.planReorder(items, settings);
   if (!plan) return false;
+  expandedEventGroup = plan.destination === DEFAULT_EVENT_GROUP ? null : plan.destination;
+  if (expandedEventGroup) {
+    dom.eventsPanel.querySelector(`[data-group-drop="${CSS.escape(expandedEventGroup)}"]`)?.classList.add("is-group-pinned-open");
+  }
   return assignEventGroups(plan.assignments, {
     focusGroup: plan.createdGroup,
     order: plan.order,
@@ -1791,7 +1993,7 @@ async function deleteEvent() {
 
 function defaultOptionsDraft() {
   return {
-    Version: 2,
+    Version: 3,
     Canvas: { Width: 1920, Height: 1080, "Preview Background": "" },
     Elements: [],
   };
@@ -1876,6 +2078,30 @@ function controlValue(control) {
 
 function optionTypeLabel(type) {
   return ({ TEXTBOX: "Text Box", PICTURE: "Picture", HITBOX: "Hitbox" })[type] || type;
+}
+
+function textboxFeatureLabel(featureId) {
+  return ({
+    hover_accent: t("懸停強調條"),
+    hover_text_color: t("懸停文字色"),
+    item_border: t("Item 邊框"),
+    text_shadow: t("文字陰影"),
+    text_outline: t("文字描邊"),
+    staggered_entrance: t("逐項進場"),
+  })[featureId] || featureId;
+}
+
+function defaultTextboxProfile() {
+  return {
+    Version: 1,
+    ID: generateId("textbox_profile"),
+    Name: t("新設定檔"),
+    Style: clone(SceneTextboxProfiles.DEFAULT_STYLE),
+    Features: Object.fromEntries(TEXTBOX_FEATURE_IDS.map((featureId) => [
+      featureId,
+      clone(TEXTBOX_FEATURE_DEFAULTS[featureId]),
+    ])),
+  };
 }
 
 function safeColor(value, fallback = "#20302a") {
@@ -1966,7 +2192,7 @@ function optionElementListHtml() {
   const elements = state.optionsDraft?.Elements || [];
   if (!elements.length) return `<div class="node-list-empty">${escapeHtml(t("尚未建立選項"))}</div>`;
   return elements.map((element) => `
-    <button class="subnav-item option-element-list-item ${element.ID === state.selectedOptionElementId ? "active" : ""}" type="button" data-option-element-select="${escapeHtml(element.ID)}">
+    <button class="subnav-item option-element-list-item list-reorder-item ${element.ID === state.selectedOptionElementId ? "active" : ""}" type="button" data-option-element-select="${escapeHtml(element.ID)}" data-reorder-id="${escapeHtml(element.ID)}" aria-grabbed="false">
       <span class="subnav-item-copy">
         <strong>${escapeHtml(element.Name || element.ID)}</strong>
         <span>${escapeHtml(optionTypeLabel(element.Type))}${element.Type === "TEXTBOX" ? ` · ${escapeHtml(t("{count} 項", { count: element.Items?.length || 0 }))}` : ""}${element.Availability === "CONTROLLED" ? " · Controlled" : ""}</span>
@@ -1988,7 +2214,13 @@ function optionStageElementHtml(element) {
   if (element.Type === "TEXTBOX") {
     const metrics = textBoxMetrics(element);
     height = metrics.height;
-    const style = element.Style || {};
+    const style = resolveTextboxStyle(element, state.textboxProfiles);
+    const hoverAccent = resolveTextboxFeature(element, "hover_accent", state.textboxProfiles);
+    const hoverTextColor = resolveTextboxFeature(element, "hover_text_color", state.textboxProfiles);
+    const itemBorder = resolveTextboxFeature(element, "item_border", state.textboxProfiles);
+    const textShadow = resolveTextboxFeature(element, "text_shadow", state.textboxProfiles);
+    const textOutline = resolveTextboxFeature(element, "text_outline", state.textboxProfiles);
+    const entrance = resolveTextboxFeature(element, "staggered_entrance", state.textboxProfiles);
     const hover = element.Hover || {};
     const hoverClass = hover.Enabled !== false ? "hover-effect-enabled" : "";
     const overflowClass = element.List?.["Show Scrollbar"] === false ? "scrollbar-hidden" : "";
@@ -1996,11 +2228,20 @@ function optionStageElementHtml(element) {
     body = `
       <div class="option-textbox-preview" style="padding:${metrics.padding}px;background:${safeColor(style.Background, "#0b1118")}">
         <div class="option-scroll-preview ${overflowClass}" style="max-height:${metrics.contentHeight}px;overflow-y:auto;gap:${metrics.spacing}px">
-          ${items.length ? items.map((item) => `
-            <button class="option-text-item ${hoverClass} ${item.ID === state.selectedOptionItemId ? "selected" : ""}" type="button" data-option-item-select="${escapeHtml(item.ID)}" style="height:${metrics.itemHeight}px;--option-item-background:${safeColor(style["Item Background"])};--option-hover-color:${safeColor(hover.Color, "#ffffff18")};background:var(--option-item-background);color:${safeColor(style["Text Color"], "#ffffff")};font-size:${numberValue(style["Text Size"], 30)}px;text-align:${numberValue(style["Text Align"], 0.5) === 0 ? "left" : numberValue(style["Text Align"], 0.5) === 1 ? "right" : "center"}">
-              ${escapeHtml(item.Text || item.Name || item.ID)}${item.Availability === "CONTROLLED" ? '<span class="visually-hidden">（Controlled）</span>' : ""}
+          ${items.length ? items.map((item, index) => {
+            const itemStyle = { ...style, ...(item["Style Override"] || {}) };
+            const align = numberValue(itemStyle["Text Align"], 0.5);
+            const shadow = textShadow.Enabled
+              ? `${numberValue(textShadow.X, 0)}px ${numberValue(textShadow.Y, 2)}px ${numberValue(textShadow.Size, 2)}px ${safeColor(textShadow.Color, "#00000088")}`
+              : "";
+            const outline = textOutline.Enabled && numberValue(textOutline.Size, 1) > 0
+              ? `-${numberValue(textOutline.Size, 1)}px 0 ${safeColor(textOutline.Color, "#000000cc")}, ${numberValue(textOutline.Size, 1)}px 0 ${safeColor(textOutline.Color, "#000000cc")}, 0 -${numberValue(textOutline.Size, 1)}px ${safeColor(textOutline.Color, "#000000cc")}, 0 ${numberValue(textOutline.Size, 1)}px ${safeColor(textOutline.Color, "#000000cc")}`
+              : "";
+            return `
+            <button class="option-text-item ${hoverClass} ${hoverAccent.Enabled ? "has-hover-accent" : ""} ${hoverTextColor.Enabled ? "has-hover-text-color" : ""} ${itemBorder.Enabled ? "has-item-border" : ""} ${entrance.Enabled ? "has-entrance" : ""} ${item.ID === state.selectedOptionItemId ? "selected" : ""}" type="button" data-option-item-select="${escapeHtml(item.ID)}" style="height:${metrics.itemHeight}px;--option-item-background:${safeColor(itemStyle["Item Background"])};--option-hover-color:${safeColor(hover.Color, "#ffffff18")};--textbox-hover-text-color:${safeColor(hoverTextColor.Color, "#ffffff")};--textbox-item-border-color:${safeColor(itemBorder.Color, "#ffffff33")};--textbox-item-border-width:${numberValue(itemBorder.Width, 1)}px;--textbox-accent-color:${safeColor(hoverAccent.Color, "#5c7265")};--textbox-accent-width:${numberValue(hoverAccent.Width, 6)}px;--textbox-entrance-distance:${numberValue(entrance.Distance, 18)}px;--textbox-entrance-delay:${numberValue(entrance.Delay, 0.04) * index}s;--textbox-entrance-duration:${numberValue(entrance.Duration, 0.22)}s;background:var(--option-item-background);color:${safeColor(itemStyle["Text Color"], "#ffffff")};font-size:${numberValue(itemStyle["Text Size"], 30)}px;text-align:${align === 0 ? "left" : align === 1 ? "right" : "center"};text-shadow:${[outline, shadow].filter(Boolean).join(",") || "none"}">
+              <span class="option-text-item-accent" aria-hidden="true"></span>${escapeHtml(item.Text || item.Name || item.ID)}${item.Availability === "CONTROLLED" ? '<span class="visually-hidden">（Controlled）</span>' : ""}
             </button>
-          `).join("") : `<div class="option-empty-row" style="height:${metrics.itemHeight}px">${escapeHtml(t("尚未建立 Item"))}</div>`}
+          `; }).join("") : `<div class="option-empty-row" style="height:${metrics.itemHeight}px">${escapeHtml(t("尚未建立 Item"))}</div>`}
         </div>
       </div>
     `;
@@ -2056,14 +2297,10 @@ function textBoxItemsHtml(element) {
   return `
     <div class="option-items-list">
       ${items.map((item, index) => `
-        <div class="option-item-row">
+        <div class="option-item-row list-reorder-item" data-option-item-order-id="${escapeHtml(item.ID)}" data-reorder-id="${escapeHtml(item.ID)}" aria-grabbed="false">
           <div class="option-item-entry ${item.ID === state.selectedOptionItemId ? "active" : ""}">
             <button type="button" data-option-item-select="${escapeHtml(item.ID)}"><strong>${escapeHtml(item.Name || item.Text || item.ID)}</strong><span>${escapeHtml(actionTriggerName(item.Trigger))}${item.Availability === "CONTROLLED" ? " · Controlled" : ""}</span></button>
-            <button class="option-item-delete" type="button" data-delete-option-item="${escapeHtml(item.ID)}" title="${escapeHtml(t("刪除選項"))}" aria-label="${escapeHtml(t("刪除選項"))}">×</button>
-          </div>
-          <div class="option-item-order">
-            <button type="button" data-move-option-item="${index}:-1" title="${escapeHtml(t("上移"))}" aria-label="${escapeHtml(t("上移"))}" ${index === 0 ? "disabled" : ""}>↑</button>
-            <button type="button" data-move-option-item="${index}:1" title="${escapeHtml(t("下移"))}" aria-label="${escapeHtml(t("下移"))}" ${index === items.length - 1 ? "disabled" : ""}>↓</button>
+            <button class="row-button option-item-delete" type="button" data-delete-option-item="${escapeHtml(item.ID)}" title="${escapeHtml(t("刪除選項"))}" aria-label="${escapeHtml(t("刪除選項"))}">×</button>
           </div>
         </div>
       `).join("") || `<div class="row-empty compact-empty">${escapeHtml(t("尚未建立 Item"))}</div>`}
@@ -2120,6 +2357,149 @@ function optionCollapsibleSection(title, summary, body, extraClass = "") {
   `;
 }
 
+function optionInspectorSectionHtml(title, body, kicker = "", extraClass = "") {
+  return `
+    <section class="option-inspector-section ${extraClass}">
+      <div class="option-inspector-section-heading">
+        ${kicker ? `<span>${escapeHtml(kicker)}</span>` : ""}
+        <h3>${escapeHtml(title)}</h3>
+      </div>
+      <div class="option-inspector-section-body">${body}</div>
+    </section>
+  `;
+}
+
+function textboxAppearanceValues(element) {
+  const profile = selectedTextboxProfile(element, state.textboxProfiles);
+  const profileId = String(element.Appearance?.Profile || "");
+  const profileChoices = state.textboxProfiles.map((entry) => entry.ID);
+  if (profileId && !profileChoices.includes(profileId)) profileChoices.push(profileId);
+  const style = resolveTextboxStyle(element, state.textboxProfiles);
+  const stylePath = profile ? "Appearance.Style Overrides" : "Style";
+  const overrides = element.Appearance?.["Style Overrides"] || {};
+  const overrideCount = Object.keys(overrides).length;
+  const item = selectedOptionItem();
+  const itemOverride = item?.["Style Override"] || {};
+  const hasItemOverride = Object.keys(itemOverride).length > 0;
+  return { profile, profileId, profileChoices, style, stylePath, overrideCount, item, itemOverride, hasItemOverride };
+}
+
+function textboxStyleInspectorHtml(element) {
+  const { profile, profileId, profileChoices, style, stylePath, overrideCount } = textboxAppearanceValues(element);
+  const profileSection = optionInspectorSectionHtml(t("外觀設定檔"), `
+    <div class="option-profile-control">
+      <label class="field"><span>${escapeHtml(t("共用設定"))}</span><select data-textbox-profile-select>${optionTags(
+        ["", ...profileChoices],
+        profileId,
+        (value) => value ? state.textboxProfiles.find((entry) => entry.ID === value)?.Name || t("{name}（未找到）", { name: value }) : t("不使用設定檔"),
+      )}</select></label>
+      <button class="quiet-button compact" id="manageTextboxProfiles" type="button">${escapeHtml(t("管理設定檔"))}</button>
+    </div>
+    ${overrideCount ? `<div class="textbox-profile-override-notice"><span>${escapeHtml(t("{count} 項個別設定正在覆蓋設定檔", { count: overrideCount }))}</span><button class="quiet-button compact" id="resetTextboxStyleOverrides" type="button">${escapeHtml(t("改用設定檔外觀"))}</button></div>` : ""}
+  `, profile?.Name || t("自訂外觀"));
+  const colorSection = optionInspectorSectionHtml(t("色彩"), `
+    <div class="option-inspector-color-grid">
+      ${transparentColorField(t("容器"), `${stylePath}.Background`, style.Background, "#0b1118")}
+      ${transparentColorField(t("Item"), `${stylePath}.Item Background`, style["Item Background"], "#20302a")}
+      <label class="field"><span>${escapeHtml(t("文字"))}</span><input data-option-path="${escapeHtml(`${stylePath}.Text Color`)}" type="color" value="${safeColor(style["Text Color"], "#ffffff").slice(0, 7)}"></label>
+    </div>
+  `, t("基礎樣式"));
+  const typeSection = optionInspectorSectionHtml(t("文字"), `
+    <div class="option-inspector-control-grid">
+      ${rangeField(t("字體大小"), `${stylePath}.Text Size`, style["Text Size"] ?? 30, { min: 8, max: 160, suffix: " px" })}
+      <label class="field"><span>${escapeHtml(t("文字對齊"))}</span><select data-option-path="${escapeHtml(`${stylePath}.Text Align`)}">${optionTags([0, 0.5, 1], style["Text Align"] ?? 0.5, (value) => ({ 0: t("靠左"), 0.5: t("置中"), 1: t("靠右") })[value])}</select></label>
+    </div>
+  `, t("排版"));
+  return profileSection + colorSection + typeSection;
+}
+
+function textboxEffectsInspectorHtml(element) {
+  const { profile } = textboxAppearanceValues(element);
+  const hoverSection = optionInspectorSectionHtml(t("互動回饋"), optionHoverFields(element), "HOVER");
+  const featureBody = profile ? `<div class="textbox-effect-grid">${TEXTBOX_FEATURE_IDS.map((featureId) => {
+    const feature = resolveTextboxFeature(element, featureId, state.textboxProfiles);
+    return `<div class="textbox-effect-card"><strong>${escapeHtml(textboxFeatureLabel(featureId))}</strong>${optionBooleanField(textboxFeatureLabel(featureId), `data-textbox-feature="${escapeHtml(featureId)}"`, feature.Enabled)}</div>`;
+  }).join("")}</div>` : `<div class="textbox-appearance-empty"><strong>${escapeHtml(t("先選擇外觀設定檔"))}</strong><span>${escapeHtml(t("可選效果由共用設定檔提供。"))}</span></div>`;
+  return hoverSection + optionInspectorSectionHtml(t("可選特性"), featureBody, t("效果"));
+}
+
+function textboxItemInspectorHtml(element) {
+  const { style, item, itemOverride, hasItemOverride } = textboxAppearanceValues(element);
+  const itemSelector = `<div class="option-item-segment" role="listbox" aria-label="Item">${(element.Items || []).map((entry, index) => `
+    <button class="${entry.ID === state.selectedOptionItemId ? "active" : ""}" type="button" data-option-item-select="${escapeHtml(entry.ID)}" aria-selected="${entry.ID === state.selectedOptionItemId}">
+      <span>${escapeHtml(String(index + 1).padStart(2, "0"))}</span><strong>${escapeHtml(entry.Name || entry.ID)}</strong>
+    </button>
+  `).join("")}</div>`;
+  const selectorSection = optionInspectorSectionHtml(t("目前 Item"), itemSelector || `<div class="textbox-appearance-empty"><strong>${escapeHtml(t("尚未選擇 Item"))}</strong></div>`, item?.Name || t("尚未選擇 Item"));
+  if (!item) return selectorSection + `<div class="textbox-appearance-empty"><span>${escapeHtml(t("先在畫布上選擇一個 Textbox Item。"))}</span></div>`;
+  const styleBody = `
+    ${optionBooleanField(t("使用獨立樣式"), 'id="itemStyleOverrideEnabled"', hasItemOverride)}
+    ${hasItemOverride ? `<div class="option-inspector-color-grid option-item-color-grid">${transparentColorField(t("背景"), "Style Override.Item Background", itemOverride["Item Background"], style["Item Background"] || "#20302a", true)}<label class="field"><span>${escapeHtml(t("文字"))}</span><input data-option-item-path="Style Override.Text Color" type="color" value="${safeColor(itemOverride["Text Color"], style["Text Color"]).slice(0, 7)}"></label></div><div class="option-inspector-control-grid">${rangeField(t("字體大小"), "Style Override.Text Size", itemOverride["Text Size"] ?? style["Text Size"] ?? 30, { min: 8, max: 160, suffix: " px", itemField: true })}<label class="field"><span>${escapeHtml(t("文字對齊"))}</span><select data-option-item-path="Style Override.Text Align">${optionTags([0, 0.5, 1], itemOverride["Text Align"] ?? style["Text Align"] ?? 0.5, (value) => ({ 0: t("靠左"), 0.5: t("置中"), 1: t("靠右") })[value])}</select></label></div>` : `<p class="option-inspector-hint">${escapeHtml(t("目前跟隨 Textbox 的共用樣式。"))}</p>`}
+  `;
+  return selectorSection + optionInspectorSectionHtml(t("單一選項"), styleBody, t("樣式"));
+}
+
+function optionCanvasInspectorHtml(element) {
+  const layout = element.Layout || {};
+  const tabs = element.Type === "TEXTBOX"
+    ? [["layout", t("佈局")], ["style", t("樣式")], ["effects", t("效果")], ["item", "Item"]]
+    : [["layout", t("佈局")], ["style", t("樣式")]];
+  if (!tabs.some(([id]) => id === state.optionInspectorTab)) state.optionInspectorTab = "layout";
+  const positionFields = `<div class="option-inspector-metric-grid">
+    <label class="field"><span>X</span><input data-option-path="Layout.X" type="number" value="${escapeHtml(layout.X ?? 0)}"></label>
+    <label class="field"><span>Y</span><input data-option-path="Layout.Y" type="number" value="${escapeHtml(layout.Y ?? 0)}"></label>
+    <label class="field"><span>${escapeHtml(t("寬度"))}</span><input data-option-path="Layout.Width" type="number" min="24" value="${escapeHtml(layout.Width ?? 100)}"></label>
+    ${element.Type === "TEXTBOX" ? "" : `<label class="field"><span>${escapeHtml(t("高度"))}</span><input data-option-path="Layout.Height" type="number" min="24" value="${escapeHtml(layout.Height ?? 100)}"></label>`}
+    <label class="field"><span>${escapeHtml(t("圖層順序"))}</span><input data-option-path="Layout.Z Order" type="number" value="${escapeHtml(layout["Z Order"] ?? 10)}"></label>
+  </div>`;
+  let content = "";
+  if (element.Type === "TEXTBOX") {
+    const list = element.List || {};
+    if (state.optionInspectorTab === "layout") {
+      content = optionInspectorSectionHtml(t("位置與尺寸"), positionFields, t("佈局")) + optionInspectorSectionHtml(t("清單"), `
+        <div class="option-inspector-control-grid">
+          ${rangeField(t("最多顯示"), "List.Max Visible Items", list["Max Visible Items"] ?? 4, { min: 1, max: 20 })}
+          ${rangeField(t("Item 高度"), "List.Item Height", list["Item Height"] ?? 72, { min: 24, max: 240, suffix: " px" })}
+          ${rangeField(t("Item 間距"), "List.Item Spacing", list["Item Spacing"] ?? 12, { min: 0, max: 120, suffix: " px" })}
+          ${rangeField(t("Padding"), "List.Padding", list.Padding ?? 16, { min: 0, max: 160, suffix: " px" })}
+        </div>
+        ${optionBooleanField(t("內容超出時顯示滑桿"), 'data-option-path="List.Show Scrollbar"', list["Show Scrollbar"] !== false)}
+      `, "TEXTBOX");
+    } else if (state.optionInspectorTab === "style") content = textboxStyleInspectorHtml(element);
+    else if (state.optionInspectorTab === "effects") content = textboxEffectsInspectorHtml(element);
+    else content = textboxItemInspectorHtml(element);
+  } else if (element.Type === "PICTURE") {
+    const picture = element.Picture || {};
+    content = state.optionInspectorTab === "layout"
+      ? optionInspectorSectionHtml(t("位置與尺寸"), positionFields, t("佈局")) + optionInspectorSectionHtml(t("圖片佈局"), `<label class="field"><span>${escapeHtml(t("填充方式"))}</span><select data-option-path="Picture.Fit">${optionTags(["CONTAIN", "COVER", "STRETCH"], picture.Fit || "CONTAIN")}</select></label>${optionBooleanField(t("保持長寬比"), 'data-option-path="Picture.Keep Aspect"', picture["Keep Aspect"] !== false)}`, "PICTURE")
+      : optionInspectorSectionHtml(t("互動回饋"), optionHoverFields(element, { picture: true }), "HOVER") + optionInspectorSectionHtml(t("顯示效果"), `${rangeField(t("不透明度"), "Picture.Opacity", picture.Opacity ?? 1, { min: 0, max: 1, step: 0.01, format: "percent" })}<label class="field"><span>Tint</span><input data-option-path="Picture.Tint" type="color" value="${safeColor(picture.Tint, "#ffffff").slice(0, 7)}"></label>`, t("樣式"));
+  } else {
+    const hitbox = element.Hitbox || {};
+    content = state.optionInspectorTab === "layout"
+      ? optionInspectorSectionHtml(t("位置與尺寸"), positionFields, t("佈局"))
+      : optionInspectorSectionHtml(t("互動回饋"), optionHoverFields(element), "HOVER") + optionInspectorSectionHtml(t("編輯器顯示"), `<label class="field"><span>${escapeHtml(t("顏色"))}</span><input data-option-path="Hitbox.Editor Color" type="color" value="${safeColor(hitbox["Editor Color"], "#28a47d").slice(0, 7)}"></label>${rangeField(t("不透明度"), "Hitbox.Editor Opacity", hitbox["Editor Opacity"] ?? 0.24, { min: 0, max: 1, step: 0.01, format: "percent" })}`, t("樣式"));
+  }
+
+  const appearance = element.Type === "TEXTBOX" ? textboxAppearanceValues(element) : null;
+  const subtitle = element.Type === "TEXTBOX"
+    ? `${t("{count} 個選項", { count: element.Items?.length || 0 })} · ${appearance.profile?.Name || t("自訂外觀")}`
+    : t("畫布元素");
+  return `
+    <div class="option-live-inspector">
+      <header class="option-live-inspector-header">
+        <div class="option-live-inspector-title">
+          <span class="option-type-chip">${escapeHtml(optionTypeLabel(element.Type))}</span>
+          <h2>${escapeHtml(element.Name || element.ID)}</h2>
+          <p>${escapeHtml(subtitle)}</p>
+        </div>
+        ${appearance ? `<div class="textbox-appearance-swatches" aria-hidden="true"><i style="--swatch:${safeColor(appearance.style.Background, "#0b1118")}"></i><i style="--swatch:${safeColor(appearance.style["Item Background"], "#20302a")}"></i><i style="--swatch:${safeColor(appearance.style["Text Color"], "#ffffff")}"></i></div>` : ""}
+        <nav class="option-inspector-tabs" role="tablist" aria-label="${escapeHtml(t("調整分類"))}">${tabs.map(([id, label]) => `<button class="${state.optionInspectorTab === id ? "active" : ""}" type="button" role="tab" data-option-inspector-tab="${id}" aria-selected="${state.optionInspectorTab === id}">${escapeHtml(label)}</button>`).join("")}</nav>
+      </header>
+      <div class="option-inspector-scrollbody"><div class="option-inspector-tabpanel" role="tabpanel">${content}</div></div>
+    </div>
+  `;
+}
+
 function optionInspectorHtml() {
   const element = selectedOptionElement();
   if (!element) {
@@ -2130,182 +2510,229 @@ function optionInspectorHtml() {
       </div>
     `;
   }
-  const layout = element.Layout || {};
-  const isCanvas = state.optionWorkspaceMode === "canvas";
-  const positionFields = `
-    <div class="form-grid two-columns option-field-grid">
-      <label class="field"><span>X</span><input data-option-path="Layout.X" type="number" value="${escapeHtml(layout.X ?? 0)}"></label>
-      <label class="field"><span>Y</span><input data-option-path="Layout.Y" type="number" value="${escapeHtml(layout.Y ?? 0)}"></label>
-    </div>
-    <div class="form-grid ${element.Type === "TEXTBOX" ? "" : "two-columns"} option-field-grid">
-      <label class="field"><span>${escapeHtml(t("寬度"))}</span><input data-option-path="Layout.Width" type="number" min="24" value="${escapeHtml(layout.Width ?? 100)}"></label>
-      ${element.Type === "TEXTBOX" ? "" : `<label class="field"><span>${escapeHtml(t("高度"))}</span><input data-option-path="Layout.Height" type="number" min="24" value="${escapeHtml(layout.Height ?? 100)}"></label>`}
-    </div>
-  `;
-  const zOrderField = `<label class="field"><span>${escapeHtml(t("圖層順序"))}</span><input data-option-path="Layout.Z Order" type="number" value="${escapeHtml(layout["Z Order"] ?? 10)}"></label>`;
+  if (state.optionWorkspaceMode === "canvas") return optionCanvasInspectorHtml(element);
+
   let primary = "";
   let sections = "";
-
   if (element.Type === "TEXTBOX") {
-    const list = element.List || {};
-    const style = element.Style || {};
     const item = selectedOptionItem();
-    const itemOverride = item?.["Style Override"] || {};
-    const hasItemOverride = Object.keys(itemOverride).length > 0;
-    if (!isCanvas) {
-      primary = `
-        <div class="form-grid two-columns option-field-grid">
-          <label class="field"><span>Name</span><input data-option-path="Name" value="${escapeHtml(element.Name || "")}"></label>
-          <label class="field"><span>Availability</span><select data-option-path="Availability">${optionTags(["ALWAYS", "CONTROLLED"], element.Availability || "ALWAYS", (value) => value === "ALWAYS" ? "Always" : "Controlled")}</select></label>
+    primary = `
+      <div class="form-grid two-columns option-field-grid">
+        <label class="field"><span>Name</span><input data-option-path="Name" value="${escapeHtml(element.Name || "")}"></label>
+        <label class="field"><span>Availability</span><select data-option-path="Availability">${optionTags(["ALWAYS", "CONTROLLED"], element.Availability || "ALWAYS", (value) => value === "ALWAYS" ? "Always" : "Controlled")}</select></label>
+      </div>
+    `;
+    sections += `
+      <div class="form-section option-textbox-items-section selected-item-editor">
+        <div class="form-section-header option-static-header">
+          <div><h3>Items</h3><span>${escapeHtml(t("{count} 個選項", { count: element.Items?.length || 0 }))}</span></div>
+          <button class="icon-button section-add-button add-button" id="addOptionItem" type="button" title="${escapeHtml(t("新增選項"))}" aria-label="${escapeHtml(t("新增選項"))}">＋</button>
         </div>
-      `;
-      sections += `
-        <div class="form-section option-textbox-items-section selected-item-editor">
-          <div class="form-section-header option-static-header">
-            <div><h3>Items</h3><span>${escapeHtml(t("{count} 個選項", { count: element.Items?.length || 0 }))}</span></div>
-            <button class="icon-button section-add-button add-button" id="addOptionItem" type="button" title="${escapeHtml(t("新增選項"))}" aria-label="${escapeHtml(t("新增選項"))}">＋</button>
-          </div>
-          ${textBoxItemsHtml(element)}
-          ${item ? `<div class="option-primary-block option-item-fields">
-            <div class="form-grid two-columns option-field-grid">
-              <label class="field"><span>Name</span><input data-option-item-path="Name" value="${escapeHtml(item.Name || "")}"></label>
-              <label class="field"><span>Availability</span><select data-option-item-path="Availability">${optionTags(["ALWAYS", "CONTROLLED"], item.Availability || "ALWAYS", (value) => value === "ALWAYS" ? "Always" : "Controlled")}</select></label>
-              <label class="field"><span>Text</span><input data-option-item-path="Text" value="${escapeHtml(item.Text || "")}"></label>
-              <label class="field"><span>Trigger</span><input data-option-item-path="Trigger" value="${escapeHtml(actionTriggerName(item.Trigger))}"></label>
-            </div>
-          </div>` : ""}
-        </div>
-      `;
-      sections += optionSoundSection(element);
-    } else {
-      primary = positionFields;
-      sections += optionCollapsibleSection("版面細節", "", `
-        ${zOrderField}
-        <div class="option-section-group">
-          ${rangeField(t("最多顯示"), "List.Max Visible Items", list["Max Visible Items"] ?? 4, { min: 1, max: 20 })}
-          ${rangeField(t("Item 高度"), "List.Item Height", list["Item Height"] ?? 72, { min: 24, max: 240, suffix: " px" })}
-          ${rangeField(t("Item 間距"), "List.Item Spacing", list["Item Spacing"] ?? 12, { min: 0, max: 120, suffix: " px" })}
-          ${rangeField(t("Padding"), "List.Padding", list.Padding ?? 16, { min: 0, max: 160, suffix: " px" })}
-        </div>
-        ${optionBooleanField(t("內容超出時顯示滑桿"), 'data-option-path="List.Show Scrollbar"', list["Show Scrollbar"] !== false)}
-      `);
-      sections += optionCollapsibleSection("外觀", "", `
-        <div class="option-section-group">
-          ${optionHoverFields(element)}
-        </div>
-        <div class="option-section-group">
-          <h4>${escapeHtml(t("背景"))}</h4>
-          <div class="form-grid compact-grid color-grid option-opacity-colors">
-            ${transparentColorField(t("容器"), "Style.Background", style.Background, "#0b1118")}
-            ${transparentColorField(t("Item"), "Style.Item Background", style["Item Background"], "#20302a")}
-          </div>
-        </div>
-        <div class="option-section-group">
-          <h4>${escapeHtml(t("文字"))}</h4>
-          <div class="form-grid two-columns compact-grid color-grid">
-            <label class="field"><span>${escapeHtml(t("一般"))}</span><input data-option-path="Style.Text Color" type="color" value="${safeColor(style["Text Color"], "#ffffff").slice(0, 7)}"></label>
-          </div>
-          ${rangeField(t("字體大小"), "Style.Text Size", style["Text Size"] ?? 30, { min: 8, max: 160, suffix: " px" })}
-          <label class="field"><span>${escapeHtml(t("文字對齊"))}</span><select data-option-path="Style.Text Align">${optionTags([0, 0.5, 1], style["Text Align"] ?? 0.5, (value) => ({ 0: t("靠左"), 0.5: t("置中"), 1: t("靠右") })[value])}</select></label>
-        </div>
-        ${item ? `
-          <div class="option-section-group">
-            ${optionBooleanField(t("使用獨立樣式"), 'id="itemStyleOverrideEnabled"', hasItemOverride)}
-            ${hasItemOverride ? `
-              <div class="form-grid compact-grid color-grid option-opacity-colors">
-                ${transparentColorField(t("背景"), "Style Override.Item Background", itemOverride["Item Background"], style["Item Background"] || "#20302a", true)}
-                <label class="field"><span>${escapeHtml(t("文字"))}</span><input data-option-item-path="Style Override.Text Color" type="color" value="${safeColor(itemOverride["Text Color"], style["Text Color"]).slice(0, 7)}"></label>
-              </div>
-              ${rangeField(t("字體大小"), "Style Override.Text Size", itemOverride["Text Size"] ?? style["Text Size"] ?? 30, { min: 8, max: 160, suffix: " px", itemField: true })}
-              <label class="field"><span>${escapeHtml(t("文字對齊"))}</span><select data-option-item-path="Style Override.Text Align">${optionTags([0, 0.5, 1], itemOverride["Text Align"] ?? style["Text Align"] ?? 0.5, (value) => ({ 0: t("靠左"), 0.5: t("置中"), 1: t("靠右") })[value])}</select></label>
-            ` : ""}
-          </div>
-        ` : ""}
-      `);
-    }
+        ${textBoxItemsHtml(element)}
+        ${item ? `<div class="option-primary-block option-item-fields"><div class="form-grid two-columns option-field-grid"><label class="field"><span>Name</span><input data-option-item-path="Name" value="${escapeHtml(item.Name || "")}"></label><label class="field"><span>Availability</span><select data-option-item-path="Availability">${optionTags(["ALWAYS", "CONTROLLED"], item.Availability || "ALWAYS", (value) => value === "ALWAYS" ? "Always" : "Controlled")}</select></label><label class="field"><span>Text</span><input data-option-item-path="Text" value="${escapeHtml(item.Text || "")}"></label><label class="field"><span>Trigger</span><input data-option-item-path="Trigger" value="${escapeHtml(actionTriggerName(item.Trigger))}"></label></div></div>` : ""}
+      </div>
+    `;
+    sections += optionSoundSection(element);
   } else if (element.Type === "PICTURE") {
     const picture = element.Picture || {};
-    if (!isCanvas) {
-      primary = `
-        <div class="form-grid two-columns option-field-grid">
-          <label class="field"><span>Name</span><input data-option-path="Name" value="${escapeHtml(element.Name || "")}"></label>
-          <label class="field"><span>Availability</span><select data-option-path="Availability">${optionTags(["ALWAYS", "CONTROLLED"], element.Availability || "ALWAYS", (value) => value === "ALWAYS" ? "Always" : "Controlled")}</select></label>
-          <label class="field option-wide-field"><span>Trigger</span><input data-option-path="Trigger" value="${escapeHtml(actionTriggerName(element.Trigger))}"></label>
-        </div>
-      `;
-      sections += `
-        <div class="form-section option-picture-source-section">
-          <div class="form-grid two-columns option-field-grid">
-            <label class="field"><span>${escapeHtml(t("Idle 圖片"))}</span><select data-option-path="Picture.Idle" aria-label="${escapeHtml(t("Idle 圖片"))}">${imageOptionTags(picture.Idle || "", [{ id: "", name: "None" }])}</select></label>
-            ${optionBooleanField(t("只讓不透明部分可點擊"), 'data-option-path="Picture.Alpha Hit Test"', Boolean(picture["Alpha Hit Test"]))}
-          </div>
-        </div>
-      `;
-      sections += optionSoundSection(element);
-    } else {
-      primary = positionFields;
-      sections += optionCollapsibleSection("版面細節", "", `
-        ${zOrderField}
-        <label class="field"><span>${escapeHtml(t("填充方式"))}</span><select data-option-path="Picture.Fit">${optionTags(["CONTAIN", "COVER", "STRETCH"], picture.Fit || "CONTAIN")}</select></label>
-        ${optionBooleanField(t("保持長寬比"), 'data-option-path="Picture.Keep Aspect"', picture["Keep Aspect"] !== false)}
-      `);
-      sections += optionCollapsibleSection("外觀", "", `
-        <div class="option-section-group">
-          ${optionHoverFields(element, { picture: true })}
-        </div>
-        <div class="option-section-group">
-          <h4>${escapeHtml(t("顯示效果"))}</h4>
-          ${rangeField(t("不透明度"), "Picture.Opacity", picture.Opacity ?? 1, { min: 0, max: 1, step: 0.01, format: "percent" })}
-          <label class="field"><span>Tint</span><input data-option-path="Picture.Tint" type="color" value="${safeColor(picture.Tint, "#ffffff").slice(0, 7)}"></label>
-        </div>
-      `);
-    }
+    primary = `<div class="form-grid two-columns option-field-grid"><label class="field"><span>Name</span><input data-option-path="Name" value="${escapeHtml(element.Name || "")}"></label><label class="field"><span>Availability</span><select data-option-path="Availability">${optionTags(["ALWAYS", "CONTROLLED"], element.Availability || "ALWAYS", (value) => value === "ALWAYS" ? "Always" : "Controlled")}</select></label><label class="field option-wide-field"><span>Trigger</span><input data-option-path="Trigger" value="${escapeHtml(actionTriggerName(element.Trigger))}"></label></div>`;
+    sections += `<div class="form-section option-picture-source-section"><div class="form-grid two-columns option-field-grid"><label class="field"><span>${escapeHtml(t("Idle 圖片"))}</span><select data-option-path="Picture.Idle" aria-label="${escapeHtml(t("Idle 圖片"))}">${imageOptionTags(picture.Idle || "", [{ id: "", name: "None" }])}</select></label>${optionBooleanField(t("只讓不透明部分可點擊"), 'data-option-path="Picture.Alpha Hit Test"', Boolean(picture["Alpha Hit Test"]))}</div></div>`;
+    sections += optionSoundSection(element);
   } else {
-    const hitbox = element.Hitbox || {};
-    if (!isCanvas) {
-      primary = `
-        <div class="form-grid two-columns option-field-grid">
-          <label class="field"><span>Name</span><input data-option-path="Name" value="${escapeHtml(element.Name || "")}"></label>
-          <label class="field"><span>Availability</span><select data-option-path="Availability">${optionTags(["ALWAYS", "CONTROLLED"], element.Availability || "ALWAYS", (value) => value === "ALWAYS" ? "Always" : "Controlled")}</select></label>
-          <label class="field option-wide-field"><span>Trigger</span><input data-option-path="Trigger" value="${escapeHtml(actionTriggerName(element.Trigger))}"></label>
-        </div>
-      `;
-      sections += optionSoundSection(element);
-    } else {
-      primary = positionFields;
-      sections += optionCollapsibleSection("版面細節", "", zOrderField);
-      sections += optionCollapsibleSection("外觀", "", `
-        <div class="option-section-group">
-          ${optionHoverFields(element)}
-        </div>
-        <div class="option-section-group">
-          <label class="field"><span>${escapeHtml(t("顏色"))}</span><input data-option-path="Hitbox.Editor Color" type="color" value="${safeColor(hitbox["Editor Color"], "#28a47d").slice(0, 7)}"></label>
-          ${rangeField(t("不透明度"), "Hitbox.Editor Opacity", hitbox["Editor Opacity"] ?? 0.24, { min: 0, max: 1, step: 0.01, format: "percent" })}
-        </div>
-      `);
-    }
+    primary = `<div class="form-grid two-columns option-field-grid"><label class="field"><span>Name</span><input data-option-path="Name" value="${escapeHtml(element.Name || "")}"></label><label class="field"><span>Availability</span><select data-option-path="Availability">${optionTags(["ALWAYS", "CONTROLLED"], element.Availability || "ALWAYS", (value) => value === "ALWAYS" ? "Always" : "Controlled")}</select></label><label class="field option-wide-field"><span>Trigger</span><input data-option-path="Trigger" value="${escapeHtml(actionTriggerName(element.Trigger))}"></label></div>`;
+    sections += optionSoundSection(element);
   }
 
   return `
-    <div class="editor-page option-editor-page option-editor-${isCanvas ? "canvas" : "form"}">
+    <div class="editor-page option-editor-page option-editor-form">
       <div class="form-section option-primary-section">${primary}</div>
       ${sections}
-      ${isCanvas ? "" : `<div class="editor-danger-zone"><button class="danger-button" id="deleteOptionElement" type="button">${escapeHtml(t("刪除"))}</button></div>`}
+      <div class="editor-danger-zone"><button class="danger-button" id="deleteOptionElement" type="button">${escapeHtml(t("刪除"))}</button></div>
     </div>
   `;
+}
+
+function textboxProfileField(label, path, value, { type = "text", min = "", max = "", step = "" } = {}) {
+  return `<label class="field"><span>${escapeHtml(label)}</span><input data-textbox-profile-path="${escapeHtml(path)}" type="${escapeHtml(type)}" value="${escapeHtml(value)}" ${min === "" ? "" : `min="${escapeHtml(min)}"`} ${max === "" ? "" : `max="${escapeHtml(max)}"`} ${step === "" ? "" : `step="${escapeHtml(step)}"`}></label>`;
+}
+
+function textboxProfileFeatureEditor(featureId, feature) {
+  const enabled = Boolean(feature.Enabled);
+  let settings = "";
+  if (featureId === "hover_accent" || featureId === "item_border") {
+    const fallbackColor = featureId === "hover_accent" ? "#5c7265" : "#ffffff33";
+    const fallbackWidth = featureId === "hover_accent" ? 6 : 1;
+    settings = `
+      ${textboxProfileField(t("顏色"), `Features.${featureId}.Color`, feature.Color || fallbackColor)}
+      ${textboxProfileField(t("寬度"), `Features.${featureId}.Width`, feature.Width ?? fallbackWidth, { type: "number", min: 1, max: 40, step: 1 })}
+    `;
+  } else if (featureId === "hover_text_color") {
+    settings = textboxProfileField(t("顏色"), `Features.${featureId}.Color`, feature.Color || "#ffffff");
+  } else if (featureId === "text_shadow") {
+    settings = `
+      ${textboxProfileField(t("顏色"), `Features.${featureId}.Color`, feature.Color || "#00000088")}
+      ${textboxProfileField(t("大小"), `Features.${featureId}.Size`, feature.Size ?? 2, { type: "number", min: 0, max: 20, step: 1 })}
+      ${textboxProfileField("X", `Features.${featureId}.X`, feature.X ?? 0, { type: "number", min: -40, max: 40, step: 1 })}
+      ${textboxProfileField("Y", `Features.${featureId}.Y`, feature.Y ?? 2, { type: "number", min: -40, max: 40, step: 1 })}
+    `;
+  } else if (featureId === "text_outline") {
+    settings = `
+      ${textboxProfileField(t("顏色"), `Features.${featureId}.Color`, feature.Color || "#000000cc")}
+      ${textboxProfileField(t("大小"), `Features.${featureId}.Size`, feature.Size ?? 1, { type: "number", min: 0, max: 20, step: 1 })}
+    `;
+  } else {
+    settings = `
+      ${textboxProfileField(t("移動距離"), `Features.${featureId}.Distance`, feature.Distance ?? 18, { type: "number", min: -200, max: 200, step: 1 })}
+      ${textboxProfileField(t("項目延遲"), `Features.${featureId}.Delay`, feature.Delay ?? 0.04, { type: "number", min: 0, max: 1, step: 0.01 })}
+      ${textboxProfileField(t("動畫時間"), `Features.${featureId}.Duration`, feature.Duration ?? 0.22, { type: "number", min: 0, max: 3, step: 0.01 })}
+    `;
+  }
+  return `
+    <details class="textbox-profile-feature" ${enabled ? "open" : ""}>
+      <summary>
+        <span>${escapeHtml(textboxFeatureLabel(featureId))}</span>
+        <label class="boolean-control" onclick="event.stopPropagation()">
+          <input data-textbox-profile-path="Features.${escapeHtml(featureId)}.Enabled" type="checkbox" ${enabled ? "checked" : ""} aria-label="${escapeHtml(textboxFeatureLabel(featureId))}">
+          <span class="boolean-display" data-off="False" data-on="True" aria-hidden="true"><i></i></span>
+        </label>
+      </summary>
+      <div class="textbox-profile-feature-fields">${settings}</div>
+    </details>
+  `;
+}
+
+function renderTextboxProfileDialog() {
+  textboxProfileReorderController?.destroy();
+  textboxProfileReorderController = null;
+  if (!dom.textboxProfileList || !dom.textboxProfileEditor) return;
+  dom.textboxProfileList.innerHTML = state.textboxProfiles.length
+    ? state.textboxProfiles.map((profile) => `
+      <button class="subnav-item list-reorder-item ${profile.ID === state.selectedTextboxProfileId ? "active" : ""}" type="button" data-textbox-profile-id="${escapeHtml(profile.ID)}" data-reorder-id="${escapeHtml(profile.ID)}" aria-grabbed="false">
+        <span class="subnav-item-copy"><strong>${escapeHtml(profile.Name)}</strong><span>${escapeHtml(profile.ID)}</span></span>
+      </button>
+    `).join("")
+    : `<div class="node-list-empty">${escapeHtml(t("尚未建立設定檔"))}</div>`;
+
+  const profile = state.textboxProfileDraft;
+  dom.textboxProfileEditor.innerHTML = profile ? `
+    <div class="textbox-profile-identity">
+      ${textboxProfileField("Name", "Name", profile.Name || "")}
+      <div class="field readonly-field"><span>ID</span><code>${escapeHtml(profile.ID)}</code></div>
+    </div>
+    <section class="textbox-profile-section">
+      <div class="settings-section-heading"><strong>${escapeHtml(t("基礎樣式"))}</strong></div>
+      <div class="form-grid two-columns">
+        ${textboxProfileField(t("容器背景"), "Style.Background", profile.Style?.Background || "#0b1118")}
+        ${textboxProfileField(t("Item 背景"), "Style.Item Background", profile.Style?.["Item Background"] || "#20302a")}
+        ${textboxProfileField(t("文字顏色"), "Style.Text Color", profile.Style?.["Text Color"] || "#ffffff")}
+        ${textboxProfileField(t("字體大小"), "Style.Text Size", profile.Style?.["Text Size"] ?? 30, { type: "number", min: 8, max: 160, step: 1 })}
+        <label class="field"><span>${escapeHtml(t("文字對齊"))}</span><select data-textbox-profile-path="Style.Text Align">${optionTags([0, 0.5, 1], profile.Style?.["Text Align"] ?? 0.5, (value) => ({ 0: t("靠左"), 0.5: t("置中"), 1: t("靠右") })[value])}</select></label>
+      </div>
+    </section>
+    <section class="textbox-profile-section">
+      <div class="settings-section-heading"><strong>${escapeHtml(t("可選特性"))}</strong></div>
+      <div class="textbox-profile-features">${TEXTBOX_FEATURE_IDS.map((featureId) => textboxProfileFeatureEditor(featureId, profile.Features?.[featureId] || TEXTBOX_FEATURE_DEFAULTS[featureId])).join("")}</div>
+    </section>
+  ` : `<div class="option-inspector-empty"><strong>${escapeHtml(t("建立第一個外觀設定檔"))}</strong></div>`;
+
+  const deleteButton = document.querySelector("#deleteTextboxProfile");
+  const saveButton = document.querySelector("#saveTextboxProfile");
+  if (deleteButton) deleteButton.disabled = !profile;
+  if (saveButton) saveButton.disabled = !profile;
+  dom.textboxProfileList.querySelectorAll("[data-textbox-profile-id]").forEach((button) => button.addEventListener("click", () => {
+    state.selectedTextboxProfileId = button.dataset.textboxProfileId;
+    state.textboxProfileDraft = clone(state.textboxProfiles.find((entry) => entry.ID === state.selectedTextboxProfileId));
+    renderTextboxProfileDialog();
+  }));
+  if (state.textboxProfiles.length > 1) {
+    textboxProfileReorderController = SceneListReorder.createController({
+      root: dom.textboxProfileList,
+      itemSelector: "[data-textbox-profile-id][data-reorder-id]",
+      onDrop: async ({ orderedIds }) => {
+        const data = await api("/api/textbox-profiles/order", { method: "PUT", body: { order: orderedIds } });
+        state.textboxProfiles = data.profiles || state.textboxProfiles;
+        renderTextboxProfileDialog();
+        return true;
+      },
+      onError: (error) => toast(error.message, "error"),
+    });
+  }
+  dom.textboxProfileEditor.querySelectorAll("[data-textbox-profile-path]").forEach((control) => {
+    const update = () => {
+      const value = control.type === "checkbox" ? control.checked : control.type === "number" || control.tagName === "SELECT" ? numberValue(control.value) : control.value;
+      setNested(state.textboxProfileDraft, control.dataset.textboxProfilePath, value);
+      if (control.type === "checkbox") renderTextboxProfileDialog();
+    };
+    control.addEventListener("input", update);
+    control.addEventListener("change", update);
+  });
+  enhanceSelects(dom.textboxProfileEditor);
+}
+
+function openTextboxProfileDialog(profileId = null) {
+  state.selectedTextboxProfileId = profileId || selectedOptionElement()?.Appearance?.Profile || state.textboxProfiles[0]?.ID || null;
+  state.textboxProfileDraft = clone(state.textboxProfiles.find((entry) => entry.ID === state.selectedTextboxProfileId) || null);
+  renderTextboxProfileDialog();
+  if (!dom.textboxProfileDialog.open) dom.textboxProfileDialog.showModal();
+}
+
+async function createTextboxProfile() {
+  try {
+    const created = await api("/api/textbox-profiles", { method: "POST", body: { profile: defaultTextboxProfile() } });
+    state.textboxProfiles.push(created);
+    state.textboxProfiles.sort((a, b) => numberValue(a.Order, 0) - numberValue(b.Order, 0));
+    state.selectedTextboxProfileId = created.ID;
+    state.textboxProfileDraft = clone(created);
+    renderTextboxProfileDialog();
+  } catch (error) {
+    toast(error.message, "error");
+  }
+}
+
+async function saveTextboxProfile(event) {
+  event.preventDefault();
+  if (!state.textboxProfileDraft) return;
+  try {
+    const saved = await api("/api/textbox-profiles", { method: "PUT", body: { profile: clone(state.textboxProfileDraft) } });
+    const index = state.textboxProfiles.findIndex((entry) => entry.ID === saved.ID);
+    if (index >= 0) state.textboxProfiles[index] = saved;
+    state.textboxProfileDraft = clone(saved);
+    renderTextboxProfileDialog();
+    if (state.activeTab === "options") renderOptionsPanel();
+    toast(t("設定檔已儲存"));
+  } catch (error) {
+    toast(error.message, "error");
+  }
+}
+
+async function deleteTextboxProfile() {
+  const profile = state.textboxProfileDraft;
+  if (!profile || !window.confirm(t("確定刪除設定檔「{name}」？", { name: profile.Name }))) return;
+  if (!await flushAutosave()) return;
+  try {
+    await api(`/api/textbox-profiles?id=${encodeURIComponent(profile.ID)}`, { method: "DELETE" });
+    state.textboxProfiles = state.textboxProfiles.filter((entry) => entry.ID !== profile.ID);
+    state.selectedTextboxProfileId = state.textboxProfiles[0]?.ID || null;
+    state.textboxProfileDraft = clone(state.textboxProfiles[0] || null);
+    renderTextboxProfileDialog();
+    toast(t("設定檔已刪除"));
+  } catch (error) {
+    toast(error.message, "error");
+  }
 }
 
 function captureOptionsPanelView() {
   const builder = dom.optionsPanel.querySelector(".option-builder");
   if (!builder) return null;
   const inspector = builder.querySelector(".option-inspector");
+  const inspectorScroll = builder.querySelector(".option-inspector-scrollbody") || inspector;
   const elementList = builder.querySelector(".option-element-sidebar .subnav-list");
   const canvas = builder.querySelector(".option-canvas-scroll");
   return {
     nodePath: builder.dataset.nodePath || "",
     elementId: builder.dataset.elementId || "",
     workspaceMode: builder.dataset.workspaceMode || "form",
-    inspectorScrollTop: inspector?.scrollTop || 0,
+    inspectorScrollTop: inspectorScroll?.scrollTop || 0,
     elementListScrollTop: elementList?.scrollTop || 0,
     canvasScrollTop: canvas?.scrollTop || 0,
     canvasScrollLeft: canvas?.scrollLeft || 0,
@@ -2325,7 +2752,8 @@ function restoreOptionsPanelView(view) {
   }
   if (view.elementId === state.selectedOptionElementId) {
     const inspector = builder?.querySelector(".option-inspector");
-    if (inspector) inspector.scrollTop = view.inspectorScrollTop;
+    const inspectorScroll = builder?.querySelector(".option-inspector-scrollbody") || inspector;
+    if (inspectorScroll) inspectorScroll.scrollTop = view.inspectorScrollTop;
     [...(builder?.querySelectorAll("details.option-collapsible-section") || [])].forEach((section) => {
       const open = view.sectionStates?.[section.dataset.optionSection];
       if (open !== undefined) section.open = open;
@@ -2335,6 +2763,8 @@ function restoreOptionsPanelView(view) {
 
 function renderOptionsPanel() {
   const view = captureOptionsPanelView();
+  optionReorderControllers.forEach((controller) => controller.destroy());
+  optionReorderControllers = [];
   if (!state.nodeDetail) {
     dom.optionsPanel.innerHTML = "";
     return;
@@ -2736,16 +3166,6 @@ async function deleteOptionItem(itemId = state.selectedOptionItemId) {
   renderOptionsPanel();
 }
 
-function moveOptionItem(index, direction) {
-  const element = selectedOptionElement();
-  if (!element?.Items) return;
-  const next = index + direction;
-  if (next < 0 || next >= element.Items.length) return;
-  [element.Items[index], element.Items[next]] = [element.Items[next], element.Items[index]];
-  markOptionsDirty();
-  renderOptionsPanel();
-}
-
 function updateOptionField(control, itemField = false) {
   const target = itemField ? selectedOptionItem() : selectedOptionElement();
   const path = itemField ? control.dataset.optionItemPath : control.dataset.optionPath;
@@ -2789,6 +3209,12 @@ function updateOptionColor(control, itemField = false) {
 function bindOptionsPanel() {
   document.querySelector("#saveOptionsButton")?.addEventListener("click", saveOptions);
   bindOptionWorkspaceDivider();
+  document.querySelectorAll("[data-option-inspector-tab]").forEach((button) => button.addEventListener("click", () => {
+    state.optionInspectorTab = button.dataset.optionInspectorTab;
+    renderOptionsPanel();
+    const scroll = document.querySelector(".option-inspector-scrollbody");
+    if (scroll) scroll.scrollTop = 0;
+  }));
   document.querySelector("#toggleOptionGrid")?.addEventListener("click", toggleOptionGrid);
   document.querySelector("#toggleOptionSnap")?.addEventListener("click", toggleOptionSnap);
   document.querySelectorAll("[data-add-option-element]").forEach((button) => button.addEventListener("click", () => addOptionElement(button.dataset.addOptionElement)));
@@ -2802,7 +3228,7 @@ function bindOptionsPanel() {
   document.querySelectorAll("[data-delete-option-item]").forEach((button) => button.addEventListener("click", () => deleteOptionItem(button.dataset.deleteOptionItem)));
   document.querySelector("#itemStyleOverrideEnabled")?.addEventListener("change", (event) => {
     const item = selectedOptionItem();
-    const style = selectedOptionElement()?.Style || {};
+    const style = resolveTextboxStyle(selectedOptionElement(), state.textboxProfiles);
     if (!item) return;
     item["Style Override"] = event.target.checked ? {
       "Item Background": style["Item Background"] || "#20302a",
@@ -2813,15 +3239,69 @@ function bindOptionsPanel() {
     markOptionsDirty();
     renderOptionsPanel();
   });
+  document.querySelector("[data-textbox-profile-select]")?.addEventListener("change", (event) => {
+    const element = selectedOptionElement();
+    if (!element || element.Type !== "TEXTBOX") return;
+    const next = textboxWithProfile(element, event.target.value, state.textboxProfiles);
+    Object.keys(element).forEach((key) => delete element[key]);
+    Object.assign(element, next);
+    markOptionsDirty();
+    renderOptionsPanel();
+  });
+  document.querySelectorAll("[data-textbox-feature]").forEach((control) => control.addEventListener("change", () => {
+    const element = selectedOptionElement();
+    if (!element?.Appearance) return;
+    element.Appearance.Features ||= {};
+    element.Appearance.Features[control.dataset.textboxFeature] = control.checked;
+    markOptionsDirty();
+    refreshOptionStage();
+  }));
+  document.querySelector("#manageTextboxProfiles")?.addEventListener("click", () => openTextboxProfileDialog());
+  document.querySelector("#resetTextboxStyleOverrides")?.addEventListener("click", () => {
+    const element = selectedOptionElement();
+    if (!element?.Appearance) return;
+    element.Appearance["Style Overrides"] = {};
+    markOptionsDirty();
+    renderOptionsPanel();
+  });
   document.querySelectorAll(".option-inspector [data-option-item-select]").forEach((button) => button.addEventListener("click", (event) => {
     event.stopPropagation();
     state.selectedOptionItemId = button.dataset.optionItemSelect;
     renderOptionsPanel();
   }));
-  document.querySelectorAll("[data-move-option-item]").forEach((button) => button.addEventListener("click", () => {
-    const [index, direction] = button.dataset.moveOptionItem.split(":").map(Number);
-    moveOptionItem(index, direction);
-  }));
+  const elementList = dom.optionsPanel.querySelector(".option-element-sidebar .subnav-list");
+  if (elementList?.querySelectorAll("[data-option-element-select]").length > 1) {
+    optionReorderControllers.push(SceneListReorder.createController({
+      root: elementList,
+      itemSelector: "[data-option-element-select][data-reorder-id]",
+      onDrop: ({ orderedIds }) => {
+        const byId = new Map(state.optionsDraft.Elements.map((element) => [String(element.ID), element]));
+        state.optionsDraft.Elements = orderedIds.map((id) => byId.get(id)).filter(Boolean);
+        markOptionsDirty();
+        renderOptionsPanel();
+        return true;
+      },
+      onError: (error) => toast(error.message, "error"),
+    }));
+  }
+  const itemList = dom.optionsPanel.querySelector(".option-items-list");
+  const selectedElement = selectedOptionElement();
+  if (itemList?.querySelectorAll("[data-option-item-order-id]").length > 1 && selectedElement?.Items) {
+    optionReorderControllers.push(SceneListReorder.createController({
+      root: itemList,
+      itemSelector: "[data-option-item-order-id][data-reorder-id]",
+      handleSelector: "[data-option-item-order-id][data-reorder-id]",
+      ignoreSelector: ".option-item-delete",
+      onDrop: ({ orderedIds }) => {
+        const byId = new Map(selectedElement.Items.map((item) => [String(item.ID), item]));
+        selectedElement.Items = orderedIds.map((id) => byId.get(id)).filter(Boolean);
+        markOptionsDirty();
+        renderOptionsPanel();
+        return true;
+      },
+      onError: (error) => toast(error.message, "error"),
+    }));
+  }
   dom.optionsPanel.querySelectorAll("[data-option-path]").forEach((control) => {
     control.addEventListener("input", () => updateOptionField(control));
   });
@@ -2852,6 +3332,7 @@ function bindOptionStageInteractions() {
     event.stopPropagation();
     state.selectedOptionElementId = button.closest("[data-option-stage-element]")?.dataset.optionStageElement || state.selectedOptionElementId;
     state.selectedOptionItemId = button.dataset.optionItemSelect;
+    state.optionInspectorTab = "item";
     renderOptionsPanel();
   }));
   document.querySelectorAll("#optionStage [data-option-stage-element]").forEach((elementNode) => elementNode.addEventListener("pointerdown", beginOptionPointer));
@@ -3003,7 +3484,7 @@ function fileListHtml(files, selected, dataName) {
   return files.map((file) => {
     const symbols = file.labels || [];
     return `
-      <button class="subnav-item ${file.name === selected ? "active" : ""}" type="button" data-${dataName}="${escapeHtml(file.name)}">
+      <button class="subnav-item list-reorder-item ${file.name === selected ? "active" : ""}" type="button" data-${dataName}="${escapeHtml(file.name)}" data-reorder-id="${escapeHtml(file.name)}" aria-grabbed="false">
         <span class="subnav-item-copy">
           <strong>${escapeHtml(file.displayName || file.name)}</strong>
           <span>${symbols.length ? t("{count} 個 label", { count: symbols.length }) : t("尚未偵測到 label")}</span>
@@ -3013,7 +3494,54 @@ function fileListHtml(files, selected, dataName) {
   }).join("");
 }
 
+function disposeContentCodeEditor() {
+  contentEditorMountRevision += 1;
+  contentEditorController?.dispose();
+  contentEditorController = null;
+}
+
+function contentEditorProjectContext() {
+  const labels = (state.nodeDetail?.contents || []).flatMap((file) =>
+    (file.labels || []).map((label) => ({ id: label, name: file.displayName || file.name || label })),
+  );
+  return { labels, images: state.images, audio: state.audio };
+}
+
+async function mountContentCodeEditor() {
+  const textarea = document.querySelector("#contentEditor");
+  const host = document.querySelector("#contentEditorHost");
+  const status = document.querySelector("#contentEditorStatus");
+  const revision = ++contentEditorMountRevision;
+  if (!textarea || !host || !window.SceneContentCodeEditor?.mount) {
+    if (status) status.textContent = t("基本編輯模式");
+    return;
+  }
+  try {
+    const controller = await window.SceneContentCodeEditor.mount({
+      host,
+      textarea,
+      value: state.contentSource,
+      path: `${state.selectedNodePath || "global"}/${state.selectedContent || "content"}`,
+      project: contentEditorProjectContext(),
+      ariaLabel: t("Ren'Py 程式碼編輯器"),
+    });
+    if (!controller) return;
+    if (revision !== contentEditorMountRevision || !host.isConnected) {
+      controller.dispose();
+      return;
+    }
+    contentEditorController = controller;
+    if (status) status.textContent = t("語法支援已啟用");
+  } catch (error) {
+    console.error("Unable to initialize the Ren'Py code editor", error);
+    if (status) status.textContent = t("基本編輯模式");
+  }
+}
+
 function renderContentPanel() {
+  contentReorderController?.destroy();
+  contentReorderController = null;
+  disposeContentCodeEditor();
   if (!state.nodeDetail) {
     dom.contentPanel.innerHTML = "";
     return;
@@ -3028,21 +3556,46 @@ function renderContentPanel() {
       <div class="editor-scroll">
         ${state.selectedContent ? `
           <div class="code-toolbar">
-            <label class="field" style="width:min(320px,60%)"><span class="visually-hidden">${t("Content 名稱")}</span><input id="contentDisplayName" value="${escapeHtml(state.selectedContentDisplayName || state.selectedContent)}"></label>
+            <div class="code-toolbar-main">
+              <label class="field"><span class="visually-hidden">${t("Content 名稱")}</span><input id="contentDisplayName" value="${escapeHtml(state.selectedContentDisplayName || state.selectedContent)}"></label>
+              <span class="code-language-status"><strong>Ren'Py</strong><span id="contentEditorStatus">${t("載入語法支援中")}</span></span>
+            </div>
             <button class="danger-button compact content-delete-button" id="deleteContentButton" type="button">${t("刪除演出")}</button>
           </div>
-          <div class="code-editor-wrap"><textarea class="code-editor" id="contentEditor" spellcheck="false">${escapeHtml(state.contentSource)}</textarea></div>
+          <div class="code-editor-wrap">
+            <textarea class="code-editor" id="contentEditor" spellcheck="false" aria-label="${t("Ren'Py 程式碼編輯器")}">${escapeHtml(state.contentSource)}</textarea>
+            <div class="content-code-editor" id="contentEditorHost" hidden></div>
+          </div>
         ` : `<div class="editor-empty"><div><p>${t("選擇或新增 Content 文件。")}</p><button class="primary-button add-button" id="emptyNewContentButton" type="button">${t("新增 Content")}</button></div></div>`}
       </div>
     </div>
   `;
   document.querySelectorAll("[data-content-file]").forEach((button) => button.addEventListener("click", () => loadContent(button.dataset.contentFile)));
+  const contentList = dom.contentPanel.querySelector(".subnav-list");
+  if (files.length > 1 && contentList) {
+    contentReorderController = SceneListReorder.createController({
+      root: contentList,
+      itemSelector: "[data-content-file][data-reorder-id]",
+      onDrop: async ({ orderedIds }) => {
+        if (!await flushAutosave()) return false;
+        const data = await api("/api/content/order", {
+          method: "PUT",
+          body: { node: state.selectedNodePath, order: orderedIds },
+        });
+        state.nodeDetail.contents = data.contents || state.nodeDetail.contents;
+        renderContentPanel();
+        return true;
+      },
+      onError: (error) => toast(error.message, "error"),
+    });
+  }
   document.querySelector("#newContentButton")?.addEventListener("click", openNameDialog);
   document.querySelector("#emptyNewContentButton")?.addEventListener("click", openNameDialog);
   document.querySelector("#saveContentButton")?.addEventListener("click", saveContent);
   document.querySelector("#deleteContentButton")?.addEventListener("click", deleteContent);
   document.querySelector("#contentDisplayName")?.addEventListener("input", scheduleContentAutosave);
   document.querySelector("#contentEditor")?.addEventListener("input", scheduleContentAutosave);
+  mountContentCodeEditor();
   syncShortcutTitles();
 }
 
@@ -3066,7 +3619,7 @@ function contentSnapshot() {
     originalName: state.selectedContent,
     id: state.selectedContent,
     displayName: document.querySelector("#contentDisplayName")?.value.trim() || state.selectedContentDisplayName,
-    source: document.querySelector("#contentEditor")?.value ?? state.contentSource,
+    source: contentEditorController?.getValue() ?? document.querySelector("#contentEditor")?.value ?? state.contentSource,
   };
 }
 
@@ -3166,18 +3719,20 @@ function statGroupsHtml() {
 
 function memoryRowsHtml() {
   const entries = Object.entries(state.memoriesDraft);
-  return entries.map(([id, values], index) => {
+  return entries.map(([id, values]) => {
     const isDefault = id === "memory";
     return `
-      <tr class="memory-row" data-memory-index="${index}" data-memory-id="${escapeHtml(id)}">
+      <tr class="memory-row list-reorder-item" data-memory-id="${escapeHtml(id)}" data-reorder-id="${escapeHtml(id)}" aria-grabbed="false">
         <td><input name="memoryName" aria-label="${t("記憶庫名稱")}" value="${escapeHtml(values.Name || id)}" ${isDefault ? "disabled" : ""}></td>
-        <td class="action-cell">${isDefault ? `<span class="default-memory-badge">${t("預設")}</span>` : `<button class="row-button" type="button" data-remove-memory="${index}" title="${t("移除記憶庫")}" aria-label="${t("移除記憶庫")}">×</button>`}</td>
+        <td class="action-cell">${isDefault ? `<span class="default-memory-badge">${t("預設")}</span>` : `<button class="row-button" type="button" data-remove-memory="${escapeHtml(id)}" title="${t("移除記憶庫")}" aria-label="${t("移除記憶庫")}">×</button>`}</td>
       </tr>
     `;
   }).join("");
 }
 
 function renderStatsPanel() {
+  memoryReorderController?.destroy();
+  memoryReorderController = null;
   statGroupDragController?.destroy();
   statGroupDragController = null;
   dom.statsPanel.innerHTML = `
@@ -3207,7 +3762,7 @@ function renderStatsPanel() {
   document.querySelector("#addStatButton")?.addEventListener("click", () => addStat());
   document.querySelector("#addMemoryButton")?.addEventListener("click", addMemory);
   document.querySelectorAll("[data-remove-stat]").forEach((button) => button.addEventListener("click", () => removeStat(button.dataset.removeStat)));
-  document.querySelectorAll("[data-remove-memory]:not([disabled])").forEach((button) => button.addEventListener("click", () => removeMemory(Number(button.dataset.removeMemory))));
+  document.querySelectorAll("[data-remove-memory]:not([disabled])").forEach((button) => button.addEventListener("click", () => removeMemory(button.dataset.removeMemory)));
   document.querySelectorAll("[data-stat-group-name]").forEach((input) => {
     const source = input.dataset.statGroupName;
     input.addEventListener("keydown", (event) => {
@@ -3232,6 +3787,20 @@ function renderStatsPanel() {
     onGroupDrop: applyStatGroupBlockDrop,
     onError: (error) => toast(error.message, "error"),
   });
+  const memoriesBody = document.querySelector("#memoriesBody");
+  if (memoriesBody?.querySelectorAll(".memory-row").length > 1) {
+    memoryReorderController = SceneListReorder.createController({
+      root: memoriesBody,
+      itemSelector: ".memory-row[data-reorder-id]",
+      onDrop: () => {
+        state.statsDraft = readStatsForm();
+        state.memoriesDraft = readMemoriesForm();
+        scheduleStatsAutosave();
+        return true;
+      },
+      onError: (error) => toast(error.message, "error"),
+    });
+  }
   const page = document.querySelector("#stateDefinitionsPage");
   page?.addEventListener("input", (event) => {
     if (event.target.matches("[data-stat-group-name]")) return;
@@ -3407,11 +3976,13 @@ function addMemory() {
   inputs[inputs.length - 1]?.select();
 }
 
-function removeMemory(index) {
+function removeMemory(id) {
   state.statsDraft = readStatsForm();
   state.memoriesDraft = readMemoriesForm();
   const entries = Object.entries(state.memoriesDraft);
-  if (entries[index]?.[0] === "memory") return;
+  if (id === "memory") return;
+  const index = entries.findIndex(([entryId]) => entryId === id);
+  if (index < 0) return;
   entries.splice(index, 1);
   state.memoriesDraft = Object.fromEntries(entries);
   renderStatsPanel();
@@ -3594,11 +4165,18 @@ function bindGraphPanel(layout, relationships, controller, revealDurationMs = 0)
   const canvas = dom.graphPanel.querySelector(".graph-canvas");
   const search = dom.graphPanel.querySelector("#graphSearch");
   const geometry = graphGeometryCache(relationships);
-  dom.graphPanel.querySelector("#resetGraphView")?.addEventListener("click", () => resetGraphView(layout));
+  const graphEvents = new AbortController();
+  const { signal: graphEventSignal } = graphEvents;
+  if (svg) svg.dataset.animationActive = "false";
+  dom.graphPanel.querySelector("#resetGraphView")?.addEventListener(
+    "click",
+    () => resetGraphView(layout),
+    { signal: graphEventSignal },
+  );
   search?.addEventListener("input", (event) => {
     state.graphSearch = event.target.value;
     updateGraphSearch();
-  });
+  }, { signal: graphEventSignal });
   const setGraphFocus = (nodeId = null) => {
     canvas?.classList.toggle("has-graph-focus", Boolean(nodeId));
     const relatedNodeIds = new Set(nodeId ? [nodeId] : []);
@@ -3618,30 +4196,59 @@ function bindGraphPanel(layout, relationships, controller, revealDurationMs = 0)
   };
   const reducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches;
   let layoutAnimationFrame = null;
+  let wheelFrame = null;
   let revealTimer = null;
   let idleMotionEnabled = false;
+  let lastIdleDrawTime = 0;
+  const nodeCount = layout.positions.size;
+  const idleFrameInterval = nodeCount >= 500 ? 1000 / 12 : nodeCount >= 200 ? 1000 / 18 : 1000 / 30;
   const refreshGraphNameScale = () => updateGraphNameScale(svg);
-  window.addEventListener("resize", refreshGraphNameScale);
+  window.addEventListener("resize", refreshGraphNameScale, { signal: graphEventSignal });
   const drawLayoutAnimation = (timeMs) => {
     layoutAnimationFrame = null;
-    if (!svg?.isConnected) return;
+    if (!svg?.isConnected || state.activeTab !== "graph" || document.hidden) {
+      if (svg) svg.dataset.animationActive = "false";
+      return;
+    }
+    if (idleMotionEnabled && !controller.isActive() && timeMs - lastIdleDrawTime < idleFrameInterval) {
+      layoutAnimationFrame = window.requestAnimationFrame(drawLayoutAnimation);
+      return;
+    }
+    lastIdleDrawTime = timeMs;
     const changed = controller.frame(timeMs, idleMotionEnabled ? 1 : 0);
     if (changed) updateGraphGeometry(layout, relationships, geometry, controller);
     if (idleMotionEnabled || controller.isActive()) {
       layoutAnimationFrame = window.requestAnimationFrame(drawLayoutAnimation);
+    } else if (svg) {
+      svg.dataset.animationActive = "false";
     }
   };
   const requestLayoutAnimationFrame = () => {
-    if (reducedMotion || layoutAnimationFrame !== null) return;
+    if (reducedMotion || layoutAnimationFrame !== null || state.activeTab !== "graph" || document.hidden) return;
+    if (svg) svg.dataset.animationActive = "true";
     layoutAnimationFrame = window.requestAnimationFrame(drawLayoutAnimation);
   };
+  const syncGraphDocumentVisibility = () => {
+    if (document.hidden) {
+      if (layoutAnimationFrame !== null) window.cancelAnimationFrame(layoutAnimationFrame);
+      layoutAnimationFrame = null;
+      if (svg) svg.dataset.animationActive = "false";
+    } else if (idleMotionEnabled || controller.isActive()) {
+      requestLayoutAnimationFrame();
+    }
+  };
+  document.addEventListener("visibilitychange", syncGraphDocumentVisibility, { signal: graphEventSignal });
   state.graphStopLayoutAnimation?.();
   state.graphStopLayoutAnimation = () => {
     if (layoutAnimationFrame !== null) window.cancelAnimationFrame(layoutAnimationFrame);
+    if (wheelFrame !== null) window.cancelAnimationFrame(wheelFrame);
     if (revealTimer !== null) window.clearTimeout(revealTimer);
     layoutAnimationFrame = null;
+    wheelFrame = null;
     revealTimer = null;
-    window.removeEventListener("resize", refreshGraphNameScale);
+    if (svg) svg.dataset.animationActive = "false";
+    canvas?.getAnimations?.({ subtree: true }).forEach((animation) => animation.cancel());
+    graphEvents.abort();
   };
 
   const finishGraphReveal = () => {
@@ -3657,109 +4264,132 @@ function bindGraphPanel(layout, relationships, controller, revealDurationMs = 0)
   if (canvas?.classList.contains("is-revealing")) {
     if (reducedMotion) finishGraphReveal();
     else revealTimer = window.setTimeout(finishGraphReveal, revealDurationMs);
-    canvas.addEventListener("pointerdown", finishGraphReveal, { capture: true, once: true });
-    canvas.addEventListener("wheel", finishGraphReveal, { capture: true, once: true });
-    canvas.addEventListener("keydown", finishGraphReveal, { capture: true, once: true });
+    canvas.addEventListener("pointerdown", finishGraphReveal, { capture: true, once: true, signal: graphEventSignal });
+    canvas.addEventListener("wheel", finishGraphReveal, { capture: true, once: true, signal: graphEventSignal });
+    canvas.addEventListener("keydown", finishGraphReveal, { capture: true, once: true, signal: graphEventSignal });
   } else if (!reducedMotion) {
     idleMotionEnabled = true;
     requestLayoutAnimationFrame();
   }
 
-  dom.graphPanel.querySelectorAll(".graph-node").forEach((node) => {
-    const openNode = () => selectNode(node.dataset.nodePath, { preserveTab: true });
-    let nodeDrag = null;
-    let suppressClick = false;
-    const graphPoint = (event) => {
-      const rect = svg.getBoundingClientRect();
-      const view = state.graphViewBox || { x: 0, y: 0, width: layout.width, height: layout.height };
-      return {
-        x: view.x + (event.clientX - rect.left) / rect.width * view.width,
-        y: view.y + (event.clientY - rect.top) / rect.height * view.height,
-      };
+  if (!svg || !canvas) return;
+  let nodeDrag = null;
+  let suppressClickNodeId = null;
+  const graphNodeFromEvent = (event) => (
+    event.target instanceof Element ? event.target.closest(".graph-node") : null
+  );
+  const graphPoint = (event) => {
+    const rect = svg.getBoundingClientRect();
+    const view = state.graphViewBox || { x: 0, y: 0, width: layout.width, height: layout.height };
+    return {
+      x: view.x + (event.clientX - rect.left) / rect.width * view.width,
+      y: view.y + (event.clientY - rect.top) / rect.height * view.height,
     };
-    const finishNodeDrag = (event, cancelled = false) => {
-      if (!nodeDrag || event.pointerId !== nodeDrag.pointerId) return;
-      if (nodeDrag.moved) {
-        const samples = nodeDrag.samples;
-        const last = samples[samples.length - 1];
-        const first = [...samples].reverse().find((sample) => last.time - sample.time >= 45) || samples[0];
-        const seconds = Math.max(0.016, (last.time - first.time) / 1000);
-        const velocityX = cancelled ? 0 : (last.x - first.x) / seconds;
-        const velocityY = cancelled ? 0 : (last.y - first.y) / seconds;
-        controller.release(node.dataset.nodeId, velocityX, velocityY);
-        suppressClick = true;
-        if (reducedMotion) {
-          controller.tick(90);
-          updateGraphGeometry(layout, relationships, geometry, controller);
-        } else {
-          requestLayoutAnimationFrame();
-        }
+  };
+  const finishNodeDrag = (event, cancelled = false) => {
+    if (!nodeDrag || event.pointerId !== nodeDrag.pointerId) return;
+    const { node } = nodeDrag;
+    if (nodeDrag.moved) {
+      const samples = nodeDrag.samples;
+      const last = samples[samples.length - 1];
+      let first = samples[0];
+      for (let index = samples.length - 1; index >= 0; index -= 1) {
+        if (last.time - samples[index].time < 45) continue;
+        first = samples[index];
+        break;
       }
-      node.classList.remove("is-dragging");
-      node.setAttribute("aria-grabbed", "false");
-      if (node.hasPointerCapture(event.pointerId)) node.releasePointerCapture(event.pointerId);
-      nodeDrag = null;
+      const seconds = Math.max(0.016, (last.time - first.time) / 1000);
+      const velocityX = cancelled ? 0 : (last.x - first.x) / seconds;
+      const velocityY = cancelled ? 0 : (last.y - first.y) / seconds;
+      controller.release(node.dataset.nodeId, velocityX, velocityY);
+      suppressClickNodeId = cancelled ? null : node.dataset.nodeId;
+      if (reducedMotion) {
+        controller.tick(90);
+        updateGraphGeometry(layout, relationships, geometry, controller);
+      } else {
+        requestLayoutAnimationFrame();
+      }
+    }
+    node.classList.remove("is-dragging");
+    node.setAttribute("aria-grabbed", "false");
+    if (node.hasPointerCapture(event.pointerId)) node.releasePointerCapture(event.pointerId);
+    nodeDrag = null;
+  };
+  canvas.addEventListener("pointerover", (event) => {
+    const node = graphNodeFromEvent(event);
+    if (!node || (event.relatedTarget instanceof Node && node.contains(event.relatedTarget))) return;
+    setGraphFocus(node.dataset.nodeId);
+  }, { signal: graphEventSignal });
+  canvas.addEventListener("pointerout", (event) => {
+    const node = graphNodeFromEvent(event);
+    if (!node || (event.relatedTarget instanceof Node && node.contains(event.relatedTarget))) return;
+    if (document.activeElement !== node) setGraphFocus();
+  }, { signal: graphEventSignal });
+  canvas.addEventListener("focusin", (event) => {
+    const node = graphNodeFromEvent(event);
+    if (node) setGraphFocus(node.dataset.nodeId);
+  }, { signal: graphEventSignal });
+  canvas.addEventListener("focusout", (event) => {
+    const node = graphNodeFromEvent(event);
+    if (!node || (event.relatedTarget instanceof Node && node.contains(event.relatedTarget))) return;
+    setGraphFocus();
+  }, { signal: graphEventSignal });
+  canvas.addEventListener("pointerdown", (event) => {
+    const node = graphNodeFromEvent(event);
+    if (!node || event.button !== 0) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const position = layout.positions.get(node.dataset.nodeId);
+    const point = graphPoint(event);
+    nodeDrag = {
+      node,
+      pointerId: event.pointerId,
+      startClientX: event.clientX,
+      startClientY: event.clientY,
+      offsetX: point.x - position.x,
+      offsetY: point.y - position.y,
+      moved: false,
+      samples: [{ x: point.x, y: point.y, time: event.timeStamp }],
     };
-    node.addEventListener("pointerenter", () => setGraphFocus(node.dataset.nodeId));
-    node.addEventListener("pointerleave", () => {
-      if (document.activeElement !== node) setGraphFocus();
-    });
-    node.addEventListener("focus", () => setGraphFocus(node.dataset.nodeId));
-    node.addEventListener("blur", () => setGraphFocus());
-    node.addEventListener("pointerdown", (event) => {
-      if (event.button !== 0) return;
+    node.setPointerCapture(event.pointerId);
+  }, { signal: graphEventSignal });
+  canvas.addEventListener("pointermove", (event) => {
+    if (!nodeDrag || event.pointerId !== nodeDrag.pointerId) return;
+    const movement = Math.hypot(event.clientX - nodeDrag.startClientX, event.clientY - nodeDrag.startClientY);
+    if (!nodeDrag.moved && movement < 6) return;
+    if (!nodeDrag.moved) {
+      nodeDrag.moved = true;
+      nodeDrag.node.classList.add("is-dragging");
+      nodeDrag.node.setAttribute("aria-grabbed", "true");
+    }
+    const point = graphPoint(event);
+    controller.pin(nodeDrag.node.dataset.nodeId, point.x - nodeDrag.offsetX, point.y - nodeDrag.offsetY);
+    nodeDrag.samples.push({ x: point.x, y: point.y, time: event.timeStamp });
+    nodeDrag.samples = nodeDrag.samples.filter((sample) => event.timeStamp - sample.time <= 120);
+    updateGraphGeometry(layout, relationships, geometry, controller);
+    requestLayoutAnimationFrame();
+  }, { signal: graphEventSignal });
+  canvas.addEventListener("pointerup", (event) => finishNodeDrag(event), { signal: graphEventSignal });
+  canvas.addEventListener("pointercancel", (event) => finishNodeDrag(event, true), { signal: graphEventSignal });
+  canvas.addEventListener("click", (event) => {
+    const node = graphNodeFromEvent(event);
+    if (!node) return;
+    if (suppressClickNodeId === node.dataset.nodeId) {
+      suppressClickNodeId = null;
       event.preventDefault();
       event.stopPropagation();
-      const position = layout.positions.get(node.dataset.nodeId);
-      const point = graphPoint(event);
-      nodeDrag = {
-        pointerId: event.pointerId,
-        startClientX: event.clientX,
-        startClientY: event.clientY,
-        offsetX: point.x - position.x,
-        offsetY: point.y - position.y,
-        moved: false,
-        samples: [{ x: point.x, y: point.y, time: event.timeStamp }],
-      };
-      node.setPointerCapture(event.pointerId);
-    });
-    node.addEventListener("pointermove", (event) => {
-      if (!nodeDrag || event.pointerId !== nodeDrag.pointerId) return;
-      const movement = Math.hypot(event.clientX - nodeDrag.startClientX, event.clientY - nodeDrag.startClientY);
-      if (!nodeDrag.moved && movement < 6) return;
-      if (!nodeDrag.moved) {
-        nodeDrag.moved = true;
-        node.classList.add("is-dragging");
-        node.setAttribute("aria-grabbed", "true");
-      }
-      const point = graphPoint(event);
-      controller.pin(node.dataset.nodeId, point.x - nodeDrag.offsetX, point.y - nodeDrag.offsetY);
-      nodeDrag.samples.push({ x: point.x, y: point.y, time: event.timeStamp });
-      nodeDrag.samples = nodeDrag.samples.filter((sample) => event.timeStamp - sample.time <= 120);
-      updateGraphGeometry(layout, relationships, geometry, controller);
-      requestLayoutAnimationFrame();
-    });
-    node.addEventListener("pointerup", (event) => finishNodeDrag(event));
-    node.addEventListener("pointercancel", (event) => finishNodeDrag(event, true));
-    node.addEventListener("click", (event) => {
-      if (suppressClick) {
-        suppressClick = false;
-        event.preventDefault();
-        event.stopPropagation();
-        return;
-      }
-      openNode();
-    });
-    node.addEventListener("keydown", (event) => {
-      if (event.key !== "Enter" && event.key !== " ") return;
-      event.preventDefault();
-      openNode();
-    });
-  });
-  if (!svg || !canvas) return;
+      return;
+    }
+    selectNode(node.dataset.nodePath, { preserveTab: true });
+  }, { signal: graphEventSignal });
+  canvas.addEventListener("keydown", (event) => {
+    const node = graphNodeFromEvent(event);
+    if (!node || (event.key !== "Enter" && event.key !== " ")) return;
+    event.preventDefault();
+    selectNode(node.dataset.nodePath, { preserveTab: true });
+  }, { signal: graphEventSignal });
   let pendingWheelDelta = 0;
   let pendingWheelPoint = null;
-  let wheelFrame = null;
   const applyWheelZoom = () => {
     wheelFrame = null;
     const point = pendingWheelPoint;
@@ -3800,7 +4430,7 @@ function bindGraphPanel(layout, relationships, controller, revealDurationMs = 0)
     pendingWheelDelta += event.deltaY * deltaScale;
     pendingWheelPoint = { x: event.clientX, y: event.clientY };
     if (wheelFrame === null) wheelFrame = window.requestAnimationFrame(applyWheelZoom);
-  }, { passive: false });
+  }, { passive: false, signal: graphEventSignal });
 
   let drag = null;
   svg.addEventListener("pointerdown", (event) => {
@@ -3809,7 +4439,7 @@ function bindGraphPanel(layout, relationships, controller, revealDurationMs = 0)
     drag = { x: event.clientX, y: event.clientY, view: { ...state.graphViewBox } };
     svg.classList.add("is-panning");
     svg.setPointerCapture(event.pointerId);
-  });
+  }, { signal: graphEventSignal });
   svg.addEventListener("pointermove", (event) => {
     if (!drag) return;
     const rect = svg.getBoundingClientRect();
@@ -3819,56 +4449,103 @@ function bindGraphPanel(layout, relationships, controller, revealDurationMs = 0)
       y: drag.view.y - (event.clientY - drag.y) / rect.height * drag.view.height,
     };
     applyGraphViewBox();
-  });
+  }, { signal: graphEventSignal });
   const stopPanning = (event) => {
     if (!drag) return;
     drag = null;
     svg.classList.remove("is-panning");
     if (svg.hasPointerCapture(event.pointerId)) svg.releasePointerCapture(event.pointerId);
   };
-  svg.addEventListener("pointerup", stopPanning);
-  svg.addEventListener("pointercancel", stopPanning);
+  svg.addEventListener("pointerup", stopPanning, { signal: graphEventSignal });
+  svg.addEventListener("pointercancel", stopPanning, { signal: graphEventSignal });
   updateGraphSearch();
   updateGraphNameScale(svg);
 }
 
-function renderGraphPanel() {
-  state.graphStopLayoutAnimation?.();
-  state.graphStopLayoutAnimation = null;
+function updateGraphSelection() {
+  const selectedPath = state.selectedNodePath;
+  const selectedNodeId = String(state.nodeDetail?.node?.ID || "");
+  dom.graphPanel.querySelectorAll(".graph-node").forEach((node) => {
+    node.classList.toggle("is-selected", node.dataset.nodePath === selectedPath);
+  });
+  dom.graphPanel.querySelectorAll(".graph-edge").forEach((edge) => {
+    edge.classList.toggle("is-related", Boolean(
+      selectedNodeId
+      && (edge.dataset.source === selectedNodeId || edge.dataset.target === selectedNodeId)
+    ));
+  });
+}
+
+async function renderGraphPanel() {
+  if (state.activeTab !== "graph") return;
   // GLOBAL is an authoring scope rather than a place in the game's node
   // structure, so neither it nor its contextual Event edges belong in this map.
   const nodes = (state.nodes || []).filter((node) => (
     node && !node.isGlobal && String(node.id) !== "__global__"
   ));
   const relationships = SceneGraphModel.relationships(nodes, state.graph?.edges || []);
-  const signature = JSON.stringify({
-    algorithm: "structured-depth-v3",
-    nodes: nodes.map((node) => [node.id, node.path, node.name]),
-    edges: relationships.map((edge) => [
-      edge.source,
-      edge.target,
-      edge.endUp,
-      edge.scope,
-      edge.events.length,
-      Boolean(edge.bidirectional),
-      Boolean(edge.cycle),
-    ]),
-  });
-  const layout = SceneGraphModel.layout(nodes, relationships, state.rootNodeId);
+  const signature = graphTopologySignature(nodes, relationships, state.rootNodeId);
+  if (dom.graphPanel.querySelector("#projectGraphSvg") && state.graphLayoutCache?.signature === signature) {
+    updateGraphSelection();
+    return;
+  }
+  const renderRevision = state.graphRenderRevision + 1;
+  state.graphRenderRevision = renderRevision;
+  state.graphCancelComputation?.();
+  state.graphCancelComputation = null;
+  state.graphStopLayoutAnimation?.();
+  state.graphStopLayoutAnimation = null;
+  if (!nodes.length) {
+    state.graphLayoutCache = null;
+    dom.graphPanel.innerHTML = '<div class="panel-page wide"><div class="success-state">' + t("建立 Scene Node 後，關聯圖會顯示 GOTO／REPLACE 關係。") + '</div></div>';
+    return;
+  }
+  let layout;
+  let layoutSource = "cache";
+  let diagnosticsPromise = null;
+  if (state.graphLayoutCache?.signature === signature) {
+    layout = typeof structuredClone === "function"
+      ? structuredClone(state.graphLayoutCache.layout)
+      : SceneGraphModel.layout(nodes, relationships, state.rootNodeId);
+  } else {
+    dom.graphPanel.innerHTML = `<div class="panel-page wide"><div class="success-state">${escapeHtml(t("讀取中"))}</div></div>`;
+    const computation = createGraphComputation(nodes, relationships, state.rootNodeId);
+    const cancelComputation = () => computation.cancel();
+    state.graphCancelComputation = cancelComputation;
+    diagnosticsPromise = computation.diagnosticsPromise;
+    try {
+      const result = await computation.layoutPromise;
+      if (renderRevision !== state.graphRenderRevision || state.activeTab !== "graph") return;
+      layout = result.layout;
+      layoutSource = result.source;
+      state.graphLayoutCache = {
+        signature,
+        layout: typeof structuredClone === "function" ? structuredClone(layout) : layout,
+        edgeCrossings: null,
+      };
+      diagnosticsPromise.finally(() => {
+        if (state.graphCancelComputation === cancelComputation) state.graphCancelComputation = null;
+      });
+    } catch (error) {
+      if (error.name === "AbortError") return;
+      state.graphCancelComputation = null;
+      dom.graphPanel.innerHTML = `<div class="panel-page wide"><div class="success-state">${escapeHtml(t("讀取失敗"))}</div></div>`;
+      toast(error.message, "error");
+      return;
+    }
+  }
   const controller = SceneGraphModel.createLayoutController(nodes, relationships, layout);
   if (signature !== state.graphLayoutSignature) {
     state.graphLayoutSignature = signature;
     state.graphViewBox = fittedGraphViewBox(layout);
   }
-  if (!nodes.length) {
-    dom.graphPanel.innerHTML = '<div class="panel-page wide"><div class="success-state">' + t("建立 Scene Node 後，關聯圖會顯示 GOTO／REPLACE 關係。") + '</div></div>';
-    return;
-  }
   const nodeNames = new Map(nodes.map((node) => [String(node.id), String(node.name || node.id)]));
-  const revealStepMs = 110;
   const revealSteps = layout.revealSteps || new Map();
   const revealStepFor = (nodeId) => revealSteps.get(String(nodeId)) || 0;
-  const maximumRevealStep = Math.max(0, ...nodes.map((node) => revealStepFor(node.id)));
+  const maximumRevealStep = nodes.reduce((maximum, node) => (
+    Math.max(maximum, revealStepFor(node.id))
+  ), 0);
+  const revealStepMs = Math.min(110, 1800 / Math.max(1, maximumRevealStep));
   const revealDurationMs = maximumRevealStep * revealStepMs + 440;
   const edgesHtml = relationships.map((relationship, index) => {
     const source = layout.positions.get(relationship.source);
@@ -3902,13 +4579,7 @@ function renderGraphPanel() {
       revealStepFor(relationship.source),
       revealStepFor(relationship.target),
     ) * revealStepMs + 70;
-    return `
-      <g class="graph-edge is-${relationship.endUp.toLocaleLowerCase()} is-${route.kind} ${secondary ? "is-secondary" : ""} ${relationship.bidirectional ? "is-bidirectional" : ""} ${relationship.cycle ? "is-cycle" : ""} ${relationship.scope === "global" ? "is-global" : ""} ${selected ? "is-related" : ""}" style="--graph-reveal-delay: ${revealDelay}ms" data-edge-index="${index}" data-end-up="${relationship.endUp}" data-scope="${relationship.scope}" data-source="${escapeHtml(relationship.source)}" data-target="${escapeHtml(relationship.target)}">
-        <path d="${SceneGraphModel.edgePath(source, target, layout, index, relationship.endUp, relationship)}"><title>${escapeHtml(descriptions.join("\n"))}</title></path>
-        ${startArrow ? `<polygon class="graph-edge-arrow is-start" points="${startArrow}"></polygon>` : ""}
-        <polygon class="graph-edge-arrow is-end" points="${endArrow}"></polygon>
-      </g>
-    `;
+    return `<g class="graph-edge is-${relationship.endUp.toLocaleLowerCase()} is-${route.kind} ${secondary ? "is-secondary" : ""} ${relationship.bidirectional ? "is-bidirectional" : ""} ${relationship.cycle ? "is-cycle" : ""} ${relationship.scope === "global" ? "is-global" : ""} ${selected ? "is-related" : ""}" style="--graph-reveal-delay: ${revealDelay}ms" data-edge-index="${index}" data-end-up="${relationship.endUp}" data-scope="${relationship.scope}" data-source="${escapeHtml(relationship.source)}" data-target="${escapeHtml(relationship.target)}"><path d="${SceneGraphModel.edgePath(source, target, layout, index, relationship.endUp, relationship)}"><title>${escapeHtml(descriptions.join("\n"))}</title></path>${startArrow ? `<polygon class="graph-edge-arrow is-start" points="${startArrow}"></polygon>` : ""}<polygon class="graph-edge-arrow is-end" points="${endArrow}"></polygon></g>`;
   }).join("");
   const nodesHtml = nodes.map((node) => {
     const position = layout.positions.get(String(node.id));
@@ -3920,23 +4591,11 @@ function renderGraphPanel() {
     const radius = layout.nodeSizes.get(String(node.id)).radius;
     const searchText = `${name} ${node.id} ${node.path}`.toLocaleLowerCase();
     const revealDelay = revealStepFor(node.id) * revealStepMs;
-    return `
-      <g class="graph-node ${selected ? "is-selected" : ""} ${root ? "is-root" : ""} ${global ? "is-global" : ""}" transform="translate(${position.x} ${position.y})" role="button" tabindex="0" data-node-id="${escapeHtml(String(node.id))}" data-node-path="${escapeHtml(node.path)}" data-search-text="${escapeHtml(searchText)}" aria-label="${t("開啟節點 {name}", { name: escapeHtml(name) })}" aria-grabbed="false">
-        <rect class="graph-node-hit-target" x="${radius - 120}" y="-10" width="240" height="${radius * 2 + 50}" rx="10"></rect>
-        <g class="graph-node-content" style="--graph-reveal-delay: ${revealDelay}ms">
-          <circle class="graph-node-dot" cx="${radius}" cy="${radius}" r="${radius}"></circle>
-          <text class="graph-node-name" x="${radius}" y="${radius * 2 + 18}" text-anchor="middle">${escapeHtml(shortName)}</text>
-        </g>
-        <title>${escapeHtml(name)}</title>
-      </g>
-    `;
+    return `<g class="graph-node ${selected ? "is-selected" : ""} ${root ? "is-root" : ""} ${global ? "is-global" : ""}" transform="translate(${position.x} ${position.y})" role="button" tabindex="0" data-node-id="${escapeHtml(String(node.id))}" data-node-path="${escapeHtml(node.path)}" data-search-text="${escapeHtml(searchText)}" aria-label="${t("開啟節點 {name}", { name: escapeHtml(name) })}" aria-grabbed="false"><rect class="graph-node-hit-target" x="${radius - 120}" y="-10" width="240" height="${radius * 2 + 50}" rx="10"></rect><g class="graph-node-content" style="--graph-reveal-delay: ${revealDelay}ms"><circle class="graph-node-dot" cx="${radius}" cy="${radius}" r="${radius}"></circle><text class="graph-node-name" x="${radius}" y="${radius * 2 + 18}" text-anchor="middle">${escapeHtml(shortName)}</text></g><title>${escapeHtml(name)}</title></g>`;
   }).join("");
-  const detachedGuideHtml = Number.isFinite(layout.detachedStartY) ? `
-    <g class="graph-detached-guide" style="--graph-reveal-delay: ${maximumRevealStep * revealStepMs}ms">
-      <line x1="60" y1="${layout.detachedStartY}" x2="${Math.max(60, layout.width - 60)}" y2="${layout.detachedStartY}"></line>
-      <text x="78" y="${layout.detachedStartY - 14}">${t("未連結至 ROOT 的節點")}</text>
-    </g>
-  ` : "";
+  const detachedGuideHtml = Number.isFinite(layout.detachedStartY)
+    ? `<g class="graph-detached-guide" style="--graph-reveal-delay: ${maximumRevealStep * revealStepMs}ms"><line x1="60" y1="${layout.detachedStartY}" x2="${Math.max(60, layout.width - 60)}" y2="${layout.detachedStartY}"></line><text x="78" y="${layout.detachedStartY - 14}">${t("未連結至 ROOT 的節點")}</text></g>`
+    : "";
   dom.graphPanel.innerHTML = `
     <div class="graph-workspace">
       <div class="graph-canvas is-revealing">
@@ -3944,15 +4603,19 @@ function renderGraphPanel() {
         <button class="graph-reset-button" id="resetGraphView" type="button" title="${t("顯示全圖")}" aria-label="${t("顯示全圖")}">
           <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"></circle><path d="M12 3v3M12 18v3M3 12h3M18 12h3"></path></svg>
         </button>
-        <svg id="projectGraphSvg" role="img" aria-label="${t("依 Stack 深度排列的 Scene Node GOTO 與 REPLACE 有向關聯圖")}" viewBox="${graphViewBoxValue()}" data-graph-width="${layout.width}" data-graph-height="${layout.height}" data-layout-algorithm="${layout.algorithm}" data-depth-columns="${layout.columns.length}" data-edge-crossings="${SceneGraphModel.countEdgeCrossings(relationships, layout)}">
-          ${detachedGuideHtml}
-          <g class="graph-edges">${edgesHtml}</g>
-          <g class="graph-nodes">${nodesHtml}</g>
-        </svg>
+        <svg id="projectGraphSvg" role="img" aria-label="${t("依 Stack 深度排列的 Scene Node GOTO 與 REPLACE 有向關聯圖")}" viewBox="${graphViewBoxValue()}" data-graph-width="${layout.width}" data-graph-height="${layout.height}" data-layout-algorithm="${layout.algorithm}" data-layout-source="${layoutSource}" data-depth-columns="${layout.columns.length}" data-edge-crossings="${state.graphLayoutCache?.edgeCrossings ?? "pending"}">${detachedGuideHtml}<g class="graph-edges">${edgesHtml}</g><g class="graph-nodes">${nodesHtml}</g></svg>
       </div>
     </div>
   `;
   bindGraphPanel(layout, relationships, controller, revealDurationMs);
+  diagnosticsPromise?.then((edgeCrossings) => {
+    if (!Number.isFinite(edgeCrossings) || state.graphLayoutCache?.signature !== signature) return;
+    state.graphLayoutCache.edgeCrossings = edgeCrossings;
+    const svg = dom.graphPanel.querySelector("#projectGraphSvg");
+    if (renderRevision === state.graphRenderRevision && svg) {
+      svg.dataset.edgeCrossings = String(edgeCrossings);
+    }
+  });
 }
 
 function renderValidationPanel() {
@@ -4000,6 +4663,7 @@ async function refreshAfterSave() {
   state.graph = project.graph || { edges: [] };
   state.images = project.images || [];
   state.audio = project.audio || [];
+  state.textboxProfiles = project.textboxProfiles || [];
   state.optionTargets = project.optionTargets || [];
   state.stats = SceneStateEditor.withStatOrders(project.stats || {});
   state.statsDraft = clone(state.stats);
@@ -4392,7 +5056,11 @@ function bindGlobalEvents() {
   document.querySelectorAll("[data-close-dialog]").forEach((button) => button.addEventListener("click", () => {
     document.querySelector(`#${button.dataset.closeDialog}`)?.close();
   }));
-  [dom.nodeDialogForm, dom.nameDialogForm, dom.settingsForm].forEach(bindDialogEnter);
+  [dom.nodeDialogForm, dom.nameDialogForm, dom.settingsForm, dom.textboxProfileForm].forEach(bindDialogEnter);
+
+  document.querySelector("#newTextboxProfile")?.addEventListener("click", createTextboxProfile);
+  document.querySelector("#deleteTextboxProfile")?.addEventListener("click", deleteTextboxProfile);
+  dom.textboxProfileForm?.addEventListener("submit", saveTextboxProfile);
 
   dom.autosaveEnabled.addEventListener("change", async (event) => {
     state.editorSettings.autosave = event.target.checked;

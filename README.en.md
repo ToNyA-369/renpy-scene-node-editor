@@ -43,6 +43,8 @@ python3 "/path/to/RenPyProject/.scene-node-editor/EDITOR/app.py" \
   --project "/path/to/RenPyProject/game"
 ```
 
+Install and update also sync bilingual creator documentation into `.scene-node-editor/`, so AI collaborators can read `AI_CONTEXT.md` first and consult the local User Guide or Reference without relying on network access.
+
 ## Game flow model
 
 ```mermaid
