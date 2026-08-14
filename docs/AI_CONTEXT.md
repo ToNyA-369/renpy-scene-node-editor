@@ -54,7 +54,7 @@ Content files under `game/GLOBALNODE/CONTENT/` and `game/SCENENODE/**/CONTENT/` 
 2. The UI calls the source “Option”; stored Triggers remain `Action:<id>`.
 3. Other Trigger formats are `Auto:Enter`, `Auto:Node`, `Auto:Exit`, `Keyboard:<Ren'Py keysym>`, and `Mouse:<Left|Middle|Right|WheelUp|WheelDown>`.
 4. An Option returns a Trigger. It does not directly choose an Event, run Effects, call Content, or change the Scene Stack.
-5. On Node and player-input Events own Conditions, Priority, Weight, Once, Effects, Content, and End up. On Enter / On Exit lifecycle Events omit Weight, End up, and Next Node.
+5. On Node and player-input Events own Conditions, Priority, Weight, Once, Effects, Content, and End up. Conditions use one OR-of-AND layer: a shared non-empty `clause` is AND, while different clauses and explicit `null` Conditions are OR branches; legacy Conditions with no `clause` remain all-AND. On Enter / On Exit lifecycle Events use the same Condition logic but omit Weight, End up, and Next Node.
 6. The fixed `__global__` Global Node is an authoring scope, not a Stack Node. Its Options render together with every current real Node and may use `Action:` Triggers; it still cannot be Root or Next Node. Its Events merge with the current real Node, and End up operates on that real Stack-top context.
 7. Event Content stores a Ren'Py label name, not an `.rpy` filename.
 8. Event Effects cover Stats, Memories, and idempotent Option `enable` / `disable` operations. Content runs first; after its label returns, the Runtime records Once and applies Effects before resolving End up. Backgrounds, audio, transitions, and other presentation use native Ren'Py in Content, which must normally `return` to the Runner.

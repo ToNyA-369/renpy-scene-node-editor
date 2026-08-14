@@ -206,8 +206,12 @@
       const picker = select.closest(".select-choice-picker");
       if (!picker) return;
       const trigger = picker.querySelector("[data-select-picker-toggle]");
-      const label = trigger?.querySelector("strong");
-      if (label) label.textContent = selectedOptionLabel(select);
+      const selectedLabel = selectedOptionLabel(select);
+      if (trigger instanceof HTMLInputElement) trigger.value = selectedLabel;
+      else {
+        const label = trigger?.querySelector("strong");
+        if (label) label.textContent = selectedLabel;
+      }
       if (trigger) trigger.disabled = select.disabled;
       populateMenu(select, picker);
     }
@@ -263,15 +267,17 @@
       const fieldLabel = select.closest("label")?.querySelector("span")?.textContent?.trim();
       const settingLabel = select.closest(".setting-row")?.querySelector("strong")?.textContent?.trim();
       const label = select.getAttribute("aria-label") || select.title || settingLabel || fieldLabel || (typeof SceneI18n !== "undefined" ? SceneI18n.t("選擇項目") : "選擇項目");
-      const trigger = document.createElement("button");
-      trigger.type = "button";
+      const trigger = document.createElement("input");
+      trigger.type = "text";
+      trigger.readOnly = true;
       trigger.className = "content-choice-trigger select-choice-trigger";
       trigger.dataset.selectPickerToggle = "";
+      trigger.setAttribute("role", "combobox");
       trigger.setAttribute("aria-label", label);
       trigger.setAttribute("aria-haspopup", "listbox");
+      trigger.setAttribute("aria-autocomplete", "none");
       trigger.setAttribute("aria-expanded", "false");
       trigger.setAttribute("aria-controls", menuId);
-      trigger.innerHTML = `<span><strong></strong></span><i aria-hidden="true">⌄</i>`;
       const menu = document.createElement("div");
       menu.id = menuId;
       menu.className = "select-choice-menu";
@@ -336,6 +342,9 @@
         const branch = event.target.closest(".select-choice-branch");
         if (branch) setSubmenuOpen(branch, true, positionSubmenu);
       });
+      picker.addEventListener("focusout", (event) => {
+        if (!picker.contains(event.relatedTarget)) close();
+      });
       picker.addEventListener("keydown", (event) => {
         const folder = event.target.closest("[data-select-folder-toggle]");
         if (folder && ["Enter", " ", "ArrowRight"].includes(event.key)) {
@@ -352,11 +361,12 @@
           event.preventDefault();
           return;
         }
-        if (event.target === trigger && ["ArrowDown", "ArrowUp"].includes(event.key)) {
+        if (event.target === trigger && ["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) {
           if (!picker.classList.contains("open")) trigger.click();
           const options = directMenuItems(menu, "[data-select-folder-toggle]", "[data-select-value]");
           const selected = options.find((option) => option.getAttribute("aria-selected") === "true");
-          (selected || options[event.key === "ArrowDown" ? 0 : options.length - 1])?.focus();
+          const edgeOption = ["ArrowDown", "Home"].includes(event.key) ? options[0] : options[options.length - 1];
+          (event.key === "Home" || event.key === "End" ? edgeOption : selected || edgeOption)?.focus();
           event.preventDefault();
           return;
         }

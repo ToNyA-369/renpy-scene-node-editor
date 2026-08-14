@@ -339,7 +339,25 @@ init -100 python:
 
 
     def scene_conditions_match(conditions):
-        return all(scene_condition_matches(item) for item in (conditions or []))
+        items = list(conditions or [])
+        if not items:
+            return True
+        if all("clause" not in item for item in items):
+            return all(scene_condition_matches(item) for item in items)
+
+        clauses = []
+        grouped = {}
+        for index, condition in enumerate(items):
+            clause_id = str(condition.get("clause") or "").strip()
+            key = ("group", clause_id) if clause_id else ("single", index)
+            if key not in grouped:
+                grouped[key] = []
+                clauses.append(grouped[key])
+            grouped[key].append(condition)
+        return any(
+            all(scene_condition_matches(condition) for condition in clause)
+            for clause in clauses
+        )
 
 
     def scene_event_once_memory(event, owner_node_id=None):
@@ -357,7 +375,7 @@ init -100 python:
             scene_event_once_memory(event, owner_node_id),
         ):
             return False
-        return all(scene_condition_matches(item) for item in event.get("Conditions", []))
+        return scene_conditions_match(event.get("Conditions", []))
 
 
     def scene_weighted_pair(pairs):

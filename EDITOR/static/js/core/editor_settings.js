@@ -5,9 +5,9 @@
   if (typeof module === "object" && module.exports) module.exports = api;
   if (root) root.SceneEditorSettings = api;
 })(typeof globalThis !== "undefined" ? globalThis : this, () => {
-  const SETTINGS_VERSION = 9;
+  const SETTINGS_VERSION = 12;
   const DEFAULT_SHORTCUTS = Object.freeze({
-    save: "mod+s", create: "mod+enter", sidebar: "mod+\\",
+    undo: "mod+z", save: "mod+s", create: "mod+enter", delete: "mod+backspace", sidebar: "mod+\\",
     cyclePrevious: "mod+shift+left", cycleNext: "mod+shift+right",
     leftPanel: "mod+[", rightPanel: "mod+]", tabNode: "mod+1",
     tabEvents: "mod+2", tabOptions: "mod+3", tabContent: "mod+4",
@@ -15,7 +15,7 @@
     grid: "g", snap: "s", sections: "mod+.", settings: "mod+,",
   });
   const SHORTCUT_LABELS = Object.freeze({
-    save: "立即儲存", create: "新增目前功能項目", sidebar: "切換節點列表",
+    undo: "返回上一步", save: "立即儲存", create: "新增目前功能項目", delete: "刪除目前功能項目", sidebar: "切換節點列表",
     cyclePrevious: "上一個功能區", cycleNext: "下一個功能區",
     leftPanel: "展開或收合左側欄位", rightPanel: "展開或收合右側欄位",
     tabNode: "前往節點", tabEvents: "前往事件", tabOptions: "前往選項",
@@ -28,6 +28,12 @@
     tabStats: "stats", tabGraph: "graph", tabValidation: "validation",
   });
   const TAB_ORDER = Object.freeze(["node", "events", "options", "content", "stats", "graph", "validation"]);
+
+  function normalizeTabOrder(value) {
+    const saved = Array.isArray(value) ? value.map(String) : [];
+    const known = saved.filter((tab, index) => TAB_ORDER.includes(tab) && saved.indexOf(tab) === index);
+    return [...known, ...TAB_ORDER.filter((tab) => !known.includes(tab))];
+  }
 
   function numberValue(value, fallback = 0) {
     const parsed = Number(value);
@@ -46,6 +52,7 @@
       autosave: true,
       autosaveDelay: 700,
       gridSize: 24,
+      tabOrder: [...TAB_ORDER],
       shortcuts: { ...DEFAULT_SHORTCUTS },
     };
     try {
@@ -79,7 +86,7 @@
         delete savedShortcuts.optionCanvasMode;
       }
       const shortcuts = { ...DEFAULT_SHORTCUTS, ...savedShortcuts };
-      [...Object.keys(TAB_SHORTCUT_ACTIONS), "create"].forEach((action) => {
+      [...Object.keys(TAB_SHORTCUT_ACTIONS), "create", "delete", "undo"].forEach((action) => {
         const conflictsWithSaved = Object.entries(savedShortcuts)
           .some(([savedAction, value]) => savedAction !== action && value === shortcuts[action]);
         if (!Object.hasOwn(savedShortcuts, action) && conflictsWithSaved) shortcuts[action] = "";
@@ -90,6 +97,7 @@
         autosave: saved.autosave !== false,
         autosaveDelay: Math.max(200, numberValue(saved.autosaveDelay, fallback.autosaveDelay)),
         gridSize: Math.max(4, Math.min(160, numberValue(saved.gridSize, fallback.gridSize))),
+        tabOrder: normalizeTabOrder(saved.tabOrder),
         shortcuts,
       };
     } catch (_error) {
@@ -103,6 +111,7 @@
     SHORTCUT_LABELS,
     TAB_ORDER,
     TAB_SHORTCUT_ACTIONS,
+    normalizeTabOrder,
     normalizeEditorSettings,
   };
 });

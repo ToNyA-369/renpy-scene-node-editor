@@ -271,7 +271,7 @@ class GlobalNodeContractTest(unittest.TestCase):
 
         self.assertIn('const GLOBAL_NODE_PATH = "@global"', source)
         self.assertIn("return EVENT_TRIGGER_MODES;", source)
-        self.assertIn("const tabs = TAB_ORDER;", source)
+        self.assertIn("const tabs = state.editorSettings.tabOrder || TAB_ORDER;", source)
         self.assertNotIn('if (tab === "options" && isGlobalNode())', source)
         self.assertIn('return state.nodes.map((node)', source)
         self.assertIn('scope === "global"', source)

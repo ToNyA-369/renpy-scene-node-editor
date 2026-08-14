@@ -57,9 +57,13 @@ class EventApiRoundTripTest(unittest.TestCase):
         }
 
         response = app.save_event({"node": "root", "event": golden})
+        normalized = {
+            **golden,
+            "Conditions": [{**condition, "clause": "and_1"} for condition in golden["Conditions"]],
+        }
 
-        self.assertEqual(response, golden)
-        self.assertEqual(self.saved_event("root", "weighted_replace"), golden)
+        self.assertEqual(response, normalized)
+        self.assertEqual(self.saved_event("root", "weighted_replace"), normalized)
 
     def test_string_choices_and_lifecycle_omissions_round_trip(self):
         app.create_node({"id": "target", "path": "target", "name": "Target"})
@@ -124,8 +128,12 @@ class EventApiRoundTripTest(unittest.TestCase):
             "Next Node": None,
         }
 
-        self.assertEqual(app.save_event({"node": "@global", "event": golden}), golden)
-        self.assertEqual(self.saved_event("@global", "global_clock"), golden)
+        normalized = {
+            **golden,
+            "Conditions": [{**golden["Conditions"][0], "clause": "and_1"}],
+        }
+        self.assertEqual(app.save_event({"node": "@global", "event": golden}), normalized)
+        self.assertEqual(self.saved_event("@global", "global_clock"), normalized)
 
         global_option = dict(
             golden,
@@ -139,8 +147,9 @@ class EventApiRoundTripTest(unittest.TestCase):
                 "element": "actions",
             }],
         )
-        self.assertEqual(app.save_event({"node": "@global", "event": global_option}), global_option)
-        self.assertEqual(self.saved_event("@global", "global_option"), global_option)
+        normalized_option = {**global_option, "Conditions": normalized["Conditions"]}
+        self.assertEqual(app.save_event({"node": "@global", "event": global_option}), normalized_option)
+        self.assertEqual(self.saved_event("@global", "global_option"), normalized_option)
 
         cross_node_effect = {
             **global_option,
@@ -149,6 +158,31 @@ class EventApiRoundTripTest(unittest.TestCase):
         }
         with self.assertRaisesRegex(app.ApiError, "只能控制同一個 Options 作用域"):
             app.save_event({"node": "@global", "event": cross_node_effect})
+
+    def test_condition_clauses_preserve_and_groups_and_independent_or_branches(self):
+        event = {
+            "ID": "condition_logic",
+            "Name": "Condition Logic",
+            "Group": "Normal",
+            "Trigger": "Auto:Node",
+            "Priority": 5,
+            "Once": False,
+            "Conditions": [
+                {"type": "stat", "id": "money", "op": ">=", "value": 10, "clause": "and_1"},
+                {"type": "memory", "bank": "memory", "id": "member", "op": "has", "clause": "and_1"},
+                {"type": "stat", "id": "hour", "op": ">=", "value": 18, "clause": None},
+            ],
+            "Effects": [],
+            "Content": None,
+            "Weight": 1,
+            "End up": "REDO",
+            "Next Node": None,
+        }
+
+        self.assertEqual(app.save_event({"node": "root", "event": event}), event)
+        invalid = {**event, "ID": "invalid_clause", "Conditions": [{**event["Conditions"][0], "clause": 3}]}
+        with self.assertRaisesRegex(app.ApiError, "Condition clause"):
+            app.save_event({"node": "root", "event": invalid})
 
     def test_event_groups_normalize_and_rename_without_changing_runtime_fields(self):
         base = {

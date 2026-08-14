@@ -211,6 +211,66 @@ async function dragListItemBefore(page, source, target, beforeDrop = null) {
   await page.mouse.up();
 }
 
+async function dragConditionBefore(page, source, target) {
+  const sourceElement = source.first();
+  const targetElement = target.first();
+  const sourceBox = await sourceElement.boundingBox();
+  const targetBox = await targetElement.boundingBox();
+  if (!sourceBox || !targetBox) throw new Error("Condition drag source or target is not visible");
+  await page.mouse.move(sourceBox.x + 2, sourceBox.y + sourceBox.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(targetBox.x + 2, targetBox.y + Math.min(12, targetBox.height * 0.2), { steps: 12 });
+  await expect(page.locator(".group-drag-preview")).toBeVisible();
+  await page.waitForTimeout(180);
+  await page.mouse.up();
+}
+
+async function dragConditionOutOfGroup(page, source) {
+  const sourceElement = source.first();
+  const root = page.locator("#conditionList");
+  const sourceBox = await sourceElement.boundingBox();
+  const rootBox = await root.boundingBox();
+  if (!sourceBox || !rootBox) throw new Error("Condition group exit target is not visible");
+  await page.mouse.move(sourceBox.x + 2, sourceBox.y + sourceBox.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(rootBox.x + 4, rootBox.y + rootBox.height - 8, { steps: 14 });
+  await expect(page.locator(".group-drag-preview")).toBeVisible();
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    await page.waitForTimeout(120);
+    const liveRootBox = await root.boundingBox();
+    if (!liveRootBox) throw new Error("Condition group exit target disappeared");
+    await page.mouse.move(
+      liveRootBox.x + 4,
+      liveRootBox.y + liveRootBox.height - 8,
+      { steps: 4 },
+    );
+  }
+  await expect(root.locator(":scope > .condition-row")).toHaveCount(1);
+  await page.mouse.up();
+}
+
+async function groupConditionsByDwell(page, source, target) {
+  const sourceElement = source.first();
+  const targetElement = target.first();
+  const sourceBox = await sourceElement.boundingBox();
+  const targetBox = await targetElement.boundingBox();
+  if (!sourceBox || !targetBox) throw new Error("Condition grouping source or target is not visible");
+  await page.mouse.move(sourceBox.x + 2, sourceBox.y + sourceBox.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(targetBox.x + targetBox.width / 2, targetBox.y + targetBox.height / 2, { steps: 10 });
+  await expect(page.locator(".group-drag-preview")).toBeVisible();
+  await page.waitForTimeout(620);
+  const liveTargetBox = await targetElement.boundingBox();
+  if (!liveTargetBox) throw new Error("Condition grouping target disappeared");
+  await page.mouse.move(
+    liveTargetBox.x + liveTargetBox.width / 2,
+    liveTargetBox.y + Math.min(18, liveTargetBox.height / 2),
+    { steps: 3 },
+  );
+  await expect(targetElement).toHaveClass(/is-group-ready/);
+  await page.mouse.up();
+}
+
 async function dragListItemBeforeFromCenter(page, source, target, beforeDrop = null) {
   const sourceElement = source.first();
   const targetElement = target.first();
@@ -225,6 +285,52 @@ async function dragListItemBeforeFromCenter(page, source, target, beforeDrop = n
   await page.waitForTimeout(180);
   if (beforeDrop) await beforeDrop();
   await page.mouse.up();
+}
+
+async function dragWorkspaceTab(page, sourceTab, targetTab, position = "before", beforeDrop = null, grabRatio = 0.5) {
+  const source = page.locator(`.tab[data-tab="${sourceTab}"]`);
+  const target = page.locator(`.tab[data-tab="${targetTab}"]`);
+  const sourceBox = await source.boundingBox();
+  const targetBox = await target.boundingBox();
+  if (!sourceBox || !targetBox) throw new Error("Workspace tab geometry is unavailable");
+  const grabOffset = sourceBox.width * grabRatio;
+  const targetCenter = targetBox.x + targetBox.width / 2;
+  const desiredPreviewCenter = targetCenter + (position === "before" ? -24 : 24);
+  const pointerX = desiredPreviewCenter - sourceBox.width / 2 + grabOffset;
+  await page.mouse.move(sourceBox.x + grabOffset, sourceBox.y + sourceBox.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(
+    pointerX,
+    targetBox.y + targetBox.height / 2,
+    { steps: 12 },
+  );
+  await expect(page.locator("#tabbar")).toHaveClass(/is-workspace-tab-reordering/);
+  await expect(source).toHaveClass(/is-workspace-tab-dragging/);
+  await expect(page.locator(".list-reorder-preview")).toHaveCount(0);
+  if (beforeDrop) await beforeDrop({ pointerX, grabOffset });
+  await page.waitForTimeout(180);
+  await page.mouse.up();
+}
+
+async function sampleWorkspaceIndicatorOffsets(page, frameCount = 6) {
+  return page.evaluate(async (count) => {
+    const offsets = [];
+    for (let frame = 0; frame < count; frame += 1) {
+      await new Promise((resolve) => window.requestAnimationFrame(resolve));
+      const indicator = document.querySelector("#tabFocusIndicator");
+      const activeTab = document.querySelector("#tabbar .tab.active");
+      if (!indicator || !activeTab) continue;
+      const indicatorRect = indicator.getBoundingClientRect();
+      const tabRect = activeTab.getBoundingClientRect();
+      offsets.push({
+        left: indicatorRect.left - tabRect.left,
+        right: indicatorRect.right - tabRect.right,
+        top: indicatorRect.top - tabRect.top,
+        bottom: indicatorRect.bottom - tabRect.bottom,
+      });
+    }
+    return offsets;
+  }, frameCount);
 }
 
 test.beforeAll(async () => {
@@ -1419,6 +1525,158 @@ test("language switch stays put when flushing the current draft fails", async ({
   await page.reload();
 });
 
+test("editor undo is keyboard-only, persists the restored data, and leaves text undo native", async ({ page }) => {
+  await page.goto(editorUrl);
+  await expect(page.locator("#nodeForm")).toBeVisible();
+  await expect(page.getByRole("button", { name: /返回上一步|Undo Last Change/ })).toHaveCount(0);
+
+  const nameField = page.locator('#nodeForm [name="Name"]');
+  const originalName = await nameField.inputValue();
+  let undoRequests = 0;
+  page.on("request", (request) => {
+    if (request.url().endsWith("/api/undo")) undoRequests += 1;
+  });
+
+  await nameField.fill(`${originalName} native undo`);
+  await nameField.press("Control+z");
+  await page.waitForTimeout(120);
+  expect(undoRequests).toBe(0);
+  const nativeCleanupSave = page.waitForResponse((candidate) => (
+    candidate.url().endsWith("/api/node")
+    && candidate.request().method() === "PUT"
+    && candidate.ok()
+  ));
+  await nameField.evaluate((field, value) => {
+    field.value = value;
+    field.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "historyUndo" }));
+  }, originalName);
+  await nativeCleanupSave;
+
+  const changedName = `${originalName} editor undo`;
+  const changedSave = page.waitForResponse((candidate) => (
+    candidate.url().endsWith("/api/node")
+    && candidate.request().method() === "PUT"
+    && candidate.ok()
+  ));
+  await nameField.fill(changedName);
+  await changedSave;
+  await expect(page.locator("#saveState")).toHaveText("已自動儲存");
+  await page.locator(".node-root-row").click();
+
+  const undoResponse = page.waitForResponse((candidate) => (
+    candidate.url().endsWith("/api/undo")
+    && candidate.request().method() === "POST"
+    && candidate.ok()
+  ));
+  await page.keyboard.press("Control+z");
+  await undoResponse;
+  await expect(page.locator("#saveState")).toHaveText("已返回上一步");
+  await expect(page.locator('#nodeForm [name="Name"]')).toHaveValue(originalName);
+
+  await reloadAndWaitForProject(page);
+  await expect(page.locator('#nodeForm [name="Name"]')).toHaveValue(originalName);
+});
+
+test("keyboard authoring follows Event focus order, navigates every picker, and deletes contextually", async ({ page }) => {
+  await page.goto(editorUrl);
+  await expect(page.getByRole("navigation", { name: /編輯器分頁|Editor Tabs/ })).toBeVisible();
+  await page.locator('.tab[data-tab="events"]').click();
+  await expect(page.locator("#eventsPanel")).toBeVisible();
+
+  const eventSave = page.waitForResponse((candidate) => (
+    candidate.url().endsWith("/api/events")
+    && candidate.request().method() === "POST"
+    && candidate.ok()
+  ));
+  await page.keyboard.press("Control+Enter");
+  const nameField = page.locator('#eventForm [name="Name"]');
+  await expect(nameField).toBeFocused();
+
+  await page.keyboard.press("Tab");
+  const triggerModePicker = page.locator('#eventForm [name="TriggerMode"]').locator("xpath=..").locator("[data-select-picker-toggle]");
+  await expect(triggerModePicker).toHaveJSProperty("tagName", "INPUT");
+  await expect(triggerModePicker).toHaveAttribute("role", "combobox");
+  await expect(triggerModePicker).toHaveAttribute("readonly", "");
+  await expect(triggerModePicker).toBeFocused();
+  await expect.poll(() => triggerModePicker.evaluate((picker) => getComputedStyle(picker).fontSize)).toBe("12px");
+  await page.keyboard.press("ArrowDown");
+  await expect(page.locator("#eventForm .select-choice-menu:visible [data-select-value][aria-selected='true']")).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(triggerModePicker).toBeFocused();
+
+  await eventSave;
+  await expect(triggerModePicker).toBeFocused();
+  await page.keyboard.press("Tab");
+  const triggerValuePicker = page.locator('#eventForm [name="Trigger"]').locator("xpath=..").locator("[data-select-picker-toggle]");
+  await expect(triggerValuePicker).toBeFocused();
+  await page.keyboard.press("End");
+  await expect(page.locator("#eventForm .select-choice-menu:visible [data-select-value]").last()).toBeFocused();
+  await page.keyboard.press("Escape");
+
+  const contentSave = page.waitForResponse((candidate) => (
+    candidate.url().endsWith("/api/events")
+    && candidate.request().method() === "POST"
+    && candidate.ok()
+  ));
+  await page.locator("#eventForm [data-add-weighted='content']").click();
+  const contentPicker = page.locator("#eventForm [data-content-picker-toggle]").first();
+  await expect(contentPicker).toBeVisible();
+  await contentPicker.focus();
+  await contentSave;
+  await expect(contentPicker).toBeFocused();
+  await page.keyboard.press("Home");
+  const contentMenuItem = page.locator("#eventForm .content-choice-menu:visible [data-content-label-choice], #eventForm .content-choice-menu:visible [data-content-file-expand]").first();
+  await expect(contentMenuItem).toBeFocused();
+  await page.keyboard.press("Escape");
+
+  await expect.poll(() => page.locator("select:not([multiple])").evaluateAll((selects) => (
+    selects.every((select) => select.dataset.selectEnhanced === "true" && select.tabIndex === -1)
+  ))).toBe(true);
+
+  const addEffectSave = page.waitForResponse((candidate) => (
+    candidate.url().endsWith("/api/events")
+    && candidate.request().method() === "POST"
+    && candidate.ok()
+  ));
+  await page.locator("#addEffectButton").click();
+  await addEffectSave;
+  const effectRow = page.locator("#effectList .effect-row").first();
+  await effectRow.locator('[name="effectValue"]').focus();
+  await page.keyboard.press("Escape");
+  await expect(effectRow).toBeFocused();
+
+  const removeEffectSave = page.waitForResponse((candidate) => (
+    candidate.url().endsWith("/api/events")
+    && candidate.request().method() === "POST"
+    && candidate.ok()
+  ));
+  await page.keyboard.press("Control+Backspace");
+  await removeEffectSave;
+  await expect(page.locator("#effectList .effect-row")).toHaveCount(0);
+
+  let deleteRequests = 0;
+  page.on("request", (request) => {
+    if (request.url().includes("/api/events?") && request.method() === "DELETE") deleteRequests += 1;
+  });
+  await nameField.focus();
+  await page.keyboard.press("Control+Backspace");
+  await page.waitForTimeout(100);
+  expect(deleteRequests).toBe(0);
+
+  const deleteButton = page.locator("#deleteEventButton");
+  await deleteButton.focus();
+  page.once("dialog", (dialog) => dialog.accept());
+  const deleteResponse = page.waitForResponse((candidate) => (
+    candidate.url().includes("/api/events?")
+    && candidate.request().method() === "DELETE"
+    && candidate.ok()
+  ));
+  await page.keyboard.press("Control+Backspace");
+  await deleteResponse;
+  expect(deleteRequests).toBe(1);
+  await expect(page.locator("#saveState")).toHaveText("已同步");
+});
+
 test("textbox appearance profiles are reusable, previewed, and persisted", async ({ page }) => {
   await page.setViewportSize({ width: 1680, height: 900 });
   await page.goto(editorUrl);
@@ -1588,19 +1846,64 @@ test("shared drag sorting persists Event rules, Options, and Memory order", asyn
   await expect(page.locator("#effectList .effect-row")).toHaveCount(2);
   await expect(page.locator('.weighted-choice-table:has([name="contentRepresentation"]) .weight-row')).toHaveCount(2);
   await expect(page.locator('.weighted-choice-table:has([name="nextRepresentation"]) .weight-row')).toHaveCount(2);
-  await expect.poll(() => page.locator("#conditionList .condition-row").first().evaluate((row) => getComputedStyle(row).backgroundColor))
-    .not.toBe("rgb(255, 255, 255)");
+  const groupedCondition = page.locator("#conditionList .condition-row").first();
+  await expect.poll(() => groupedCondition.evaluate((row) => getComputedStyle(row).borderColor))
+    .toBe("rgba(0, 0, 0, 0)");
+  await groupedCondition.hover();
+  await expect.poll(() => groupedCondition.evaluate((row) => getComputedStyle(row).borderColor))
+    .not.toBe("rgba(0, 0, 0, 0)");
+  await expect.poll(() => page.locator("#conditionList .condition-drop-tail").evaluate((tail) => tail.getBoundingClientRect().height))
+    .toBe(0);
 
   const conditionSave = page.waitForResponse((candidate) => (
     candidate.url().endsWith("/api/events") && candidate.request().method() === "POST" && candidate.ok()
   ));
-  await dragListItemBefore(
+  await dragConditionBefore(
     page,
     page.locator("#conditionList .condition-row").nth(1),
     page.locator("#conditionList .condition-row").nth(0),
   );
   await conditionSave;
   await expect(page.locator("#conditionList .condition-row").first().locator('[name="conditionType"]')).toHaveValue("memory");
+  await expect(page.locator("#conditionList .condition-and-group")).toHaveCount(1);
+
+  const conditionOrSave = page.waitForResponse((candidate) => (
+    candidate.url().endsWith("/api/events") && candidate.request().method() === "POST" && candidate.ok()
+  ));
+  await dragConditionOutOfGroup(page, page.locator("#conditionList .condition-row").first());
+  await conditionOrSave;
+  await expect(page.locator("#conditionList .condition-and-group .condition-row")).toHaveCount(1);
+  await expect(page.locator("#conditionList > .condition-row")).toHaveCount(1);
+  await expect.poll(() => page.locator("#conditionList > .condition-logic-block").nth(1).evaluate((block) => {
+    const separator = getComputedStyle(block, "::before");
+    return -(Number.parseFloat(separator.top) + Number.parseFloat(separator.height));
+  })).toBeGreaterThanOrEqual(8);
+
+  const addOrSave = page.waitForResponse((candidate) => (
+    candidate.url().endsWith("/api/events") && candidate.request().method() === "POST" && candidate.ok()
+  ));
+  await page.getByRole("button", { name: "新增條件" }).click();
+  await addOrSave;
+  await expect(page.locator("#conditionList > .condition-row")).toHaveCount(2);
+
+  const regroupSave = page.waitForResponse((candidate) => (
+    candidate.url().endsWith("/api/events") && candidate.request().method() === "POST" && candidate.ok()
+  ));
+  await groupConditionsByDwell(
+    page,
+    page.locator("#conditionList > .condition-row").nth(0),
+    page.locator("#conditionList > .condition-row").nth(1),
+  );
+  await regroupSave;
+  await expect(page.locator("#conditionList .condition-and-group")).toHaveCount(2);
+  await expect(page.locator("#conditionList > .condition-row")).toHaveCount(0);
+  await reloadAndWaitForProject(page);
+  await openNodeSidebar(page);
+  await page.locator('#nodeList [data-node-path="branch_lab"]').click();
+  await page.getByRole("button", { name: /^事件 / }).click();
+  await page.locator('[data-event-id="branch_success"]').click();
+  await expect(page.locator("#conditionList .condition-and-group")).toHaveCount(2);
+  await expect(page.locator("#conditionList > .condition-row")).toHaveCount(0);
 
   const effectSave = page.waitForResponse((candidate) => (
     candidate.url().endsWith("/api/events") && candidate.request().method() === "POST" && candidate.ok()
@@ -1685,7 +1988,10 @@ test("shared drag sorting persists Event rules, Options, and Memory order", asyn
 
   const savedBranch = await (await page.request.get(`${editorUrl}/api/node?path=branch_lab`)).json();
   const savedEvent = savedBranch.events.find((entry) => entry.data.ID === "branch_success").data;
-  expect(savedEvent.Conditions.map((entry) => entry.type)).toEqual(["memory", "stat"]);
+  expect(savedEvent.Conditions).toHaveLength(3);
+  expect(savedEvent.Conditions[0].clause).toBe("and_1");
+  expect(savedEvent.Conditions[1].clause).toBeTruthy();
+  expect(savedEvent.Conditions[2].clause).toBe(savedEvent.Conditions[1].clause);
   expect(savedEvent.Effects.map((entry) => entry.type)).toEqual(["memory", "stat"]);
   expect(Object.keys(savedEvent.Content)).toEqual(["test_branch_random", "test_branch_success"]);
   expect(Object.keys(savedEvent["Next Node"])).toEqual(["outcome_fallback", "outcome_success"]);
@@ -1823,6 +2129,10 @@ test("Content mounts the offline Ren'Py editor and keeps autosave persistence", 
   await expect(page.locator("#contentEditor")).toBeHidden();
   await expect(page.locator("#contentEditorHost .line-numbers").first()).toBeVisible();
 
+  await page.locator("#contentEditorHost textarea").focus();
+  await page.keyboard.press("Escape");
+  await expect(page.locator("#contentPanel")).toBeFocused();
+
   const fallback = page.locator("#contentEditor");
   const original = await fallback.inputValue();
   const marker = "# content editor browser persistence";
@@ -1857,6 +2167,160 @@ test("Content mounts the offline Ren'Py editor and keeps autosave persistence", 
   expect(browserErrors, browserErrors.join("\n")).toEqual([]);
 });
 
+test("workspace tabs drag horizontally, persist their order, and do not change the active workspace", async ({ page }) => {
+  await page.goto(editorUrl);
+  const tabIds = () => page.locator("#tabbar .tab").evaluateAll((tabs) => tabs.map((tab) => tab.dataset.tab));
+  const defaultOrder = ["node", "events", "options", "content", "stats", "graph", "validation"];
+  await expect.poll(tabIds).toEqual(defaultOrder);
+  await expect(page.locator('.tab[data-tab="node"]')).toHaveClass(/active/);
+
+  // A press that never crosses the drag threshold must remain an ordinary tab click.
+  await page.locator('.tab[data-tab="events"]').click();
+  await expect(page.locator('.tab[data-tab="events"]')).toHaveClass(/active/);
+  await page.locator('.tab[data-tab="node"]').click();
+  await expect(page.locator('.tab[data-tab="node"]')).toHaveClass(/active/);
+
+  const pressedNodeBox = await page.locator('.tab[data-tab="node"]').boundingBox();
+  if (!pressedNodeBox) throw new Error("Workspace tab press geometry is unavailable");
+  await page.mouse.move(pressedNodeBox.x + pressedNodeBox.width / 2, pressedNodeBox.y + pressedNodeBox.height / 2);
+  await page.mouse.down();
+  await expect(page.locator('.tab[data-tab="node"]')).toHaveCSS("transform", "none");
+  await page.mouse.up();
+
+  const reorderSave = page.waitForResponse((candidate) => (
+    candidate.url().endsWith("/api/editor-settings")
+    && candidate.request().method() === "PUT"
+    && candidate.ok()
+  ));
+  await dragWorkspaceTab(page, "graph", "events", "before", async ({ pointerX, grabOffset }) => {
+    const draggedTab = page.locator('#tabbar .tab[data-tab="graph"]');
+    await expect(page.locator("#tabFocusIndicator")).toHaveCSS("opacity", "0");
+    await expect.poll(tabIds).toEqual(defaultOrder);
+    await expect(draggedTab).toHaveCSS("transition-duration", "0s");
+    const draggedBox = await draggedTab.boundingBox();
+    expect(Math.abs((draggedBox?.x || 0) + grabOffset - pointerX)).toBeLessThan(1.5);
+    const tabbarBox = await page.locator("#tabbar").boundingBox();
+    if (!tabbarBox) throw new Error("Workspace tab bar geometry is unavailable");
+    await page.mouse.move(
+      pointerX,
+      tabbarBox.y + 1,
+      { steps: 4 },
+    );
+    await page.waitForTimeout(50);
+    const constrainedDraggedBox = await draggedTab.boundingBox();
+    expect(constrainedDraggedBox?.y).toBeGreaterThanOrEqual(tabbarBox.y);
+    expect((constrainedDraggedBox?.y || 0) + (constrainedDraggedBox?.height || 0))
+      .toBeLessThanOrEqual(tabbarBox.y + tabbarBox.height);
+    await expect(page.locator("#tabbar .tab")).toHaveCount(defaultOrder.length);
+  }, 0.9);
+  await reorderSave;
+  const reordered = ["node", "graph", "events", "options", "content", "stats", "validation"];
+  await expect.poll(tabIds).toEqual(reordered);
+  await expect(page.locator('.tab[data-tab="node"]')).toHaveClass(/active/);
+  await expect(page.locator(".list-reorder-preview.is-workspace-tab-preview")).toHaveCount(0);
+  await expect.poll(() => page.locator("#tabbar .tab").evaluateAll((tabs) => {
+    const barRect = tabs[0]?.parentElement?.getBoundingClientRect();
+    if (!barRect) return false;
+    const firstRect = tabs[0].getBoundingClientRect();
+    return tabs.every((tab) => {
+      const rect = tab.getBoundingClientRect();
+      return getComputedStyle(tab).transform === "none"
+        && Math.abs(rect.top - firstRect.top) < 0.5
+        && Math.abs(rect.height - firstRect.height) < 0.5
+        && rect.left >= barRect.left
+        && rect.right <= barRect.right;
+    });
+  })).toBe(true);
+  await expect.poll(() => page.locator("#tabFocusIndicator").evaluate((indicator) => {
+    const activeTab = indicator.parentElement?.querySelector(".tab.active");
+    return activeTab
+      ? [indicator.offsetLeft, indicator.offsetWidth, activeTab.offsetLeft, activeTab.offsetWidth]
+      : [];
+  })).toEqual(await page.locator('.tab[data-tab="node"]').evaluate((activeTab) => (
+    [activeTab.offsetLeft, activeTab.offsetWidth, activeTab.offsetLeft, activeTab.offsetWidth]
+  )));
+
+  await page.reload();
+  await expect(page.getByRole("navigation", { name: /編輯器分頁|Editor tabs/ })).toBeVisible();
+  await expect.poll(tabIds).toEqual(reordered);
+
+  const restoreSave = page.waitForResponse((candidate) => (
+    candidate.url().endsWith("/api/editor-settings")
+    && candidate.request().method() === "PUT"
+    && candidate.ok()
+  ));
+  await dragWorkspaceTab(page, "graph", "stats", "after", null, 0.1);
+  await restoreSave;
+  await expect.poll(tabIds).toEqual(defaultOrder);
+
+  const activeMoveSave = page.waitForResponse((candidate) => (
+    candidate.url().endsWith("/api/editor-settings")
+    && candidate.request().method() === "PUT"
+    && candidate.ok()
+  ));
+  await dragWorkspaceTab(page, "node", "events", "after", null, 0.9);
+  await expect(page.locator("#tabbar")).toHaveClass(/is-workspace-tab-settling/);
+  await expect(page.locator("#tabFocusIndicator")).toHaveCSS("opacity", "0");
+  await activeMoveSave;
+  await expect(page.locator("#tabbar")).not.toHaveClass(/is-workspace-tab-settling/);
+  const releaseOffsets = await sampleWorkspaceIndicatorOffsets(page);
+  expect(releaseOffsets.length).toBeGreaterThan(0);
+  expect(releaseOffsets.every((offset) => (
+    Math.abs(offset.left) < 0.5
+    && Math.abs(offset.right) < 0.5
+    && Math.abs(offset.top) < 0.5
+    && Math.abs(offset.bottom) < 0.5
+  ))).toBe(true);
+  await expect.poll(tabIds).toEqual(["events", "node", "options", "content", "stats", "graph", "validation"]);
+
+  const activeRestoreSave = page.waitForResponse((candidate) => (
+    candidate.url().endsWith("/api/editor-settings")
+    && candidate.request().method() === "PUT"
+    && candidate.ok()
+  ));
+  await dragWorkspaceTab(page, "node", "events", "before", null, 0.1);
+  await activeRestoreSave;
+  await expect.poll(tabIds).toEqual(defaultOrder);
+
+  const fallbackReleaseSave = page.waitForResponse((candidate) => (
+    candidate.url().endsWith("/api/editor-settings")
+    && candidate.request().method() === "PUT"
+    && candidate.ok()
+  ));
+  await dragWorkspaceTab(page, "validation", "graph", "before", async () => {
+    await page.evaluate(() => {
+      window.dispatchEvent(new MouseEvent("mouseup", {
+        bubbles: true,
+        button: 0,
+        buttons: 0,
+      }));
+    });
+    await expect(page.locator(".list-reorder-preview")).toHaveCount(0);
+    await expect(page.locator('#tabbar .tab[data-tab="validation"]')).toHaveCSS("visibility", "visible");
+  }, 0.8);
+  await fallbackReleaseSave;
+  await expect.poll(tabIds).toEqual(["node", "events", "options", "content", "stats", "validation", "graph"]);
+
+  const fallbackRestoreSave = page.waitForResponse((candidate) => (
+    candidate.url().endsWith("/api/editor-settings")
+    && candidate.request().method() === "PUT"
+    && candidate.ok()
+  ));
+  await dragWorkspaceTab(page, "validation", "graph", "after");
+  await fallbackRestoreSave;
+  await expect.poll(tabIds).toEqual(defaultOrder);
+  await expect(page.locator("#tabbar .tab")).toHaveCount(defaultOrder.length);
+  await expect.poll(() => page.locator("#tabbar .tab").evaluateAll((tabs) => tabs.every((tab) => {
+    const rect = tab.getBoundingClientRect();
+    const style = getComputedStyle(tab);
+    return style.display !== "none"
+      && style.visibility === "visible"
+      && Number.parseFloat(style.opacity) > 0
+      && rect.width > 0
+      && rect.height > 0;
+  }))).toBe(true);
+});
+
 test("interaction details expose keyboard focus and honor reduced motion", async ({ page }) => {
   const browserErrors = [];
   page.on("console", (message) => {
@@ -1876,15 +2340,22 @@ test("interaction details expose keyboard focus and honor reduced motion", async
   const pressedTabState = await page.evaluate(() => {
     const indicator = document.querySelector("#tabFocusIndicator");
     const target = document.querySelector('.tab[data-tab="events"]');
+    const tabbar = document.querySelector("#tabbar");
+    const targetRect = target.getBoundingClientRect();
+    const tabbarRect = tabbar.getBoundingClientRect();
+    const tabbarStyle = getComputedStyle(tabbar);
     return {
       activeTab: document.querySelector(".tab.active")?.dataset.tab,
       indicatorLeft: Number.parseFloat(indicator.style.left),
       pointerNavigation: document.querySelector("#tabbar").classList.contains("is-pointer-navigation"),
-      targetLeft: target.offsetLeft,
+      targetLeft: targetRect.left
+        - tabbarRect.left
+        - (Number.parseFloat(tabbarStyle.borderLeftWidth) || 0)
+        + tabbar.scrollLeft,
     };
   });
   expect(pressedTabState.activeTab).toBe("node");
-  expect(pressedTabState.indicatorLeft).toBe(pressedTabState.targetLeft);
+  expect(pressedTabState.indicatorLeft).toBeCloseTo(pressedTabState.targetLeft, 3);
   expect(pressedTabState.pointerNavigation).toBe(true);
   await page.mouse.up();
   await expect(eventTab).toHaveClass(/active/);

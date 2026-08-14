@@ -45,6 +45,27 @@ test("moving out of a two-item group dissolves the singleton", () => {
   });
 });
 
+test("semantic groups can retain a singleton when an item moves out", () => {
+  const items = [
+    { id: "a", group: "and_1" },
+    { id: "b", group: "and_1" },
+    { id: "c", group: "__or__" },
+  ];
+  assert.deepEqual(SceneGroupDrag.planReorder(items, {
+    sourceId: "b",
+    targetId: "c",
+    targetGroup: "__or__",
+    position: "before",
+    defaultGroup: "__or__",
+    dissolveSingleton: false,
+  }), {
+    assignments: { b: "__or__" },
+    destination: "__or__",
+    createdGroup: null,
+    order: ["a", "b", "c"],
+  });
+});
+
 test("dropping a grouped item onto an ungrouped item creates a new group and dissolves its source", () => {
   const items = [
     { id: "a", group: "Story" },

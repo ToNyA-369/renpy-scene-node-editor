@@ -41,12 +41,23 @@
     return 0;
   }
 
+  function horizontalDragGeometry(pointerX, grabOffset, width, minimumX, maximumRight) {
+    const safeWidth = Math.max(0, Number(width) || 0);
+    const minimum = Number(minimumX) || 0;
+    const maximum = Math.max(minimum, (Number(maximumRight) || minimum) - safeWidth);
+    const desiredStart = (Number(pointerX) || 0) - (Number(grabOffset) || 0);
+    const start = Math.min(maximum, Math.max(minimum, desiredStart));
+    return { start, center: start + safeWidth / 2, end: start + safeWidth };
+  }
+
   function createController({
     root,
     itemSelector,
     handleSelector = null,
     ignoreSelector = null,
+    axis = "vertical",
     getItemId = (element) => element.dataset.reorderId,
+    onMove = () => {},
     onDrop,
     onError = () => {},
   }) {
@@ -67,6 +78,7 @@
     let previousOverflowAnchor = null;
     let previousUserSelect = null;
     let suppressClickUntil = 0;
+    let finishing = false;
 
     const closest = (target, selector) => {
       const element = target?.closest?.(selector);
@@ -99,11 +111,15 @@
         animation.addEventListener("cancel", clear, { once: true });
       });
     };
+    const horizontal = axis === "horizontal";
     const findScrollContainer = () => {
-      let element = root.parentElement;
+      let element = horizontal ? root : root.parentElement;
       while (element && element !== document.body) {
         const style = window.getComputedStyle(element);
-        if (/(auto|scroll)/.test(style.overflowY) && element.scrollHeight > element.clientHeight + 1) return element;
+        const overflow = horizontal ? style.overflowX : style.overflowY;
+        const scrollSize = horizontal ? element.scrollWidth : element.scrollHeight;
+        const clientSize = horizontal ? element.clientWidth : element.clientHeight;
+        if (/(auto|scroll)/.test(overflow) && scrollSize > clientSize + 1) return element;
         element = element.parentElement;
       }
       return document.scrollingElement || document.documentElement;
@@ -163,6 +179,19 @@
     };
     const updatePreview = (event) => {
       if (!preview || !press) return;
+      if (horizontal) {
+        const rootRect = root.getBoundingClientRect();
+        const geometry = horizontalDragGeometry(
+          event.clientX,
+          press.grabX,
+          press.previewWidth,
+          rootRect.left + press.previewStartInset,
+          rootRect.right - press.previewEndInset,
+        );
+        const y = rootRect.top + press.previewCrossOffset;
+        preview.style.transform = `translate3d(${geometry.start}px, ${y}px, 0)`;
+        return;
+      }
       preview.style.transform = `translate3d(${event.clientX - press.grabX}px, ${event.clientY - press.grabY}px, 0)`;
     };
     const restoreSource = () => {
@@ -173,6 +202,7 @@
         : null;
       press.originalParent.insertBefore(source, next);
       animateReflow(before);
+      onMove({ source, orderedIds: items().map((item) => String(getItemId(item))) });
     };
     const setPlacement = (nextPlacement) => {
       if (!source || !nextPlacement) return;
@@ -188,31 +218,61 @@
       root.insertBefore(source, normalizedBefore);
       placement = nextPlacement;
       animateReflow(before);
+      onMove({ source, orderedIds: items().map((item) => String(getItemId(item))) });
     };
     const resolvePlacement = (point) => {
       const rootRect = root.getBoundingClientRect();
-      if (
-        point.clientX < rootRect.left || point.clientX > rootRect.right
-        || point.clientY < rootRect.top - 12 || point.clientY > rootRect.bottom + 28
-      ) return null;
+      const dragGeometry = horizontal
+        ? horizontalDragGeometry(
+          point.clientX,
+          press.grabX,
+          press.previewWidth,
+          rootRect.left + press.previewStartInset,
+          rootRect.right - press.previewEndInset,
+        )
+        : null;
+      const primary = horizontal ? dragGeometry.center : point.clientY;
+      const cross = horizontal
+        ? rootRect.top + press.previewCrossOffset + press.previewHeight / 2
+        : point.clientX;
+      const primaryStart = horizontal ? rootRect.left : rootRect.top;
+      const primaryEnd = horizontal ? rootRect.right : rootRect.bottom;
+      const crossStart = horizontal ? rootRect.top : rootRect.left;
+      const crossEnd = horizontal ? rootRect.bottom : rootRect.right;
+      if (primary < primaryStart - 12 || primary > primaryEnd + 28 || cross < crossStart || cross > crossEnd) return null;
       const candidates = movableItems();
       if (!candidates.length) return { target: null, targetId: null, position: "after" };
+      if (horizontal) {
+        const trackStart = rootRect.left + press.previewStartInset;
+        const trackEnd = rootRect.right - press.previewEndInset;
+        if (dragGeometry.start <= trackStart + 0.5) {
+          const first = candidates[0];
+          return { target: first, targetId: getItemId(first), position: "before" };
+        }
+        if (dragGeometry.end >= trackEnd - 0.5) {
+          const last = candidates[candidates.length - 1];
+          return { target: last, targetId: getItemId(last), position: "after" };
+        }
+      }
       const currentTarget = placement?.target;
       if (currentTarget?.isConnected) {
         const rect = currentTarget.getBoundingClientRect();
         const position = insertionPosition(
-          point.clientY,
-          rect,
+          primary,
+          horizontal ? { top: rect.left, height: rect.width } : rect,
           placement.position,
         );
-        const deadBand = Math.min(18, Math.max(7, rect.height * 0.2));
-        if (point.clientY >= rect.top - deadBand && point.clientY <= rect.bottom + deadBand) {
+        const targetStart = horizontal ? rect.left : rect.top;
+        const targetEnd = horizontal ? rect.right : rect.bottom;
+        const targetSize = horizontal ? rect.width : rect.height;
+        const deadBand = Math.min(18, Math.max(7, targetSize * 0.2));
+        if (primary >= targetStart - deadBand && primary <= targetEnd + deadBand) {
           return { target: currentTarget, targetId: getItemId(currentTarget), position };
         }
       }
       const target = candidates.find((candidate) => {
         const rect = candidate.getBoundingClientRect();
-        return point.clientY < rect.top + rect.height / 2;
+        return primary < (horizontal ? rect.left + rect.width / 2 : rect.top + rect.height / 2);
       });
       if (target) return { target, targetId: getItemId(target), position: "before" };
       const last = candidates[candidates.length - 1];
@@ -226,11 +286,14 @@
       else placement = null;
       if (scrollContainer) {
         const rect = scrollContainer === document.scrollingElement || scrollContainer === document.documentElement
-          ? { top: 0, bottom: window.innerHeight }
+          ? (horizontal ? { left: 0, right: window.innerWidth } : { top: 0, bottom: window.innerHeight })
           : scrollContainer.getBoundingClientRect();
-        const delta = edgeScrollDelta(pendingPoint.clientY, rect.top, rect.bottom);
+        const delta = horizontal
+          ? edgeScrollDelta(pendingPoint.clientX, rect.left, rect.right)
+          : edgeScrollDelta(pendingPoint.clientY, rect.top, rect.bottom);
         if (delta) {
-          scrollContainer.scrollTop += delta;
+          if (horizontal) scrollContainer.scrollLeft += delta;
+          else scrollContainer.scrollTop += delta;
           layoutFrame = window.requestAnimationFrame(processPoint);
         }
       }
@@ -245,8 +308,15 @@
     const startDrag = (event) => {
       source = press.source;
       const rect = source.getBoundingClientRect();
+      const rootRect = root.getBoundingClientRect();
+      const rootStyle = window.getComputedStyle(root);
       press.grabX = press.startX - rect.left;
       press.grabY = press.startY - rect.top;
+      press.previewWidth = rect.width;
+      press.previewHeight = rect.height;
+      press.previewCrossOffset = rect.top - rootRect.top;
+      press.previewStartInset = Number.parseFloat(rootStyle.paddingLeft) || 0;
+      press.previewEndInset = Number.parseFloat(rootStyle.paddingRight) || 0;
       previousUserSelect = document.documentElement.style.userSelect;
       document.documentElement.style.userSelect = "none";
       window.getSelection?.()?.removeAllRanges();
@@ -272,14 +342,15 @@
       scrollContainer = null;
       previousOverflowAnchor = null;
     };
-    const finish = async (event, cancelled = false) => {
-      if (!press || event.pointerId !== press.pointerId) return;
+    const finishActive = async (cancelled = false) => {
+      if (!press || finishing) return;
       if (layoutFrame) window.cancelAnimationFrame(layoutFrame);
       layoutFrame = 0;
       if (!press.dragging) {
         press = null;
         return;
       }
+      finishing = true;
       const completedPress = press;
       completedPress.dragging = false;
       const completedSource = source;
@@ -308,10 +379,19 @@
         source = null;
         placement = null;
         pendingPoint = null;
+        finishing = false;
       }
     };
+    const finishPointer = (event, cancelled = false) => {
+      if (!press || event.pointerId !== press.pointerId) return;
+      void finishActive(cancelled);
+    };
+    const cancelForInterruption = () => {
+      if (press?.dragging) void finishActive(true);
+      else press = null;
+    };
     const pointerDown = (event) => {
-      if (event.button !== 0 || !event.isPrimary) return;
+      if (finishing || event.button !== 0 || !event.isPrimary) return;
       if (ignoreSelector && event.target.closest?.(ignoreSelector)) return;
       const item = closest(event.target, itemSelector);
       if (!item) return;
@@ -346,8 +426,16 @@
 
     root.addEventListener("pointerdown", pointerDown, { signal });
     window.addEventListener("pointermove", pointerMove, { capture: true, signal });
-    window.addEventListener("pointerup", (event) => finish(event), { capture: true, signal });
-    window.addEventListener("pointercancel", (event) => finish(event, true), { capture: true, signal });
+    window.addEventListener("pointerup", (event) => finishPointer(event), { capture: true, signal });
+    window.addEventListener("pointercancel", (event) => finishPointer(event, true), { capture: true, signal });
+    window.addEventListener("mouseup", (event) => {
+      if (event.button === 0 && press?.dragging) void finishActive(false);
+    }, { capture: true, signal });
+    window.addEventListener("blur", cancelForInterruption, { signal });
+    window.addEventListener("pagehide", cancelForInterruption, { signal });
+    document.addEventListener("visibilitychange", () => {
+      if (document.hidden) cancelForInterruption();
+    }, { signal });
     root.addEventListener("click", (event) => {
       if (performance.now() > suppressClickUntil) return;
       event.preventDefault();
@@ -362,9 +450,10 @@
         clearVisuals();
         press = null;
         source = null;
+        finishing = false;
       },
     };
   }
 
-  return Object.freeze({ createController, edgeScrollDelta, insertionPosition, reorderIds });
+  return Object.freeze({ createController, edgeScrollDelta, horizontalDragGeometry, insertionPosition, reorderIds });
 });

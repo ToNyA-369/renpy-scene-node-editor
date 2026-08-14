@@ -1673,6 +1673,98 @@ textarea:disabled {
   grid-template-columns: 122px minmax(120px, 1.3fr) 110px minmax(100px, 1fr) 34px;
 }
 
+.condition-logic-flow {
+  gap: 0;
+  padding: 0 10px;
+}
+
+.condition-drop-tail {
+  min-height: 0;
+  height: 0;
+  transition: min-height var(--motion-fast) var(--ease-out);
+}
+
+.condition-logic-flow.is-group-dragging .condition-drop-tail {
+  min-height: 42px;
+}
+
+.condition-logic-block {
+  position: relative;
+}
+
+.condition-logic-block + .condition-logic-block {
+  margin-top: 44px;
+}
+
+.condition-logic-block + .condition-logic-block::before {
+  position: absolute;
+  top: -33px;
+  left: 50%;
+  z-index: 2;
+  padding: 2px 9px;
+  color: var(--muted);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  content: "OR";
+  font-size: 10px;
+  font-weight: 760;
+  letter-spacing: 0.12em;
+  line-height: 16px;
+  transform: translateX(-50%);
+}
+
+.condition-and-group {
+  padding: 12px;
+  background: color-mix(in srgb, var(--surface-soft) 68%, var(--surface));
+  border: 1px solid var(--line);
+  border-radius: calc(var(--radius) + 3px);
+  transition: border-color var(--motion-fast) ease, box-shadow var(--motion-fast) ease, transform var(--motion-fast) ease;
+}
+
+.condition-and-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 22px;
+  margin: 0 2px 9px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.condition-and-header strong {
+  padding: 2px 8px;
+  color: var(--accent-strong);
+  background: var(--accent-soft);
+  border-radius: 999px;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+}
+
+.condition-group-items {
+  display: grid;
+  gap: 8px;
+}
+
+.condition-and-group.is-group-drop-ready,
+.condition-and-group.is-group-preview-open {
+  border-color: color-mix(in srgb, var(--accent) 68%, var(--line));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 12%, transparent);
+  transform: scale(1.004);
+}
+
+.condition-row[data-condition-clause=""].is-group-ready {
+  margin-bottom: 48px;
+}
+
+.condition-row[data-condition-clause=""].is-group-ready::after {
+  inset: -6px -6px -48px;
+  background: var(--surface-soft);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 14%, transparent);
+}
+
 .repeat-row.weight-row {
   grid-template-columns: minmax(140px, 1fr) 130px 34px;
 }
@@ -6111,6 +6203,29 @@ textarea:hover {
   border-radius: 12px;
 }
 
+input.select-choice-trigger {
+  display: block;
+  padding-right: 34px;
+  overflow: hidden;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 680;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.select-choice-picker::after {
+  position: absolute;
+  top: 50%;
+  right: 13px;
+  content: "⌄";
+  color: var(--muted);
+  pointer-events: none;
+  transform: translateY(-54%);
+}
+
 .content-choice-trigger > span {
   display: grid;
   min-width: 0;
@@ -6705,6 +6820,7 @@ textarea:hover {
 
 @media (prefers-reduced-motion: reduce) {
   .event-group,
+  .condition-and-group,
   .event-group-items-shell,
   .event-pool-flow,
   .stat-group-card,
@@ -7272,8 +7388,51 @@ body *::-webkit-scrollbar {
 .event-primary-section .select-choice-trigger {
   padding-inline: 16px;
   border-radius: 15px;
-  font-size: 17px;
+  font-size: 12px;
+  font-weight: 680;
   letter-spacing: 0.05em;
+}
+
+.tabbar .tab[data-reorder-id] {
+  cursor: grab;
+  touch-action: pan-y;
+}
+
+.tabbar .tab[data-reorder-id]:active {
+  transform: none;
+}
+
+.tabbar .tab[data-reorder-id][aria-grabbed="true"] {
+  cursor: grabbing;
+}
+
+.tabbar:is(.is-workspace-tab-reordering, .is-workspace-tab-settling) .tab-focus-indicator.ready {
+  opacity: 0;
+  transition: none;
+}
+
+.tabbar.is-workspace-tab-reordering .tab:not(.is-workspace-tab-dragging) {
+  transition: transform 115ms cubic-bezier(0.2, 0.82, 0.2, 1);
+  will-change: transform;
+}
+
+.tabbar .tab.is-workspace-tab-dragging {
+  z-index: 3;
+  background: var(--surface-soft);
+  border-color: rgba(92, 114, 101, 0.24);
+  box-shadow: 0 8px 18px rgba(70, 70, 70, 0.14);
+  transition: none;
+  will-change: transform;
+}
+
+.tabbar:is(.is-workspace-tab-reordering, .is-workspace-tab-settling) .tab.active {
+  background: var(--accent-soft);
+  border: 1px solid rgba(92, 114, 101, 0.5);
+}
+
+:where(.condition-row, .effect-row, .weight-row):focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
 }
 
 #conditionList,
@@ -7654,7 +7813,25 @@ body *::-webkit-scrollbar {
 @media (prefers-reduced-motion: reduce) {
   #conditionList .repeat-row,
   #effectList .repeat-row,
-  .weighted-choice-table .weight-row {
+  .weighted-choice-table .weight-row,
+  .condition-drop-tail {
     transition: none;
   }
+}
+
+/* Conditions inside an AND group share the group surface instead of nesting cards. */
+#conditionList .condition-and-group .condition-row,
+#conditionList .condition-and-group .condition-row:last-child {
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+}
+
+#conditionList .condition-and-group .condition-row:hover {
+  border-color: var(--line-strong);
+  box-shadow: none;
+}
+
+#conditionList .condition-and-group .condition-row[aria-grabbed="true"] {
+  border-color: var(--accent);
 }

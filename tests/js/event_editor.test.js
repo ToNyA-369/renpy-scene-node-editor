@@ -4,6 +4,7 @@ const assert = require("node:assert/strict");
 const test = require("node:test");
 
 const SceneEventEditor = require("../../EDITOR/static/js/workspaces/event_editor.js");
+const SceneGroupDrag = require("../../EDITOR/static/js/ui/group_drag.js");
 const stateRuleContract = require("../../EDITOR/static/js/core/state_rule_contract.js");
 
 function escapeHtml(value) {
@@ -43,8 +44,9 @@ function createEditor({ stats = [{ id: "money", name: "Money" }], effectTypes } 
   });
 }
 
-function fakeRow(values) {
+function fakeRow(values, clause = "") {
   return {
+    dataset: { conditionClause: clause },
     querySelector(selector) {
       const name = selector.match(/name="([^"]+)"/)?.[1];
       if (!Object.hasOwn(values, name)) throw new Error(`Unexpected field: ${name}`);
@@ -115,6 +117,56 @@ test("Event pool blocks keep loose items at their ordered positions", () => {
   ]);
 });
 
+test("legacy Conditions become one AND clause while later additions follow branch intent", () => {
+  const legacy = [
+    { type: "stat", id: "money", op: ">=", value: 10 },
+    { type: "memory", bank: "memory", id: "member", op: "has" },
+  ];
+  const normalized = SceneEventEditor.normalizeConditions(legacy);
+  assert.deepEqual(normalized.map((item) => item.clause), ["and_1", "and_1"]);
+  assert.equal(SceneEventEditor.conditionBlocks(normalized)[0].type, "group");
+
+  const addedToDefault = SceneEventEditor.appendCondition(normalized, { type: "stat", id: "phase" });
+  assert.equal(addedToDefault[2].clause, "and_1");
+  const withOr = SceneEventEditor.applyConditionPlan(addedToDefault, {
+    assignments: { 2: SceneEventEditor.CONDITION_OR_GROUP },
+    order: ["0", "1", "2"],
+  });
+  const addedAsOr = SceneEventEditor.appendCondition(withOr, { type: "stat", id: "hour" });
+  assert.equal(addedAsOr[2].clause, null);
+  assert.equal(addedAsOr[3].clause, null);
+});
+
+test("Condition clause plans preserve a one-item AND group", () => {
+  const conditions = [
+    { type: "stat", id: "a", clause: "and_1" },
+    { type: "stat", id: "b", clause: "and_1" },
+    { type: "stat", id: "c", clause: null },
+  ];
+  const moved = SceneEventEditor.applyConditionPlan(conditions, {
+    assignments: { 1: SceneEventEditor.CONDITION_OR_GROUP },
+    order: ["0", "1", "2"],
+  });
+  assert.equal(moved[0].clause, "and_1");
+  assert.equal(moved[1].clause, null);
+});
+
+test("a long dwell inside the same AND group still reorders", () => {
+  const conditions = [
+    { type: "stat", id: "a", clause: "and_1" },
+    { type: "stat", id: "b", clause: "and_1" },
+  ];
+  const plan = SceneEventEditor.planConditionDrop(SceneGroupDrag, conditions, {
+    mode: "group",
+    sourceId: "1",
+    targetId: "0",
+    targetGroup: SceneEventEditor.conditionDragGroup("and_1"),
+    position: "before",
+  });
+  assert.deepEqual(plan.order, ["1", "0"]);
+  assert.deepEqual(plan.assignments, {});
+});
+
 test("Condition and Effect DOM values map to the stable Event JSON contract", () => {
   const editor = createEditor();
   const conditions = [
@@ -140,8 +192,8 @@ test("Condition and Effect DOM values map to the stable Event JSON contract", ()
 
   assert.deepEqual(editor.readRules(form), {
     conditions: [
-      { type: "stat", id: "money", op: ">=", value: 12 },
-      { type: "memory", id: "visited", op: "not_has", bank: "daily" },
+      { type: "stat", id: "money", op: ">=", value: 12, clause: null },
+      { type: "memory", id: "visited", op: "not_has", bank: "daily", clause: null },
     ],
     effects: [
       { type: "stat", op: "+", id: "money", value: 3 },
@@ -155,7 +207,7 @@ test("rule type changes use centralized defaults and fail safely without a Stat"
   const draft = { Conditions: [{ type: "memory" }], Effects: [{ type: "stat" }] };
   const editor = createEditor();
   assert.equal(editor.replaceRuleType(draft, "condition", 0, "stat"), true);
-  assert.deepEqual(draft.Conditions[0], { type: "stat", id: "money", op: ">=", value: 0 });
+  assert.deepEqual(draft.Conditions[0], { type: "stat", id: "money", op: ">=", value: 0, clause: null });
   assert.equal(editor.replaceRuleType(draft, "effect", 0, "memory"), true);
   assert.deepEqual(draft.Effects[0], { type: "memory", bank: "memory", id: "新標籤", op: "add" });
   assert.equal(editor.replaceRuleType(draft, "effect", 0, "option"), true);
