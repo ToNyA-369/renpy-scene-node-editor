@@ -50,6 +50,7 @@
     position = "after",
     newGroupName = "New Group",
     defaultGroup = "Normal",
+    dissolveSingleton = true,
   }) {
     const source = (items || []).find((item) => item.id === sourceId);
     const target = targetId ? items.find((item) => item.id === targetId) : null;
@@ -73,7 +74,7 @@
     if (!destination || destination === sourceGroup && !createdGroup) return null;
     assignments[source.id] = destination;
 
-    if (sourceGroup !== defaultGroup && sourceGroup !== destination) {
+    if (dissolveSingleton && sourceGroup !== defaultGroup && sourceGroup !== destination) {
       const remaining = items.filter((item) => (
         item.id !== source.id
         && normalizeGroup(assignments[item.id] ?? item.group, defaultGroup) === sourceGroup
@@ -111,6 +112,7 @@
     targetGroup = null,
     position = "before",
     defaultGroup = "Normal",
+    dissolveSingleton = true,
   }) {
     const source = (items || []).find((item) => item.id === sourceId);
     const target = targetId ? items.find((item) => item.id === targetId) : null;
@@ -120,7 +122,7 @@
       ? normalizeGroup(target?.group, defaultGroup)
       : normalizeGroup(targetGroup, defaultGroup);
     const assignments = sourceGroup === destination ? {} : { [source.id]: destination };
-    if (sourceGroup !== defaultGroup && sourceGroup !== destination) {
+    if (dissolveSingleton && sourceGroup !== defaultGroup && sourceGroup !== destination) {
       const remaining = items.filter((item) => (
         item.id !== source.id && normalizeGroup(item.group, defaultGroup) === sourceGroup
       ));

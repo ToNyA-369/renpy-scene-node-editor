@@ -177,7 +177,7 @@ Runtime 以獨立 `scene_enabled_options` 保存受控目標，不污染 Stats�
 - Editor 不提供 Screen 文件工作區或 CRUD API；Installer 也不管理創作者的 `gui.rpy`、`screens.rpy` 與其他介面文件。
 - 中文顯示名稱與穩定技術 ID 映射。
 - Event Conditions、Effects、Content、Next Node 與權重表單。
-- Event Conditions／Effects／Content 權重／Next Node 權重都以獨立卡片呈現，並共用無群組 Pointer 排序；Conditions／Effects 直接保存陣列順序，權重 object 只保存 Editor 顯示順序而不改變機率。
+- Event Conditions 使用一層 OR-of-AND 語意群組：同一非空 `clause` 是 AND，不同 clause 與 `null` 獨立條件是 OR；舊平面 Conditions 仍按全 AND 讀取並在保存時正規化至 `and_1`。群組內外可直接拖移，單成員 AND 群組保留；只有單一 AND 群組時新增會加入該組，已有 OR 分支後新增為獨立條件。Effects／Content 權重／Next Node 權重維持無群組 Pointer 排序；Effects 直接保存並依陣列順序執行，權重 object 只保存 Editor 顯示順序而不改變機率。
 - Content 文件與 Textbox Profile 管理清單共用無群組 Pointer 排序。Scene Node 選單則組合 `js/ui/group_drag.js`，以 Node.json 的可選 `Group` 與 `Order` 保存停留成組、跨框移入／移出及整組排序，並由 `PUT /api/node-groups` 原子寫入；Global Node 固定在群組流之外。共用群組意圖停留時間為 500ms，未群組候選會向下展開 48px 的真實預留空間；Event／Node 群組內排序後以暫時 pinned-open 狀態保持展開至 pointerleave，整組預覽則以 220ms 從目前高度縮合。Node.json 的可選 `Content Order` 與 Profile 的可選 `Order` 同樣是 Editor-only metadata。缺值時保持既有穩定順序，首次拖移後才正規化，不得改變 ROOT、Stack、圖面布局或 Runtime。
 - 刪除 Content 權重列時，最後一列必須正規化為 `null`，不可保存空 object；空 object 會被 API 視為不合法權重表並造成正常刪除顯示 autosave 錯誤。
 - Event Trigger 的 Options 來源在 UI 顯示為 `Option`，JSON／Runtime 契約仍是 `Action:<id>`；Auto 顯示為 On Enter／On Node／On Exit，保存為 `Auto:Enter`／`Auto:Node`／`Auto:Exit`。
@@ -193,6 +193,7 @@ Runtime 以獨立 `scene_enabled_options` 保存受控目標，不污染 Stats�
 - Options 拖曳把手式表單／畫布切換，以及畫布拖曳、縮放、格線與吸附。
 - 自動儲存採遞增 revision；過期請求不得覆蓋較新的草稿、狀態或儲存提示。切換節點、分頁或文件前先完成目前 revision，刪除則先取消並等待舊寫入，避免刪除後的競態與假失敗。
 - 自動儲存排程與競態控制已抽成可獨立測試的 `autosave_coordinator.js`；Node 測試覆蓋連續編輯、切換前 flush、刪除前 cancel-and-wait、網路重試與失敗阻擋。
+- Editor Undo 固定以 Cmd／Ctrl + Z 觸發，不提供工具列圖示；文字輸入、textarea、contenteditable 與 Monaco 保留瀏覽器／編輯器原生文字復原。其他成功的專案寫入由 Editor Server 記錄為最多 100 筆、僅限本次執行期間的 LIFO 檔案交易，`POST /api/undo` 會原子恢復最新一步後由前端刷新目前工作區。建立／刪除 Node、Event、Content、Textbox Profile、多檔 State 與排序／群組寫入都使用同一交易邊界；失敗交易必須立即回滾且不可進入歷史。Editor settings 不屬於專案內容歷史。Undo 前會強制完成目前 pending snapshot，即使 autosave 已停用也只形成「寫入目前值 → 立即恢復前值」的淨復原結果；flush 或 restore 失敗時不得更新畫面。
 - 前端已開始漸進式模組化：API Client、Editor Settings、Event Trigger／End up 契約、Event 規則與權重表單、Event／Stats 排序流區塊模型、共用 Pointer 即時插入與停留群組控制器、無群組清單排序控制器、共用階層下拉選單、Content 程式碼提示轉換及關聯圖純資料模型都有獨立模組與 Node 測試；`app.js` 保留組裝、渲染與跨模組協調。
 - Content 的 Monaco／Shiki 瀏覽器資產由 `tools/build_editor_assets.mjs` 依鎖定 npm 版本與 `tools/editor_assets/renpy-language/` 的官方 grammar／snippets 產生至 `EDITOR/static/vendor/`。安裝包只帶生成資產，不需要 Node 或網路；`python3 tools/verify.py` 會檢查生成物沒有過期。進階編輯器透過隱藏 textarea 的既有 `input`／autosave 契約接線，載入失敗必須回退到可用 textarea，不可改變 Content API 或 `.rpy` 格式。第三方聲明位於 `EDITOR/THIRD_PARTY_NOTICES.md`。
 - Condition／Effect 類型、操作與預設資料形狀集中於 `state_rule_contract.js`；跨層測試會直接比較前端 registry、Editor API registry 與 Runtime 分支，新增操作不得只修改表單。
@@ -249,7 +250,7 @@ Runtime 以獨立 `scene_enabled_options` 保存受控目標，不污染 Stats�
 ### 7.2 整體布局
 
 - 上方左側顯示目前節點名稱與儲存狀態。
-- 上方中央是同一水平的精簡功能 Bar：節點、事件、選項、演出、狀態、關聯圖、檢查。
+- 上方中央是同一水平的精簡功能 Bar：節點、事件、選項、演出、狀態、關聯圖、檢查；創作者可直接橫向拖移分頁改變顯示順序，順序保存於 Editor settings，固定的 Cmd／Ctrl + 1…7 仍指向原本功能，上一個／下一個功能區則依目前視覺順序巡覽。
 - 點擊節點名稱會由左側滑入節點抽屜。
 - 節點抽屜包含新增、搜尋、節點切換、遊戲名稱與設定入口。
 - Event 使用左側 Event Pool 加主要編輯區。
@@ -260,6 +261,8 @@ Runtime 以獨立 `scene_enabled_options` 保存受控目標，不污染 Stats�
 
 ```text
 Cmd + Shift + Left / Right  切換上一個／下一個功能區
+Cmd + Z                  返回上一步（文字欄位內沿用原生文字復原）
+Cmd + Backspace          刪除目前功能項目（文字欄位內沿用原生文字刪除）
 Cmd + [                  展開或收合左側欄
 Cmd + ]                  展開或收合右側欄
 Cmd + \                  開啟或關閉節點抽屜
@@ -276,7 +279,11 @@ S            開啟或關閉吸附
 Cmd + .      展開或收合目前區塊；Options 中切換表單／畫布
 ```
 
-快捷鍵可在設定中修改。新增資料的對話框按 Enter 應確認，不應取消。
+快捷鍵可在設定中修改。刪除快捷鍵依目前工作區與焦點使用既有刪除流程：Event 規則／權重列與 Options Item 優先刪除聚焦項目，否則刪除目前 Event、Options Element、Content 或 Node；State 只刪除明確聚焦的 Stat／Memory。新增資料的對話框按 Enter 應確認，不應取消。
+
+Event 的輸入欄位按 Esc 會退出至所在 Condition／Effect／Content／Next Node 列；若不在子列則退出至 Event 表單層。Content 程式碼編輯器按 Esc 會退出至演出工作區，但 Monaco 的建議、尋找、參數提示、重新命名或 Hover 等暫時介面必須先由第一下 Esc 關閉。退焦後 Cmd／Ctrl + Backspace 才執行對應結構刪除，欄位仍聚焦時則維持原生文字刪除。
+
+共用與 Content 階層下拉選單都必須支援方向鍵、Home／End、Enter、Esc 與子層左右巡覽；隱藏的原生 `select` 不可重複進入 Tab 順序。共用下拉選單的可見觸發器使用唯讀 combobox 欄位而非普通按鈕，使 Safari 在未開啟「按 Tab 鍵反白網頁上的每個項目」時仍依欄位順序聚焦。Event 主要欄位的 Tab 順序固定由 Name 前往 Trigger Mode、Trigger Value、Priority、Weight、Once，再進入 Conditions、Effects、Content 與 End up，刪除操作留在最後。自動儲存導致的重繪必須恢復增強型下拉選單的可見觸發器焦點。
 
 ## 8. 程式地圖
 
@@ -299,8 +306,11 @@ EDITOR/static/js/core/api_client.js
 EDITOR/static/js/core/autosave_coordinator.js
   自動儲存 revision、序列化、flush、取消等待與斷線重試；同時支援瀏覽器與 Node 單元測試。
 
+EDITOR/static/js/core/undo_coordinator.js
+  Cmd／Ctrl + Z 的原生文字欄位判定、pending save flush、Undo API 與工作區刷新順序；不持有工作區資料或檔案快照。
+
 EDITOR/static/js/core/editor_settings.js
-  設定版本、遷移、分頁順序、快捷鍵預設值與名稱。
+  設定版本、遷移、可自訂工作區分頁順序、快捷鍵預設值與名稱。
 
 EDITOR/static/js/core/event_contract.js
   Event Trigger 模式、生命週期、鍵盤顯示與 End up 的 Editor 端單一登錄點。
@@ -315,7 +325,10 @@ EDITOR/static/js/ui/group_drag.js
   Event／Stats／Node 共用 Pointer 拖移、即時插入間隙、FLIP 讓位、跨群組歸屬與 500ms 停留成組；純資料排序／解散規劃可由 Node 測試直接呼叫。
 
 EDITOR/static/js/ui/list_reorder.js
-  Scene Nodes、Event Conditions／Effects／Content／Next Node、Options Elements／Textbox Items、Content 文件、Textbox Profiles 與 Memory Banks 共用的無群組 Pointer 排序；提供 7px 起拖門檻、1:1 預覽、表格列 colgroup 幾何複製、即時插入間隙、中線遲滯、FLIP 讓位、邊緣自動捲動與 reduced-motion 回退，並以依賴注入的 `onDrop` 保存各工作區既有資料順序。
+  Scene Nodes、Event Effects／Content／Next Node、Options Elements／Textbox Items、Content 文件、Textbox Profiles 與 Memory Banks 共用的無群組 Pointer 排序；提供 7px 起拖門檻、1:1 預覽、表格列 colgroup 幾何複製、即時插入間隙、中線遲滯、FLIP 讓位、邊緣自動捲動與 reduced-motion 回退，並以依賴注入的 `onDrop` 保存各工作區既有資料順序。Event Conditions 改由 `group_drag.js` 組合語意 AND 群組與 OR 分支。
+
+EDITOR/static/js/ui/workspace_tab_reorder.js
+  工作區 Bar 專用的單軌 Pointer 排序。拖移期間不複製、不隱藏也不搬動 DOM；直接以原分頁跟隨水平指標，拖移本體不套用一般按鈕的按壓縮放或 transform transition，確保起始幾何正確且維持 1:1 跟手；其他分頁只以短促 transform 讓出預定槽位，放手後才一次提交 DOM 與 Editor-only `tabOrder`。作用中分頁的背景隨本體移動，獨立 focus indicator 在拖移／落位期間隱藏並於 FLIP settle 後以實際小數像素矩形同步。`mouseup` 是 Safari 遺失 `pointerup` 時的冪等後備；儲存失敗會沿相同路徑動畫回原順序。
 
 EDITOR/static/js/workspaces/event_editor.js
   Event Group 正規化／分組、Condition／Effect 列、Content／Next Node 權重表單、DOM 回讀與規則型別切換；依賴由 app.js 建立時明確注入。

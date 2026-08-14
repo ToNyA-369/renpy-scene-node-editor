@@ -9,6 +9,8 @@ import os
 import re
 import secrets
 import shutil
+import threading
+from contextlib import contextmanager
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path, PurePosixPath
@@ -33,6 +35,7 @@ DATA_DIR = "DATA"
 NODE_DIR = "SCENENODE"
 EVENT_DIR = "EVENTPOOL"
 DEFAULT_EVENT_GROUP = "Normal"
+DEFAULT_CONDITION_CLAUSE = "and_1"
 CONTENT_DIR = "CONTENT"
 OPTIONS_FILE = "Options.json"
 TEXTBOX_PROFILE_DIR = "TEXTBOX_PROFILES"
@@ -41,6 +44,11 @@ GLOBAL_NODE_PATH = "@global"
 EDITOR_SETTINGS_FILE = "settings.json"
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".avif"}
 AUDIO_EXTENSIONS = {".opus", ".ogg", ".mp3", ".mp2", ".flac", ".wav"}
+UNDO_HISTORY_LIMIT = 100
+
+_UNDO_HISTORY = []
+_UNDO_LOCK = threading.RLock()
+_UNDO_LOCAL = threading.local()
 
 LABEL_RE = re.compile(r"^\s*label\s+([A-Za-z_][A-Za-z0-9_.]*)\s*:", re.MULTILINE)
 DISPLAY_NAME_RE = re.compile(r"^\s*#\s*@display_name:\s*(.+?)\s*$", re.MULTILINE)
@@ -172,6 +180,7 @@ PYTHON_EN_DICTIONARY = {
     "Event 排序必須包含目前作用域的所有 Events。": "Event order must contain every Event in the current scope.",
     "Normal 是固定的預設 Event 群組。": "Normal is the fixed default Event group.",
     "Conditions 必須是 object 陣列。": "Conditions must be an array of objects.",
+    "Condition clause 必須是 null 或不超過 80 個字元的字串。": "Condition clause must be null or a string of at most 80 characters.",
     "Effects 必須是 object 陣列。": "Effects must be an array of objects.",
     "Option Effect 只能控制同一個 Options 作用域內的 Option。": "Option Effect can only control Options in the same Options scope.",
     "End up 必須是 REDO、GOTO、REPLACE 或 EXIT。": "End up must be REDO, GOTO, REPLACE, or EXIT.",
@@ -196,6 +205,8 @@ PYTHON_EN_DICTIONARY = {
     "無法存取這個資源。": "Cannot access this asset.",
     "資源路徑不可為空。": "Asset path cannot be empty.",
     "找不到圖片資源。": "Image asset not found.",
+    "沒有可以返回的上一步。": "There is no previous change to undo.",
+    "無法返回上一步：{exc}": "Unable to undo the previous change: {exc}",
     "{id} 是 Global Node 的保留 ID。": "{id} is a reserved ID for Global Node.",
     "未預期的錯誤：{exc}": "Unexpected error: {exc}",
 }
@@ -243,7 +254,133 @@ def ensure_project_structure():
     initialize_scene_project(PROJECT_ROOT)
 
 
+def node_trash_root():
+    project_base = PROJECT_ROOT.parent if PROJECT_ROOT.name.casefold() == "game" else PROJECT_ROOT
+    return project_base / ".scene-node-trash"
+
+
+def _path_snapshot(path):
+    return path.read_bytes() if path.exists() and path.is_file() else None
+
+
+def _tree_snapshot(root):
+    if not root.exists():
+        return None
+    if not root.is_dir():
+        raise OSError(f"Undo tree is not a directory: {root}")
+    return {
+        path.relative_to(root).as_posix(): path.read_bytes()
+        for path in sorted(root.rglob("*"))
+        if path.is_file()
+    }
+
+
+def _atomic_write_bytes(path, content):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(path.name + ".undo-tmp")
+    temporary.write_bytes(content)
+    os.replace(str(temporary), str(path))
+
+
+class UndoTransaction:
+    def __init__(self, label):
+        self.label = str(label or "change")
+        self.files = {}
+        self.trees = {}
+
+    def capture_file(self, path):
+        resolved = Path(path).resolve()
+        if any(resolved == root or root in resolved.parents for root in self.trees):
+            return
+        if resolved not in self.files:
+            self.files[resolved] = _path_snapshot(resolved)
+
+    def capture_tree(self, root):
+        resolved = Path(root).resolve()
+        if resolved in self.trees:
+            return
+        self.trees[resolved] = _tree_snapshot(resolved)
+        self.files = {
+            path: snapshot
+            for path, snapshot in self.files.items()
+            if path != resolved and resolved not in path.parents
+        }
+
+    def changed_paths(self):
+        changed = [path for path, before in self.files.items() if _path_snapshot(path) != before]
+        changed.extend(root for root, before in self.trees.items() if _tree_snapshot(root) != before)
+        return sorted(set(changed), key=str)
+
+    def restore(self):
+        for root, before in sorted(self.trees.items(), key=lambda entry: len(entry[0].parts), reverse=True):
+            if root.exists():
+                if root.is_dir():
+                    shutil.rmtree(root)
+                else:
+                    root.unlink()
+            if before is not None:
+                root.mkdir(parents=True, exist_ok=True)
+                for relative, content in before.items():
+                    _atomic_write_bytes(root / Path(relative), content)
+        for path, before in self.files.items():
+            if before is None:
+                if path.exists():
+                    if path.is_dir():
+                        shutil.rmtree(path)
+                    else:
+                        path.unlink()
+            else:
+                _atomic_write_bytes(path, before)
+
+
+def active_undo_transaction():
+    return getattr(_UNDO_LOCAL, "transaction", None)
+
+
+@contextmanager
+def undo_transaction(label):
+    with _UNDO_LOCK:
+        transaction = UndoTransaction(label)
+        _UNDO_LOCAL.transaction = transaction
+        try:
+            yield transaction
+        except Exception:
+            _UNDO_LOCAL.transaction = None
+            transaction.restore()
+            raise
+        else:
+            _UNDO_LOCAL.transaction = None
+            if transaction.changed_paths():
+                _UNDO_HISTORY.append(transaction)
+                del _UNDO_HISTORY[:-UNDO_HISTORY_LIMIT]
+
+
+def clear_undo_history():
+    with _UNDO_LOCK:
+        _UNDO_HISTORY.clear()
+
+
+def perform_undo():
+    with _UNDO_LOCK:
+        if not _UNDO_HISTORY:
+            raise ApiError(HTTPStatus.CONFLICT, tr("沒有可以返回的上一步。"))
+        transaction = _UNDO_HISTORY.pop()
+        changed = transaction.changed_paths()
+        try:
+            transaction.restore()
+        except Exception as exc:
+            _UNDO_HISTORY.append(transaction)
+            raise ApiError(HTTPStatus.INTERNAL_SERVER_ERROR, tr("無法返回上一步：{exc}", exc=exc)) from exc
+        return {
+            "undone": True,
+            "paths": [str(path) for path in changed],
+        }
+
+
 def atomic_write(path, content):
+    transaction = active_undo_transaction()
+    if transaction:
+        transaction.capture_file(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_name(path.name + ".tmp")
     temporary.write_text(content, encoding="utf-8")
@@ -252,6 +389,13 @@ def atomic_write(path, content):
 
 def write_json(path, data):
     atomic_write(path, json.dumps(data, ensure_ascii=False, indent=2) + "\n")
+
+
+def undoable_unlink(path):
+    transaction = active_undo_transaction()
+    if transaction:
+        transaction.capture_file(path)
+    path.unlink()
 
 
 def read_json(path, default=None):
@@ -593,7 +737,7 @@ def delete_textbox_profile(profile_id):
             HTTPStatus.CONFLICT,
             tr("Textbox 外觀設定檔 {profile_id} 仍被 {count} 個 Textbox 使用。", profile_id=profile_id, count=len(references)),
         )
-    path.unlink()
+    undoable_unlink(path)
     return {"deleted": True, "id": profile_id}
 
 
@@ -629,6 +773,19 @@ def validate_condition(condition, field="Condition"):
         return result
 
     raise ApiError(HTTPStatus.BAD_REQUEST, tr("{field} 的類型不合法：{condition_type}。", field=field, condition_type=condition_type))
+
+
+def validate_condition_clause(value):
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise ApiError(HTTPStatus.BAD_REQUEST, tr("Condition clause 必須是 null 或不超過 80 個字元的字串。"))
+    clause = value.strip()
+    if not clause:
+        return None
+    if len(clause) > 80:
+        raise ApiError(HTTPStatus.BAD_REQUEST, tr("Condition clause 必須是 null 或不超過 80 個字元的字串。"))
+    return clause
 
 
 def validate_effect(effect, field="Effect"):
@@ -1313,6 +1470,16 @@ def validate_event(event, global_scope=False, owner_node_id=None):
 
     content = event.get("Content")
     validate_weight_map(content, "Content")
+    legacy_conditions = bool(conditions) and all("clause" not in item for item in conditions)
+    validated_conditions = []
+    for item in conditions:
+        validated = validate_condition(item, "Event Condition")
+        validated["clause"] = (
+            DEFAULT_CONDITION_CLAUSE
+            if legacy_conditions
+            else validate_condition_clause(item.get("clause"))
+        )
+        validated_conditions.append(validated)
     validated_effects = [validate_effect(item, "Event Effect") for item in effects]
     for effect in validated_effects:
         if (
@@ -1332,7 +1499,7 @@ def validate_event(event, global_scope=False, owner_node_id=None):
         "Trigger": trigger,
         "Priority": priority,
         "Once": bool(event.get("Once", False)),
-        "Conditions": [validate_condition(item, "Event Condition") for item in conditions],
+        "Conditions": validated_conditions,
         "Effects": validated_effects,
         "Content": content,
     }
@@ -1562,6 +1729,9 @@ def create_node(payload):
         node.get("order", -1) if isinstance(node.get("order"), int) else -1
         for node in existing_nodes
     ))) + 1
+    transaction = active_undo_transaction()
+    if transaction:
+        transaction.capture_tree(directory)
     directory.mkdir(parents=True, exist_ok=True)
     (directory / EVENT_DIR).mkdir(exist_ok=True)
     (directory / CONTENT_DIR).mkdir(exist_ok=True)
@@ -1733,7 +1903,7 @@ def save_event(payload):
         raise ApiError(HTTPStatus.CONFLICT, tr("這個 Event ID 已經存在。"))
     write_json(target, event)
     if old_path_to_remove and old_path_to_remove.exists():
-        old_path_to_remove.unlink()
+        undoable_unlink(old_path_to_remove)
     return event
 
 
@@ -1869,7 +2039,7 @@ def save_content_file(root, payload):
         raise ApiError(HTTPStatus.CONFLICT, tr("Content 名稱已經存在。"))
     atomic_write(target, source.rstrip() + "\n")
     if old_path_to_remove and old_path_to_remove.exists():
-        old_path_to_remove.unlink()
+        undoable_unlink(old_path_to_remove)
     node_file = root.parent / "Node.json"
     node = read_json(node_file, {}) or {}
     existing_order = node.get("Content Order") if isinstance(node.get("Content Order"), list) else []
@@ -1941,11 +2111,14 @@ def delete_node(relative):
     node = read_json(directory / "Node.json", {}) or {}
     if node.get("ID") == configured_root_node():
         raise ApiError(HTTPStatus.CONFLICT, tr("請先將其他 Scene Node 設為 Root，才能刪除目前的起始節點。"))
-    project_base = PROJECT_ROOT.parent if PROJECT_ROOT.name.casefold() == "game" else PROJECT_ROOT
-    trash_root = project_base / ".scene-node-trash"
+    trash_root = node_trash_root()
     trash_root.mkdir(parents=True, exist_ok=True)
     stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S-%f")
     target = trash_root / f"{stamp}-{node.get('ID', directory.name)}"
+    transaction = active_undo_transaction()
+    if transaction:
+        transaction.capture_tree(directory)
+        transaction.capture_tree(target)
     shutil.move(str(directory), str(target))
     return {"deleted": True, "backup": str(target), "nodes": dissolve_singleton_node_groups()}
 
@@ -2052,20 +2225,31 @@ class EditorHandler(BaseHTTPRequestHandler):
         try:
             parsed = urlparse(self.path)
             payload = read_body(self)
+            if parsed.path == "/api/undo":
+                self.send_json(perform_undo())
+                return
             if parsed.path == "/api/nodes":
-                self.send_json(create_node(payload), HTTPStatus.CREATED)
+                with undo_transaction(parsed.path):
+                    result = create_node(payload)
+                self.send_json(result, HTTPStatus.CREATED)
                 return
             if parsed.path == "/api/events":
-                self.send_json(save_event(payload))
+                with undo_transaction(parsed.path):
+                    result = save_event(payload)
+                self.send_json(result)
                 return
             if parsed.path == "/api/textbox-profiles":
-                self.send_json(create_textbox_profile(payload), HTTPStatus.CREATED)
+                with undo_transaction(parsed.path):
+                    result = create_textbox_profile(payload)
+                self.send_json(result, HTTPStatus.CREATED)
                 return
             if parsed.path == "/api/content":
                 directory = authoring_directory(payload.get("node"))
                 if not (directory / "Node.json").exists():
                     raise ApiError(HTTPStatus.NOT_FOUND, tr("找不到指定的 authoring scope。"))
-                self.send_json(save_content_file(directory / CONTENT_DIR, payload))
+                with undo_transaction(parsed.path):
+                    result = save_content_file(directory / CONTENT_DIR, payload)
+                self.send_json(result)
                 return
             raise ApiError(HTTPStatus.NOT_FOUND, tr("找不到 API。"))
         except ApiError as exc:
@@ -2084,56 +2268,75 @@ class EditorHandler(BaseHTTPRequestHandler):
                 return
             if parsed.path == "/api/stats":
                 stats = validate_stats(payload.get("stats"))
-                write_json(stats_path(), stats)
+                with undo_transaction(parsed.path):
+                    write_json(stats_path(), stats)
                 self.send_json({"stats": stats})
                 return
             if parsed.path == "/api/state":
                 stats = validate_stats(payload.get("stats"))
                 memories = validate_memories(payload.get("memories"))
-                write_json(stats_path(), stats)
-                write_json(memories_path(), memories)
+                with undo_transaction(parsed.path):
+                    write_json(stats_path(), stats)
+                    write_json(memories_path(), memories)
                 self.send_json({"stats": stats, "memories": memories})
                 return
             if parsed.path == "/api/node":
-                self.send_json(save_node(payload))
+                with undo_transaction(parsed.path):
+                    result = save_node(payload)
+                self.send_json(result)
                 return
             if parsed.path == "/api/nodes/order":
-                self.send_json(save_node_order(payload))
+                with undo_transaction(parsed.path):
+                    result = save_node_order(payload)
+                self.send_json(result)
                 return
             if parsed.path == "/api/node-groups":
-                self.send_json(save_node_groups(payload))
+                with undo_transaction(parsed.path):
+                    result = save_node_groups(payload)
+                self.send_json(result)
                 return
             if parsed.path == "/api/project/root":
-                self.send_json(save_root_node(payload))
+                with undo_transaction(parsed.path):
+                    result = save_root_node(payload)
+                self.send_json(result)
                 return
             if parsed.path == "/api/options":
                 global_scope = is_global_node_path(payload.get("node"))
                 directory = authoring_directory(payload.get("node"))
                 if not (directory / "Node.json").exists():
                     raise ApiError(HTTPStatus.NOT_FOUND, tr("找不到指定的 authoring scope。"))
-                result = {"saved": True}
-                if "options" in payload:
-                    previous = validate_options(read_json(directory / OPTIONS_FILE, default_options()))
-                    options = validate_options(payload.get("options"))
-                    node = read_json(directory / "Node.json", {}) or {}
-                    node_id = GLOBAL_NODE_ID if global_scope else node.get("ID")
-                    validate_option_target_removals(node_id, previous, options)
-                    write_json(directory / OPTIONS_FILE, options)
-                    result["options"] = options
-                    result["optionTargets"] = scan_option_targets()
+                with undo_transaction(parsed.path):
+                    result = {"saved": True}
+                    if "options" in payload:
+                        previous = validate_options(read_json(directory / OPTIONS_FILE, default_options()))
+                        options = validate_options(payload.get("options"))
+                        node = read_json(directory / "Node.json", {}) or {}
+                        node_id = GLOBAL_NODE_ID if global_scope else node.get("ID")
+                        validate_option_target_removals(node_id, previous, options)
+                        write_json(directory / OPTIONS_FILE, options)
+                        result["options"] = options
+                        result["optionTargets"] = scan_option_targets()
                 self.send_json(result)
                 return
             if parsed.path == "/api/textbox-profiles":
-                self.send_json(save_textbox_profile(payload))
+                with undo_transaction(parsed.path):
+                    result = save_textbox_profile(payload)
+                self.send_json(result)
                 return
             if parsed.path == "/api/textbox-profiles/order":
-                self.send_json(save_textbox_profile_order(payload))
+                with undo_transaction(parsed.path):
+                    result = save_textbox_profile_order(payload)
+                self.send_json(result)
                 return
             if parsed.path == "/api/content/order":
-                self.send_json(save_content_order(payload))
+                with undo_transaction(parsed.path):
+                    result = save_content_order(payload)
+                self.send_json(result)
                 return
             if parsed.path == "/api/event-groups":
-                self.send_json(rename_event_group(payload))
+                with undo_transaction(parsed.path):
+                    result = rename_event_group(payload)
+                self.send_json(result)
                 return
             raise ApiError(HTTPStatus.NOT_FOUND, tr("找不到 API。"))
         except ApiError as exc:
@@ -2149,10 +2352,14 @@ class EditorHandler(BaseHTTPRequestHandler):
                 event_id = clean_file_name(self.query_value("id"), ".json")
                 target = directory / f"{event_id}.json"
             elif parsed.path == "/api/nodes":
-                self.send_json(delete_node(self.query_value("path")))
+                with undo_transaction(parsed.path):
+                    result = delete_node(self.query_value("path"))
+                self.send_json(result)
                 return
             elif parsed.path == "/api/textbox-profiles":
-                self.send_json(delete_textbox_profile(self.query_value("id")))
+                with undo_transaction(parsed.path):
+                    result = delete_textbox_profile(self.query_value("id"))
+                self.send_json(result)
                 return
             elif parsed.path == "/api/content":
                 directory = authoring_directory(self.query_value("node")) / CONTENT_DIR
@@ -2162,16 +2369,17 @@ class EditorHandler(BaseHTTPRequestHandler):
                 raise ApiError(HTTPStatus.NOT_FOUND, tr("找不到 API。"))
             if not target.exists():
                 raise ApiError(HTTPStatus.NOT_FOUND, tr("找不到要刪除的文件。"))
-            target.unlink()
-            if parsed.path == "/api/content":
-                node_file = directory.parent / "Node.json"
-                node = read_json(node_file, {}) or {}
-                order = node.get("Content Order") if isinstance(node.get("Content Order"), list) else []
-                node["Content Order"] = [entry for entry in order if entry != name]
-                write_json(node_file, node)
-            response = {"deleted": True}
-            if parsed.path == "/api/events":
-                response["events"] = dissolve_singleton_event_groups(directory.parent)
+            with undo_transaction(parsed.path):
+                undoable_unlink(target)
+                if parsed.path == "/api/content":
+                    node_file = directory.parent / "Node.json"
+                    node = read_json(node_file, {}) or {}
+                    order = node.get("Content Order") if isinstance(node.get("Content Order"), list) else []
+                    node["Content Order"] = [entry for entry in order if entry != name]
+                    write_json(node_file, node)
+                response = {"deleted": True}
+                if parsed.path == "/api/events":
+                    response["events"] = dissolve_singleton_event_groups(directory.parent)
             self.send_json(response)
         except ApiError as exc:
             self.send_error_json(exc)

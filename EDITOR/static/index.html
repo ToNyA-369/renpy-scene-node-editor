@@ -46,13 +46,13 @@
         <span class="save-state" id="saveState" role="status" data-i18n="已同步">已同步</span>
         <nav class="tabbar" id="tabbar" aria-label="編輯器分頁" data-i18n-aria-label="編輯器分頁">
           <span class="tab-focus-indicator" id="tabFocusIndicator" aria-hidden="true"></span>
-          <button class="tab active" type="button" data-tab="node" data-i18n="節點">節點</button>
-          <button class="tab" type="button" data-tab="events"><span data-i18n="事件">事件</span> <span class="tab-count" id="eventCount">0</span></button>
-          <button class="tab" type="button" data-tab="options" data-i18n="選項">選項</button>
-          <button class="tab" type="button" data-tab="content" data-i18n="演出">演出</button>
-          <button class="tab" type="button" data-tab="stats" data-i18n="狀態">狀態</button>
-          <button class="tab" type="button" data-tab="graph" data-i18n="關聯圖">關聯圖</button>
-          <button class="tab" type="button" data-tab="validation"><span data-i18n="檢查">檢查</span> <span class="tab-count issue-count" id="issueCount">0</span></button>
+          <button class="tab active" type="button" data-tab="node" data-reorder-id="node" aria-grabbed="false" data-i18n="節點">節點</button>
+          <button class="tab" type="button" data-tab="events" data-reorder-id="events" aria-grabbed="false"><span data-i18n="事件">事件</span> <span class="tab-count" id="eventCount">0</span></button>
+          <button class="tab" type="button" data-tab="options" data-reorder-id="options" aria-grabbed="false" data-i18n="選項">選項</button>
+          <button class="tab" type="button" data-tab="content" data-reorder-id="content" aria-grabbed="false" data-i18n="演出">演出</button>
+          <button class="tab" type="button" data-tab="stats" data-reorder-id="stats" aria-grabbed="false" data-i18n="狀態">狀態</button>
+          <button class="tab" type="button" data-tab="graph" data-reorder-id="graph" aria-grabbed="false" data-i18n="關聯圖">關聯圖</button>
+          <button class="tab" type="button" data-tab="validation" data-reorder-id="validation" aria-grabbed="false"><span data-i18n="檢查">檢查</span> <span class="tab-count issue-count" id="issueCount">0</span></button>
         </nav>
       </header>
 
@@ -215,11 +215,13 @@
   <script src="/js/core/i18n.js" defer></script>
   <script src="/js/core/api_client.js" defer></script>
   <script src="/js/core/editor_settings.js" defer></script>
+  <script src="/js/core/undo_coordinator.js" defer></script>
   <script src="/js/core/event_contract.js" defer></script>
   <script src="/js/core/state_rule_contract.js" defer></script>
   <script src="/js/ui/choice_picker.js" defer></script>
   <script src="/js/ui/group_drag.js" defer></script>
   <script src="/js/ui/list_reorder.js" defer></script>
+  <script src="/js/ui/workspace_tab_reorder.js" defer></script>
   <script src="/js/workspaces/graph_model.js" defer></script>
   <script src="/js/workspaces/graph_layout_client.js" defer></script>
   <script src="/js/workspaces/textbox_profiles.js" defer></script>

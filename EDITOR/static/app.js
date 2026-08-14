@@ -26,6 +26,10 @@ const {
   normalizeEditorSettings,
 } = SceneEditorSettings;
 const {
+  createUndoCoordinator,
+  isNativeUndoTarget,
+} = SceneUndo;
+const {
   createTask: createGraphComputation,
   signature: graphTopologySignature,
 } = SceneGraphLayoutClient;
@@ -111,12 +115,14 @@ let editorSettingsSave = Promise.resolve(true);
 let editorSettingsSaveFailureNotified = false;
 let workspaceAnimationTimer = null;
 let pendingTabPreview = null;
+let tabIndicatorTransitionFrame = 0;
 let pendingNodeGroupFocus = null;
 let pendingEventGroupFocus = null;
 let expandedNodeGroup = null;
 let expandedEventGroup = null;
 let pendingStatGroupFocus = null;
 let eventGroupDragController = null;
+let conditionGroupDragController = null;
 let statGroupDragController = null;
 let eventRuleReorderControllers = [];
 let optionReorderControllers = [];
@@ -126,6 +132,7 @@ let contentReorderController = null;
 let textboxProfileReorderController = null;
 let contentEditorController = null;
 let contentEditorMountRevision = 0;
+let tabReorderController = null;
 
 const dom = {
   workspace: document.querySelector("#workspace"),
@@ -275,6 +282,14 @@ function toast(message, kind = "") {
 }
 
 const api = SceneEditorApi.createApiClient();
+const undoCoordinator = createUndoCoordinator({
+  flush: () => autosaveCoordinator.flush({ force: true }),
+  hasUnsaved: () => autosaveCoordinator.hasUnsaved(),
+  requestUndo: () => api("/api/undo", { method: "POST", body: {} }),
+  refresh: refreshAfterUndo,
+  onState: setSaveState,
+  onError: (error) => toast(error?.message || t("返回上一步失敗"), "error"),
+});
 
 function optionTags(items, current, label = (item) => item, value = (item) => item) {
   return items.map((item) => {
@@ -558,11 +573,17 @@ const {
   replaceRuleType,
 } = eventEditor;
 const {
+  CONDITION_OR_GROUP,
   DEFAULT_EVENT_GROUP,
   addWeightedChoice,
+  appendCondition,
+  applyConditionPlan,
   choiceEntries,
+  conditionDragGroup,
   eventPoolBlocks,
   normalizeEventGroup,
+  normalizeConditions,
+  planConditionDrop,
   removeWeightedChoice,
 } = SceneEventEditor;
 
@@ -895,16 +916,61 @@ function renderAll() {
   syncShortcutTitles();
 }
 
+function applyWorkspaceTabOrder() {
+  const order = state.editorSettings.tabOrder || TAB_ORDER;
+  order.forEach((tab) => {
+    const button = dom.tabbar?.querySelector(`.tab[data-tab="${tab}"]`);
+    if (button) dom.tabbar.append(button);
+  });
+  syncTabFocusIndicator({ immediate: true });
+}
+
+function bindWorkspaceTabReorder() {
+  tabReorderController?.destroy();
+  tabReorderController = SceneWorkspaceTabReorder.createController({
+    root: dom.tabbar,
+    itemSelector: ".tab[data-reorder-id]",
+    onDrop: async ({ orderedIds, previousIds }) => {
+      state.editorSettings.tabOrder = orderedIds;
+      const saved = await writeEditorSettings();
+      if (!saved) {
+        state.editorSettings.tabOrder = previousIds;
+        return false;
+      }
+      return true;
+    },
+    onSettled: () => syncTabFocusIndicator({ immediate: true }),
+    onError: (error) => toast(error.message, "error"),
+  });
+}
+
 function syncTabFocusIndicator({ immediate = false, targetTab = null } = {}) {
   const indicator = dom.tabFocusIndicator;
   const activeTab = targetTab || dom.tabbar?.querySelector(".tab.active");
   if (!indicator || !activeTab) return;
-  if (immediate) indicator.classList.add("no-transition");
-  indicator.style.left = `${activeTab.offsetLeft}px`;
-  indicator.style.width = `${activeTab.offsetWidth}px`;
+  if (tabIndicatorTransitionFrame) {
+    window.cancelAnimationFrame(tabIndicatorTransitionFrame);
+    tabIndicatorTransitionFrame = 0;
+  }
+  const tabRect = activeTab.getBoundingClientRect();
+  const tabbarRect = dom.tabbar.getBoundingClientRect();
+  const tabbarStyle = window.getComputedStyle(dom.tabbar);
+  const borderLeft = Number.parseFloat(tabbarStyle.borderLeftWidth) || 0;
+  const borderTop = Number.parseFloat(tabbarStyle.borderTopWidth) || 0;
+  indicator.classList.toggle("no-transition", immediate);
+  indicator.style.left = `${tabRect.left - tabbarRect.left - borderLeft + dom.tabbar.scrollLeft}px`;
+  indicator.style.top = `${tabRect.top - tabbarRect.top - borderTop + dom.tabbar.scrollTop}px`;
+  indicator.style.width = `${tabRect.width}px`;
+  indicator.style.height = `${tabRect.height}px`;
   indicator.classList.add("ready");
   if (immediate) {
-    window.requestAnimationFrame(() => indicator.classList.remove("no-transition"));
+    // Commit the final geometry without allowing a stale transition callback
+    // from an earlier drag frame to animate the indicator away from its tab.
+    void indicator.offsetWidth;
+    tabIndicatorTransitionFrame = window.requestAnimationFrame(() => {
+      indicator.classList.remove("no-transition");
+      tabIndicatorTransitionFrame = 0;
+    });
   }
 }
 
@@ -1310,9 +1376,12 @@ function captureEventPanelView() {
   const eventList = dom.eventsPanel.querySelector(".subnav-list");
   const form = document.querySelector("#eventForm");
   const focused = form?.contains(document.activeElement) ? document.activeElement : null;
-  const focusName = focused?.name || "";
+  const focusedPickerSelect = focused?.closest?.(".select-choice-picker")?.querySelector("select[name]");
+  const focusedContentPicker = focused?.closest?.(".content-choice-picker");
+  const focusName = focused?.name || focusedPickerSelect?.name || "";
+  const focusPicker = Boolean(focusedPickerSelect);
   const focusIndex = focusName
-    ? [...form.querySelectorAll(`[name="${focusName}"]`)].indexOf(focused)
+    ? [...form.querySelectorAll(`[name="${focusName}"]`)].indexOf(focusedPickerSelect || focused)
     : -1;
   return {
     editorScrollTop: editor?.scrollTop || 0,
@@ -1321,6 +1390,8 @@ function captureEventPanelView() {
     sectionStates: [...(form?.querySelectorAll("details.collapsible-section") || [])].map((section) => section.open),
     focusName,
     focusIndex,
+    focusPicker,
+    focusContentPickerIndex: focusedContentPicker?.dataset.contentPickerIndex ?? "",
   };
 }
 
@@ -1331,7 +1402,14 @@ function restoreEventPanelView(view) {
   });
   if (form && view.focusName && view.focusIndex >= 0) {
     const candidates = [...form.querySelectorAll(`[name="${view.focusName}"]`)];
-    candidates[view.focusIndex]?.focus({ preventScroll: true });
+    const candidate = candidates[view.focusIndex];
+    const focusTarget = view.focusPicker
+      ? candidate?.closest(".select-choice-picker")?.querySelector("[data-select-picker-toggle]")
+      : candidate;
+    focusTarget?.focus({ preventScroll: true });
+  } else if (form && view.focusContentPickerIndex !== "") {
+    form.querySelector(`[data-content-picker-index="${CSS.escape(view.focusContentPickerIndex)}"] [data-content-picker-toggle]`)
+      ?.focus({ preventScroll: true });
   }
   const editor = document.querySelector("#eventEditorScroll");
   if (editor) {
@@ -1346,6 +1424,8 @@ function renderEventsPanel({ preserveView = false } = {}) {
   const view = preserveView ? captureEventPanelView() : null;
   eventRuleReorderControllers.forEach((controller) => controller.destroy());
   eventRuleReorderControllers = [];
+  conditionGroupDragController?.destroy();
+  conditionGroupDragController = null;
   eventGroupDragController?.destroy();
   eventGroupDragController = null;
   if (!state.nodeDetail) {
@@ -1375,6 +1455,7 @@ function renderEventsPanel({ preserveView = false } = {}) {
       </div>
     </div>
   `;
+  enhanceSelects(dom.eventsPanel);
   bindEventPanel();
   if (view) restoreEventPanelView(view);
   if (pendingEventGroupFocus) {
@@ -1429,7 +1510,7 @@ function eventEditorHtml(event) {
           <div><h3>Conditions</h3><span>${escapeHtml(t("{count} 個條件", { count: event.Conditions?.length || 0 }))}</span></div>
           <button class="icon-button section-add-button add-button" id="addConditionButton" type="button" title="${escapeHtml(t("新增條件"))}" aria-label="${escapeHtml(t("新增條件"))}">＋</button>
         </summary>
-        <div class="collapsible-section-body"><div class="repeat-list" id="conditionList">${conditionRowsHtml(event.Conditions || [])}</div></div>
+        <div class="collapsible-section-body"><div class="repeat-list condition-logic-flow" id="conditionList">${conditionRowsHtml(event.Conditions || [])}<div class="condition-drop-tail" aria-hidden="true"></div></div></div>
       </details>
 
       <details class="form-section collapsible-section" open>
@@ -1536,8 +1617,20 @@ function bindEventPanel() {
   });
   const form = document.querySelector("#eventForm");
   if (!form) return;
+  conditionGroupDragController = SceneGroupDrag.createController({
+    root: document.querySelector("#conditionList"),
+    itemSelector: ".condition-row[data-condition-id]",
+    groupSelector: ".condition-and-group[data-condition-group]",
+    ungroupedSelector: "#conditionList",
+    listSelector: ".condition-group-items",
+    defaultGroup: CONDITION_OR_GROUP,
+    getItemId: (element) => element.dataset.conditionId,
+    getItemGroup: (element) => conditionDragGroup(element.dataset.conditionClause),
+    getGroupName: (element) => conditionDragGroup(element.dataset.conditionGroup),
+    onDrop: applyConditionGroupDrop,
+    onError: (error) => toast(error.message, "error"),
+  });
   const reorderRoots = [
-    document.querySelector("#conditionList"),
     document.querySelector("#effectList"),
     ...document.querySelectorAll("#eventForm .weighted-choice-table .repeat-list"),
   ];
@@ -1579,14 +1672,14 @@ function bindEventPanel() {
     const pickerToggle = event.target.closest("[data-content-picker-toggle]");
     const fileExpand = event.target.closest("[data-content-file-expand]");
     const labelChoice = event.target.closest("[data-content-label-choice]");
-    if (pickerToggle && ["ArrowDown", "ArrowUp"].includes(event.key)) {
+    if (pickerToggle && ["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) {
       if (!picker.classList.contains("open")) pickerToggle.click();
       const items = directMenuItems(
         picker.querySelector(":scope > .content-choice-menu"),
         "[data-content-file-expand]",
         "[data-content-label-choice]",
       );
-      items[event.key === "ArrowDown" ? 0 : items.length - 1]?.focus();
+      items[["ArrowDown", "Home"].includes(event.key) ? 0 : items.length - 1]?.focus();
       event.preventDefault();
     } else if (fileExpand && ["ArrowRight", "Enter", " "].includes(event.key)) {
       const branch = event.target.closest(".content-file-branch");
@@ -1632,12 +1725,16 @@ function bindEventPanel() {
     const branch = event.target.closest(".content-file-branch");
     if (branch) setSubmenuOpen(branch, true, positionContentSubmenu);
   });
+  form.addEventListener("focusout", (event) => {
+    const picker = event.target.closest(".content-choice-picker");
+    if (picker && !picker.contains(event.relatedTarget)) closeContentPickers();
+  });
   document.querySelector("#deleteEventButton")?.addEventListener("click", deleteEvent);
   document.querySelector("#addConditionButton")?.addEventListener("click", (event) => {
     event.stopPropagation();
     const condition = newStateRule("condition", "stat") || newStateRule("condition", "memory");
     state.eventDraft = readEventForm();
-    state.eventDraft.Conditions.push(condition);
+    state.eventDraft.Conditions = appendCondition(state.eventDraft.Conditions, condition);
     scheduleEventAutosave({ useDraft: true });
     renderEventsPanel({ preserveView: true });
   });
@@ -1831,7 +1928,9 @@ async function createEventDraft(group = DEFAULT_EVENT_GROUP) {
   state.eventDraft.Group = normalizeEventGroup(group);
   renderEventsPanel();
   scheduleEventAutosave();
-  document.querySelector('[name="Name"]')?.focus();
+  const nameInput = document.querySelector('#eventForm [name="Name"]');
+  nameInput?.focus();
+  nameInput?.select();
 }
 
 async function renameEventGroup(source, target) {
@@ -1908,6 +2007,22 @@ async function applyEventGroupDrop({ mode, sourceId, targetId, targetGroup, posi
     order: plan.order,
     notify: false,
   });
+}
+
+function applyConditionGroupDrop({ mode, sourceId, targetId, targetGroup, position }) {
+  const conditions = normalizeConditions(state.eventDraft?.Conditions || []);
+  const plan = planConditionDrop(SceneGroupDrag, conditions, {
+    mode,
+    sourceId,
+    targetId,
+    targetGroup,
+    position,
+  });
+  if (!plan) return false;
+  state.eventDraft.Conditions = applyConditionPlan(conditions, plan);
+  scheduleEventAutosave({ useDraft: true });
+  renderEventsPanel({ preserveView: true });
+  return true;
 }
 
 async function applyEventGroupBlockDrop({ sourceGroup, targetId, position }) {
@@ -2807,6 +2922,7 @@ function renderOptionsPanel() {
       </div>
     </div>
   `;
+  enhanceSelects(dom.optionsPanel);
   bindOptionsPanel();
   restoreOptionsPanelView(view);
 }
@@ -4685,6 +4801,40 @@ async function refreshAfterSave() {
   renderAll();
 }
 
+async function refreshAfterUndo() {
+  const context = {
+    nodePath: state.selectedNodePath,
+    eventId: state.selectedEventId,
+    content: state.selectedContent,
+    optionElementId: state.selectedOptionElementId,
+    optionItemId: state.selectedOptionItemId,
+  };
+  await loadProject({ preserveNode: true });
+  if (state.selectedNodePath !== context.nodePath || !state.nodeDetail) return;
+
+  const eventEntry = state.nodeDetail.events.find((entry) => entry.data.ID === context.eventId);
+  if (eventEntry) {
+    state.selectedEventId = context.eventId;
+    state.eventOriginalId = context.eventId;
+    state.eventDraft = clone(eventEntry.data);
+  }
+
+  if (state.optionsDraft?.Elements.some((element) => element.ID === context.optionElementId)) {
+    state.selectedOptionElementId = context.optionElementId;
+    const element = selectedOptionElement();
+    state.selectedOptionItemId = element?.Items?.some((item) => item.ID === context.optionItemId)
+      ? context.optionItemId
+      : element?.Items?.[0]?.ID || null;
+  }
+
+  const contentExists = state.nodeDetail.contents.some((content) => content.name === context.content);
+  if (contentExists) state.selectedContent = context.content;
+  renderAll();
+  if (contentExists) {
+    await loadContent(context.content);
+  }
+}
+
 function openNameDialog() {
   dom.nameDialogInput.value = "";
   dom.nameDialog.showModal();
@@ -4775,6 +4925,8 @@ function shortcutDisplay(shortcut) {
     if (part === "shift") return isMac ? "⇧" : "Shift";
     if (part === "space") return "Space";
     if (part === "esc") return "Esc";
+    if (part === "backspace") return "Backspace";
+    if (part === "delete") return "Delete";
     if (part === "left") return "←";
     if (part === "right") return "→";
     if (part === "up") return "↑";
@@ -4882,7 +5034,7 @@ function saveActiveEditor() {
 }
 
 function cycleActiveTab(direction) {
-  const tabs = TAB_ORDER;
+  const tabs = state.editorSettings.tabOrder || TAB_ORDER;
   const currentIndex = tabs.indexOf(state.activeTab);
   const nextIndex = (currentIndex + direction + tabs.length) % tabs.length;
   requestTabSwitch(tabs[nextIndex]);
@@ -4934,12 +5086,89 @@ function createInActiveTab() {
   return true;
 }
 
+function clickDeleteControl(control) {
+  if (!control || control.disabled) return false;
+  control.click();
+  return true;
+}
+
+function deleteInActiveTab() {
+  if (document.querySelector("dialog[open]")) return false;
+  const focused = document.activeElement;
+
+  if (state.activeTab === "events") {
+    const row = focused?.closest?.(".condition-row, .effect-row, .weight-row");
+    const rowDelete = row?.querySelector("[data-remove-condition], [data-remove-effect], [data-remove-weighted]");
+    if (clickDeleteControl(rowDelete)) return true;
+    if (clickDeleteControl(document.querySelector("#deleteEventButton"))) return true;
+  } else if (state.activeTab === "options") {
+    const focusedItem = focused?.closest?.("[data-option-item-order-id], .option-item-entry")
+      ?.querySelector?.("[data-delete-option-item]");
+    if (clickDeleteControl(focusedItem)) return true;
+    if (state.optionInspectorTab === "item" && state.selectedOptionItemId) {
+      void deleteOptionItem(state.selectedOptionItemId);
+      return true;
+    }
+    if (state.selectedOptionElementId) {
+      void deleteOptionElement();
+      return true;
+    }
+  } else if (state.activeTab === "content") {
+    if (clickDeleteControl(document.querySelector("#deleteContentButton"))) return true;
+  } else if (state.activeTab === "stats") {
+    const row = focused?.closest?.("[data-stat-id], [data-memory-id]");
+    if (clickDeleteControl(row?.querySelector("[data-remove-stat], [data-remove-memory]"))) return true;
+  } else if (state.activeTab === "node") {
+    if (clickDeleteControl(document.querySelector("#deleteNodeButton"))) return true;
+  }
+
+  toast(t("目前沒有可刪除的項目"));
+  return true;
+}
+
+function hasOpenEditorTransient(target) {
+  if (target.closest(".select-choice-picker.open, .content-choice-picker.open")) return true;
+  const monaco = target.closest(".monaco-editor");
+  if (!monaco) return false;
+  return Boolean(monaco.querySelector([
+    ".suggest-widget.visible",
+    ".parameter-hints-widget.visible",
+    ".find-widget.visible",
+    ".rename-box.visible",
+    ".monaco-hover.visible",
+  ].join(", ")));
+}
+
+function exitEditorFieldFocus(event) {
+  if (event.key !== "Escape" || event.metaKey || event.ctrlKey || event.altKey) return false;
+  if (document.querySelector("dialog[open]")) return false;
+  const target = event.target;
+  if (!(target instanceof Element) || hasOpenEditorTransient(target)) return false;
+  const editable = target.matches("input, textarea, [contenteditable='true']") || target.closest(".monaco-editor");
+  if (!editable) return false;
+
+  let context = null;
+  if (state.activeTab === "events" && target.closest("#eventForm")) {
+    context = target.closest(".condition-row, .effect-row, .weight-row") || document.querySelector("#eventForm");
+  } else if (state.activeTab === "content" && dom.contentPanel.contains(target)) {
+    context = dom.contentPanel;
+  }
+  if (!context) return false;
+  context.tabIndex = -1;
+  context.focus({ preventScroll: true });
+  event.preventDefault();
+  event.stopPropagation();
+  return true;
+}
+
 function runShortcut(action) {
   if (TAB_SHORTCUT_ACTIONS[action]) requestTabSwitch(TAB_SHORTCUT_ACTIONS[action]);
   else if (action === "cyclePrevious") cycleActiveTab(-1);
   else if (action === "cycleNext") cycleActiveTab(1);
   else if (action === "save") saveActiveEditor();
+  else if (action === "undo") void undoCoordinator.undo();
   else if (action === "create") return createInActiveTab();
+  else if (action === "delete") return deleteInActiveTab();
   else if (action === "sidebar") toggleSidebar();
   else if (action === "settings") openSettings();
   else if (action === "sections") toggleActiveSections();
@@ -5033,6 +5262,7 @@ function bindGlobalEvents() {
       if (!await requestTabSwitch(button.dataset.tab)) syncTabFocusIndicator();
     });
   });
+  bindWorkspaceTabReorder();
   dom.tabbar.addEventListener("keydown", () => dom.tabbar.classList.remove("is-pointer-navigation"));
   dom.tabbar.addEventListener("focusout", (event) => {
     if (!dom.tabbar.contains(event.relatedTarget)) dom.tabbar.classList.remove("is-pointer-navigation");
@@ -5146,9 +5376,11 @@ function bindGlobalEvents() {
       if (state.activeTab === "content") scheduleContentAutosave();
       return;
     }
+    if (exitEditorFieldFocus(event)) return;
     const shortcut = shortcutFromEvent(event);
     const action = Object.entries(state.editorSettings.shortcuts).find(([, value]) => value && value === shortcut)?.[0];
     const isTyping = event.target.matches("input, textarea, select, [contenteditable='true']");
+    if (["delete", "undo"].includes(action) && isNativeUndoTarget(event.target)) return;
     if (!action || (isTyping && !event.metaKey && !event.ctrlKey && !event.altKey)) return;
     if (runShortcut(action)) {
       event.preventDefault();
@@ -5180,6 +5412,7 @@ async function init() {
   await loadEditorSettings();
   setLocale(state.editorSettings.language);
   translateDocument(document);
+  applyWorkspaceTabOrder();
   await writeEditorSettings({ notifyFailure: false });
   syncSidebarLayout();
   syncShortcutTitles();

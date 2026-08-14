@@ -227,7 +227,7 @@ Options have no lifecycle, condition expressions, or custom Screen source. Every
 { "content_day": 3, "content_night": 1 }
 ```
 
-`Conditions` and `Effects` are ordered arrays. Pointer dragging from row whitespace saves their array order directly without adding grouping or ordering metadata. Conditions still all need to pass; Effects execute in array order after Content returns. Weight objects remain probability maps and are not drag-sortable.
+`Conditions` and `Effects` are ordered arrays. Each Condition may carry `clause: <string|null>`: Conditions sharing one non-empty clause must all pass (AND), while different clauses and independent `null` Conditions are alternative branches (OR). Legacy data with no `clause` field keeps its original all-AND meaning and normalizes into one `and_1` group when saved by the Editor. The Editor presents AND as a frame and OR between groups or independent Conditions; Conditions can be dragged in, out, and reordered, and a one-member AND group does not dissolve automatically. Effects remain directly reorderable and execute in array order after Content returns. Weight objects remain probability maps and are not drag-sortable.
 
 An ordinary Event's `End up` may be `REDO`, `GOTO`, `REPLACE`, or `EXIT`. GOTO and REPLACE require `Next Node`; the Editor shows Node Name while JSON stores the stable Node ID. REPLACE example:
 
@@ -288,7 +288,17 @@ Memory:
 { "type": "memory", "bank": "memory", "id": "has_key", "op": "has" }
 ```
 
-Operators: `has`, `not_has`. Every Condition on an Event must pass.
+Operators: `has`, `not_has`. For example, `(money >= 10 AND member) OR hour >= 18` is stored as:
+
+```json
+[
+  { "type": "stat", "id": "money", "op": ">=", "value": 10, "clause": "and_1" },
+  { "type": "memory", "bank": "memory", "id": "member", "op": "has", "clause": "and_1" },
+  { "type": "stat", "id": "hour", "op": ">=", "value": 18, "clause": null }
+]
+```
+
+An empty Conditions array remains unconditional. Condition logic is a single OR-of-AND layer and does not support nested groups.
 
 ## Effects
 

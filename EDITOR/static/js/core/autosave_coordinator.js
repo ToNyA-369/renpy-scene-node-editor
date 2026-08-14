@@ -96,8 +96,8 @@
       }, retryDelay);
     }
 
-    async function run() {
-      if (!pending || !isEnabled()) return true;
+    async function run(force = false) {
+      if (!pending || (!isEnabled() && !force)) return true;
       clearSaveTimer();
       const task = pending;
       pending = null;
@@ -138,8 +138,8 @@
       return succeeded;
     }
 
-    async function flush() {
-      if (!isEnabled()) return true;
+    async function flush({ force = false } = {}) {
+      if (!isEnabled() && !force) return true;
       if (!pending && failed?.retryable) {
         clearRetryTimer();
         pending = failed;
@@ -147,7 +147,7 @@
       }
       if (!pending && failed) return false;
       while (pending) {
-        if (!await run()) return false;
+        if (!await run(force)) return false;
       }
       return Boolean(await inFlight) && !failed;
     }

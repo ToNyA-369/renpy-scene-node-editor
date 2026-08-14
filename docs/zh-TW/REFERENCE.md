@@ -242,7 +242,7 @@ Options 沒有生命週期、條件運算式或自訂 Screen 來源。所有已�
 
 權重必須大於 0。
 
-`Conditions` 與 `Effects` 是有序陣列，Editor 允許由列留白拖移並直接保存陣列順序，不新增群組或排序 metadata。Conditions 的邏輯仍是全部通過；Effects 會在 Content 返回後依陣列順序執行。權重物件仍是機率映射，不提供拖移排序。
+`Conditions` 與 `Effects` 是有序陣列。每個 Condition 可帶 `clause: <string|null>`：相同非空 clause 的 Conditions 必須全部通過（AND），不同 clause 與 `null` 的獨立 Condition 之間只需任一分支通過（OR）。沒有任何 `clause` 欄位的舊資料維持原本的全 AND 語意，Editor 保存時會把它們正規化至單一 `and_1` 群組。Editor 以群組框表示 AND、群組／獨立條件之間顯示 OR；條件可拖入、拖出及排序，單成員 AND 群組不會自動解散。Effects 則由列留白拖移並在 Content 返回後依陣列順序執行。權重物件仍是機率映射，不提供拖移排序。
 
 一般 Event 的 `End up` 可為 `REDO`、`GOTO`、`REPLACE` 或 `EXIT`。`GOTO` 與 `REPLACE` 必須提供 `Next Node`；Editor 顯示 Node Name，但 JSON 保存穩定 Node ID。REPLACE 範例：
 
@@ -303,7 +303,17 @@ Memory：
 { "type": "memory", "bank": "memory", "id": "has_key", "op": "has" }
 ```
 
-支援 `has`、`not_has`。Event 的所有 Conditions 都必須通過。
+支援 `has`、`not_has`。例如 `(money >= 10 AND member) OR hour >= 18` 可保存為：
+
+```json
+[
+  { "type": "stat", "id": "money", "op": ">=", "value": 10, "clause": "and_1" },
+  { "type": "memory", "bank": "memory", "id": "member", "op": "has", "clause": "and_1" },
+  { "type": "stat", "id": "hour", "op": ">=", "value": 18, "clause": null }
+]
+```
+
+空 Conditions 仍代表無條件候選。條件只允許一層 OR-of-AND，不支援巢狀群組。
 
 ## Effects
 

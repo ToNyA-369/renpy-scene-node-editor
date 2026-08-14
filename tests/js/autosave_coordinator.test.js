@@ -162,3 +162,13 @@ test("disabled autosave preserves a pending edit until autosave is enabled", asy
   assert.equal(writes, 1);
   assert.equal(coordinator.hasUnsaved(), false);
 });
+
+test("an explicit undo flush can commit a pending snapshot while autosave is disabled", async () => {
+  const { coordinator } = harness({ enabled: false });
+  let writes = 0;
+  coordinator.schedule("options", async () => { writes += 1; });
+
+  assert.equal(await coordinator.flush({ force: true }), true);
+  assert.equal(writes, 1);
+  assert.equal(coordinator.hasUnsaved(), false);
+});

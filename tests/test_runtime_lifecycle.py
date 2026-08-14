@@ -63,6 +63,31 @@ def lifecycle_event(event_id, trigger="Auto:Enter", priority=3, **overrides):
 
 
 class RuntimeLifecycleTest(unittest.TestCase):
+    def test_condition_clauses_are_or_between_branches_and_and_within_groups(self):
+        runtime = load_runtime_namespace()
+        grouped = [
+            {"type": "stat", "id": "phase", "op": ">=", "value": 1, "clause": "and_1"},
+            {"type": "memory", "bank": "memory", "id": "member", "op": "has", "clause": "and_1"},
+            {"type": "stat", "id": "phase", "op": "==", "value": 0, "clause": None},
+        ]
+
+        self.assertTrue(runtime["scene_conditions_match"](grouped))
+        runtime["scene_apply_stat_effect"]({"type": "stat", "id": "phase", "op": "set", "value": 1})
+        self.assertFalse(runtime["scene_conditions_match"](grouped))
+        runtime["scene_memory_add"]("memory", "member")
+        self.assertTrue(runtime["scene_conditions_match"](grouped))
+
+    def test_legacy_flat_conditions_remain_all_required(self):
+        runtime = load_runtime_namespace()
+        legacy = [
+            {"type": "stat", "id": "phase", "op": "==", "value": 0},
+            {"type": "memory", "bank": "memory", "id": "member", "op": "has"},
+        ]
+
+        self.assertFalse(runtime["scene_conditions_match"](legacy))
+        runtime["scene_memory_add"]("memory", "member")
+        self.assertTrue(runtime["scene_conditions_match"](legacy))
+
     def test_lifecycle_collects_every_match_in_priority_then_id_order(self):
         runtime = load_runtime_namespace()
         runtime["scene_catalog"]["events"]["root"] = [
