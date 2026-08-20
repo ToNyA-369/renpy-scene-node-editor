@@ -10,7 +10,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 FRONTEND = ROOT / "EDITOR" / "static" / "app.js"
 GRAPH_MODEL = ROOT / "EDITOR" / "static" / "js" / "workspaces" / "graph_model.js"
-STYLES = ROOT / "EDITOR" / "static" / "styles.css"
+GRAPH_STYLES = ROOT / "EDITOR" / "static" / "css" / "editor.css"
 sys.path.insert(0, str(ROOT / "EDITOR"))
 
 import app  # noqa: E402
@@ -91,7 +91,7 @@ class ReplaceContractTest(unittest.TestCase):
     def test_graph_derives_chained_parent_management_edges_and_reuses_goto_color(self):
         frontend = FRONTEND.read_text(encoding="utf-8")
         graph_model = GRAPH_MODEL.read_text(encoding="utf-8")
-        styles = STYLES.read_text(encoding="utf-8")
+        styles = GRAPH_STYLES.read_text(encoding="utf-8")
 
         self.assertIn('endUp: "MANAGEMENT"', graph_model)
         self.assertIn("replaceBySource.get(current.nodeId)", graph_model)

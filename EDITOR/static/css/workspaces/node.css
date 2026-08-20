@@ -1,0 +1,279 @@
+/* Node overview workspace */
+
+.panel-page.node-panel-page {
+  width: min(100%, 1280px);
+  padding: 28px 38px 64px;
+}
+
+.node-editor-shell {
+  padding: 30px;
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--panel-radius);
+}
+
+.node-root-row {
+  display: flex;
+  align-items: center;
+  min-height: 48px;
+  margin-bottom: 18px;
+  padding: 8px 10px 8px 14px;
+  justify-content: space-between;
+  gap: 16px;
+  color: var(--muted);
+  background: var(--surface-soft);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  font-size: 12px;
+}
+
+.node-root-row > div {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.root-node-badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 0 9px;
+  color: var(--accent);
+  background: var(--accent-soft);
+  border: 1px solid rgba(92, 114, 101, 0.5);
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 750;
+  letter-spacing: 0.12em;
+}
+
+.root-node-badge.is-compact {
+  min-height: 19px;
+  margin-left: 8px;
+  padding-inline: 6px;
+  font-size: 8px;
+  vertical-align: 2px;
+}
+
+.root-node-badge.is-global {
+  border-style: dashed;
+}
+
+.node-editor-shell .bento-form {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 18px;
+}
+
+.node-editor-shell .bento-form .node-form-section,
+.node-editor-shell .bento-form .node-identity-section {
+  padding: 24px 28px;
+  border-color: var(--line-strong);
+  border-radius: 22px;
+}
+
+.node-editor-shell .field {
+  gap: 9px;
+}
+
+.node-editor-shell .field > span {
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 540;
+  letter-spacing: 0.12em;
+}
+
+.node-editor-shell input,
+.node-editor-shell select {
+  height: 50px;
+  padding-inline: 16px;
+  border-radius: 15px;
+  font-size: 16px;
+}
+
+.node-editor-shell .editor-danger-zone {
+  margin-top: 24px;
+}
+
+.node-overview {
+  display: grid;
+  margin-top: 18px;
+  gap: 18px;
+}
+
+.node-overview-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.node-overview-metrics article,
+.node-overview-card {
+  background: var(--surface-soft);
+  border: 1px solid var(--line-strong);
+  border-radius: 18px;
+}
+
+.node-overview-metrics article {
+  display: grid;
+  min-height: 94px;
+  padding: 18px 20px;
+  align-content: space-between;
+  gap: 8px;
+}
+
+.node-overview-metrics span,
+.node-overview-card header > span {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 720;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.node-overview-metrics strong {
+  color: var(--ink);
+  font-size: 26px;
+  font-weight: 620;
+  font-variant-numeric: tabular-nums;
+}
+
+.node-overview-details {
+  display: grid;
+  grid-template-columns: minmax(0, 1.45fr) minmax(280px, 0.75fr);
+  gap: 12px;
+}
+
+.node-overview-card {
+  padding: 22px 24px;
+}
+
+.node-overview-card header {
+  display: grid;
+  margin-bottom: 18px;
+  gap: 5px;
+}
+
+.node-overview-card header strong {
+  color: var(--ink);
+  font-size: 15px;
+  font-weight: 620;
+}
+
+.node-flow-row {
+  display: grid;
+  grid-template-columns: 76px minmax(0, 1fr);
+  align-items: start;
+  padding: 12px 0;
+  gap: 14px;
+  border-top: 1px solid var(--line);
+}
+
+.node-flow-row > span {
+  padding-top: 6px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.node-flow-row > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.node-flow-chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 29px;
+  padding: 5px 9px;
+  gap: 7px;
+  color: var(--ink);
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  border-radius: 9px;
+  font-size: 11px;
+}
+
+.node-flow-chip small {
+  color: var(--muted);
+  font-size: 9px;
+  font-weight: 720;
+  letter-spacing: 0.06em;
+}
+
+.node-flow-chip.is-replace {
+  border-style: dashed;
+}
+
+.node-flow-empty {
+  padding: 6px 0;
+  color: var(--faint);
+  font-size: 11px;
+}
+
+.node-lifecycle-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.node-lifecycle-grid div {
+  display: grid;
+  min-height: 76px;
+  padding: 13px;
+  align-content: space-between;
+  gap: 8px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 13px;
+}
+
+.node-lifecycle-grid span {
+  color: var(--muted);
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.node-lifecycle-grid strong {
+  color: var(--ink);
+  font-size: 20px;
+  font-weight: 620;
+  font-variant-numeric: tabular-nums;
+}
+
+.node-editor-shell .form-section:first-of-type {
+  border-top: 1px solid var(--line-strong);
+}
+
+@media (max-width: 760px) {
+  .panel-page.node-panel-page {
+    padding: 20px 16px 42px;
+  }
+
+  .node-editor-shell {
+    padding: 20px;
+  }
+
+  .node-root-row {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .node-root-row > .quiet-button {
+    width: 100%;
+  }
+
+  .node-overview-metrics,
+  .node-overview-details {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .node-overview-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .node-editor-shell .bento-form .node-form-section,
+  .node-editor-shell .bento-form .node-identity-section {
+    padding: 20px;
+  }
+}

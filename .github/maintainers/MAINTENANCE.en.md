@@ -18,10 +18,14 @@ js/ui/choice_picker.js           shared hierarchical select interaction
 js/workspaces/event_editor.js    Event rules, weighted choices, and DOM serialization
 js/workspaces/state_editor.js    Stat grouping and hierarchical picker data
 js/workspaces/graph_model.js     graph relationships, layout and paths
+js/workspaces/node_workspace.js  Node overview data, rendering, and form event wiring
+js/workspaces/validation_workspace.js Project Validation rendering, refresh, and failure feedback
 app.js                           state composition, rendering and module coordination
 ```
 
 A new module must have one describable responsibility, receive dependencies explicitly instead of reading hidden `app.js` globals, and expose pure logic to `node:test` where practical. The project intentionally uses native browser scripts with named namespaces and no bundler or third-party frontend framework. `index.html` is the only script-order entry point.
+
+Workspace-specific presentation belongs under `css/workspaces/`. The Node overview and Project Validation are currently extracted into `node.css` and `validation.css`; shared primitives remain in `components.css`, while `editor.css` keeps the shell and composition rules that have not yet been extracted.
 
 ## Common extension paths
 
@@ -76,7 +80,11 @@ Graph-model tests must also protect the local-physics boundary: only real GOTO /
 
 - `css/tokens.css`: foundational colors, dimensions, and shared tokens.
 - `css/base.css`: reset, typography, and focus defaults.
-- `styles.css`: existing components and workspaces still awaiting gradual extraction.
+- `css/components.css`: shared form-field and button primitives; workspaces override them only when context requires it.
+- `css/workspaces/node.css`: Node overview, root state, flow/lifecycle cards, and narrow-layout rules.
+- `css/workspaces/validation.css`: issue rows and responsive rules for the Project Validation workspace.
+- `styles.css`: historical component and workspace rules still awaiting gradual extraction.
+- `css/editor.css`: the current Editor shell, workspace composition, and responsive rules, loaded after extracted workspace CSS.
 
 Move CSS without changing selectors, declarations, or load order first. Then verify desktop, narrow layout, and reduced motion in a browser. Do not combine file movement with a redesign.
 

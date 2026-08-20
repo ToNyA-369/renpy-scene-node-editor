@@ -1,29 +1,41 @@
 :root {
-  --canvas: #e8e7e1;
-  --surface: #f8f7f2;
-  --surface-soft: #efeee8;
-  --surface-warm: #f4f0e7;
-  --ink: #292d2c;
-  --muted: #666d69;
-  --faint: #8b918d;
-  --line: #d8d6ce;
-  --line-strong: #c4c3bb;
-  --accent: #5e8277;
-  --accent-dark: #3f665d;
-  --accent-soft: #e0ebe6;
-  --blue: #607b89;
-  --blue-soft: #e2e9ec;
-  --amber: #9a713c;
-  --amber-soft: #f3e8d4;
-  --danger: #a6534f;
-  --danger-soft: #f3e3df;
-  --focus: #52788c;
-  --sidebar-width: 236px;
-  --topbar-height: 62px;
+  /* Project palette: paper, graphite, green, and destructive red. */
+  --canvas: #e5e5e2;
+  --surface: #f4f4f4;
+  --surface-soft: rgba(70, 70, 70, 0.06);
+  --surface-warm: rgba(244, 244, 244, 0.72);
+  --ink: #464646;
+  --muted: rgba(70, 70, 70, 0.72);
+  --faint: rgba(70, 70, 70, 0.5);
+  --line: rgba(70, 70, 70, 0.18);
+  --line-strong: rgba(70, 70, 70, 0.52);
+  --accent: #5c7265;
+  --accent-dark: #5c7265;
+  --accent-soft: rgba(92, 114, 101, 0.38);
+  --blue: #5c7265;
+  --blue-soft: rgba(92, 114, 101, 0.14);
+  --amber: #5c7265;
+  --amber-soft: rgba(92, 114, 101, 0.12);
+  --danger: #aa7878;
+  --danger-soft: rgba(170, 120, 120, 0.15);
+  --focus: #5c7265;
+
+  /* Shell and component geometry. Responsive overrides stay with their layout. */
+  --sidebar-width: 390px;
+  --topbar-height: 118px;
   --tabbar-height: 44px;
-  --radius: 7px;
-  --shadow: 0 14px 38px rgba(41, 45, 44, 0.14);
+  --radius: 14px;
+  --panel-radius: 26px;
+  --control-height-compact: 34px;
+  --control-height: 38px;
+  --section-action-height: 44px;
+  --section-action-width: 96px;
+  --control-radius: 14px;
+  --panel-shadow: none;
+  --shadow: none;
   --focus-ring: 0 0 0 3px rgba(92, 114, 101, 0.2);
+
+  /* Motion stays short, restrained, and globally adjustable. */
   --motion-instant: 90ms;
   --motion-fast: 140ms;
   --motion-medium: 220ms;

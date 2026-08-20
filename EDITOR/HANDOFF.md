@@ -196,10 +196,10 @@ Options Renderer 會把目前節點與 Global Options 合併後依 Element `Z Or
 - 自動儲存採遞增 revision；過期請求不得覆蓋較新的草稿、狀態或儲存提示。切換節點、分頁或文件前先完成目前 revision，刪除則先取消並等待舊寫入，避免刪除後的競態與假失敗。
 - 自動儲存排程與競態控制已抽成可獨立測試的 `autosave_coordinator.js`；Node 測試覆蓋連續編輯、切換前 flush、刪除前 cancel-and-wait、網路重試與失敗阻擋。
 - Editor Undo 固定以 Cmd／Ctrl + Z 觸發，不提供工具列圖示；文字輸入、textarea、contenteditable 與 Monaco 保留瀏覽器／編輯器原生文字復原。其他成功的專案寫入由 Editor Server 記錄為最多 100 筆、僅限本次執行期間的 LIFO 檔案交易，`POST /api/undo` 會原子恢復最新一步後由前端刷新目前工作區。建立／刪除 Node、Event、Content、Textbox Profile、多檔 State 與排序／群組寫入都使用同一交易邊界；失敗交易必須立即回滾且不可進入歷史。Editor settings 不屬於專案內容歷史。Undo 前會強制完成目前 pending snapshot，即使 autosave 已停用也只形成「寫入目前值 → 立即恢復前值」的淨復原結果；flush 或 restore 失敗時不得更新畫面。
-- 前端已開始漸進式模組化：API Client、Editor Settings、Event Trigger／End up 契約、Event 規則與權重表單、Event／Stats 排序流區塊模型、共用 Pointer 即時插入與停留群組控制器、無群組清單排序控制器、共用階層下拉選單、Content 程式碼提示轉換及關聯圖純資料模型都有獨立模組與 Node 測試；`app.js` 保留組裝、渲染與跨模組協調。
+- 前端已開始漸進式模組化：API Client、Editor Settings、Event Trigger／End up 契約、Event 規則與權重表單、Event／Stats 排序流區塊模型、共用 Pointer 即時插入與停留群組控制器、無群組清單排序控制器、共用階層下拉選單、Content 程式碼提示轉換、Node 總覽、Project Validation 及關聯圖純資料模型都有獨立模組與 Node 測試；`app.js` 保留狀態組裝與跨模組協調。
 - Content 的 Monaco／Shiki 瀏覽器資產由 `tools/build_editor_assets.mjs` 依鎖定 npm 版本與 `tools/editor_assets/renpy-language/` 的官方 grammar／snippets 產生至 `EDITOR/static/vendor/`。安裝包只帶生成資產，不需要 Node 或網路；`python3 tools/verify.py` 會檢查生成物沒有過期。進階編輯器透過隱藏 textarea 的既有 `input`／autosave 契約接線，載入失敗必須回退到可用 textarea，不可改變 Content API 或 `.rpy` 格式。第三方聲明位於 `EDITOR/THIRD_PARTY_NOTICES.md`。
 - Condition／Effect 類型、操作與預設資料形狀集中於 `state_rule_contract.js`；跨層測試會直接比較前端 registry、Editor API registry 與 Runtime 分支，新增操作不得只修改表單。
-- CSS 的設計 token 與瀏覽器基礎規則已分離至 `css/tokens.css`、`css/base.css`；其餘工作區樣式仍在 `styles.css` 漸進整理，不在搬移時改變視覺。
+- CSS 的唯一基礎 token 位於 `css/tokens.css`，瀏覽器預設位於 `css/base.css`，共用表單欄位與按鈕 primitive 位於 `css/components.css`；歷史規則保留於 `styles.css`，已抽出的工作區規則位於 `css/workspaces/`，目前 Editor shell、工作區組合與跨工作區回應式規則位於 `css/editor.css`。載入順序固定為 tokens → base → vendor → styles → components → workspace → editor；搬移時不得同時改變視覺，且 `styles.css` 不可再以 top-level `:root` 覆寫正式主題。
 - 節點刪除引用檢查與 `.scene-node-trash/` 可復原區。
 - 專案引用檢查。
 - 依 `GOTO / REPLACE / Next Node` 產生唯讀有向關聯圖，採 deterministic Stack 深度布局。只顯示實際 Scene Nodes；GLOBAL 作用域與 Global Event 邊不進入圖面。ROOT 位於最左側起點欄，主要 GOTO 每前進一次就進入右側下一個 Stack 深度欄；垂直泳道以穩定 Name／ID 排序及子樹 span 配置，讓父節點對齊其分支範圍。
@@ -341,6 +341,9 @@ EDITOR/static/js/workspaces/event_focus_navigation.js
 EDITOR/static/js/workspaces/state_editor.js
   Stats 群組／順序正規化、工作區分組與 Group → Stat 階層選單資料；不改變平面 Stat ID。
 
+EDITOR/static/js/workspaces/node_workspace.js
+  Node 總覽的連線聚合、指標與生命週期 view model、HTML 渲染及面板內事件接線；保存、刪除與 root 切換仍由 app.js 協調。
+
 EDITOR/static/js/workspaces/graph_model.js
   關聯圖 GOTO／REPLACE／遞迴管理關係、雙向關係正規化、Stack 深度／同深度 GOTO local progression／REPLACE parity lanes／分支泳道布局、拖曳回位控制器、Cycle route 與 SVG edge path 的可測試資料邏輯。
 
@@ -361,11 +364,23 @@ tools/build_editor_assets.mjs
   Monaco／Shiki 的瀏覽器入口與可重現建置；輸出 `EDITOR/static/vendor/content_editor.{js,css}` 與 worker，輸出需提交並由 verify 檢查同步。
 
 EDITOR/static/styles.css
-  尚待逐步拆分的既有元件、工作區版面、響應式規則與互動狀態。
+  尚待逐步拆分的歷史元件與工作區規則。
 
 EDITOR/static/css/tokens.css
 EDITOR/static/css/base.css
-  共用設計 token，以及全頁 reset、字體與 focus 基礎規則。
+  唯一共用設計 token，以及全頁 reset、字體與 focus 基礎規則。
+
+EDITOR/static/css/components.css
+  共用表單欄位與按鈕 primitive；工作區只能在必要情境覆寫。
+
+EDITOR/static/css/workspaces/node.css
+  Node 總覽、root 狀態、flow／lifecycle 卡片及窄版規則。
+
+EDITOR/static/css/workspaces/validation.css
+  Project Validation 的問題列、狀態布局與窄版規則。
+
+EDITOR/static/css/editor.css
+  目前 Editor shell、工作區組合、互動與回應式規則；固定載入於已抽出的 workspace CSS 之後。
 
 INTEGRATION/TestGame/FRAMEWORK/runtime.rpy
   State、Event 選擇、Effects 與 Scene Node stack Runtime。
@@ -423,7 +438,7 @@ tools/verify.py
   在 GitHub Pull Request 與 main push 上，以 Linux、macOS 執行統一驗證。
 ```
 
-前端工作區的主要頁面渲染與 Options 互動仍集中在 `app.js`，既有工作區 CSS 也仍集中於 `styles.css`；但共用核心、Event 表單資料轉換、下拉選單及關聯圖模型已有可測試邊界。新功能先依 `AGENTS.md` 與 `.github/maintainers/MAINTENANCE.md` 判斷擴充入口，不要把可獨立邏輯重新塞回 composition root。不同對話若同時修改 `app.js`／`styles.css` 仍容易衝突；平行工作應使用獨立 Git worktree，或明確切分不同模組。
+前端工作區的主要頁面渲染與 Options 互動仍有部分集中在 `app.js`，既有工作區 CSS 也仍有部分集中於 `styles.css`／`editor.css`；但共用核心、Event 表單資料轉換、Node 總覽、Project Validation、下拉選單及關聯圖模型已有可測試邊界。新功能先依 `AGENTS.md` 與 `.github/maintainers/MAINTENANCE.md` 判斷擴充入口，不要把可獨立邏輯重新塞回 composition root。不同對話若同時修改 `app.js`／`styles.css` 仍容易衝突；平行工作應使用獨立 Git worktree，或明確切分不同模組。
 
 ## 9. 啟動與驗證
 

@@ -1,0 +1,60 @@
+/* Project validation workspace. Status surfaces remain shared in components.css. */
+.validation-list {
+  display: grid;
+  gap: 8px;
+}
+
+.issue-row {
+  display: grid;
+  grid-template-columns: 76px minmax(150px, 0.8fr) minmax(240px, 1.6fr);
+  padding: 11px 13px;
+  gap: 12px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-left-width: 3px;
+  border-radius: var(--radius);
+}
+
+.issue-row.error {
+  border-left-color: var(--danger);
+}
+
+.issue-row.warning {
+  border-left-color: #d18a28;
+}
+
+.issue-level {
+  font-size: 11px;
+  font-weight: 750;
+}
+
+.issue-row.error .issue-level {
+  color: var(--danger);
+}
+
+.issue-row.warning .issue-level {
+  color: var(--amber);
+}
+
+.issue-location {
+  overflow: hidden;
+  color: var(--muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.issue-message {
+  font-size: 12px;
+}
+
+@media (max-width: 760px) {
+  .issue-row {
+    grid-template-columns: 74px minmax(0, 1fr);
+  }
+
+  .issue-message {
+    grid-column: 1 / -1;
+  }
+}

@@ -284,6 +284,26 @@ function toast(message, kind = "") {
 }
 
 const api = SceneEditorApi.createApiClient();
+const nodeWorkspaceController = SceneNodeWorkspace.createController({
+  panel: dom.nodePanel,
+  t,
+  escapeHtml,
+  onSubmit: saveNode,
+  onAutosave: scheduleNodeAutosave,
+  onSetRoot: setSelectedNodeAsRoot,
+  onDelete: deleteNode,
+});
+const validationController = SceneValidationWorkspace.createController({
+  panel: dom.validationPanel,
+  getIssues: () => state.issues,
+  setIssues: (issues) => { state.issues = issues; },
+  flush: flushAutosave,
+  api,
+  onIssuesChange: updateHeader,
+  toast,
+  t,
+  escapeHtml,
+});
 const undoCoordinator = createUndoCoordinator({
   flush: () => autosaveCoordinator.flush({ force: true }),
   hasUnsaved: () => autosaveCoordinator.hasUnsaved(),
@@ -833,7 +853,7 @@ function renderAll() {
   renderContentPanel();
   renderStatsPanel();
   if (state.activeTab === "graph") renderGraphPanel();
-  renderValidationPanel();
+  validationController.render();
   switchTab(state.activeTab, { render: false });
   updateEmptyState();
   syncShortcutTitles();
@@ -927,7 +947,7 @@ function switchTab(tab, { render = true } = {}) {
     if (tab === "options") renderOptionsPanel();
     if (tab === "stats") renderStatsPanel();
     if (tab === "graph") renderGraphPanel();
-    if (tab === "validation") renderValidationPanel();
+    if (tab === "validation") validationController.render();
   }
   updateEmptyState();
   if (isSwitchingTab) playWorkspaceAnimation("tab-switch-enter");
@@ -968,114 +988,14 @@ async function requestTabSwitch(tab, options = {}) {
 }
 
 function renderNodePanel() {
-  if (!state.nodeDetail) {
-    dom.nodePanel.innerHTML = "";
-    return;
-  }
-  const node = state.nodeDetail.node;
-  const isGlobal = isGlobalNode();
-  const isRoot = node.ID === state.rootNodeId;
-  const events = (state.nodeDetail.events || []).map((entry) => entry.data || {});
-  const optionsCount = state.nodeDetail.options?.Elements?.length || 0;
-  const labelCount = (state.nodeDetail.contents || []).reduce((total, content) => total + (content.labels?.length || 0), 0);
-  const outgoing = (state.graph?.edges || []).filter((edge) => String(edge.source) === String(node.ID));
-  const incoming = (state.graph?.edges || []).filter((edge) => String(edge.target) === String(node.ID));
-  const nodeName = (nodeId) => (
-    String(state.globalNode?.id) === String(nodeId)
-      ? state.globalNode.name
-      : state.nodes.find((item) => String(item.id) === String(nodeId))?.name
-  ) || nodeId;
-  const groupConnections = (items, direction) => {
-    const grouped = new Map();
-    items.forEach((edge) => {
-      const relatedNode = direction === "out" ? edge.target : edge.source;
-      const endUp = edge.endUp || "GOTO";
-      const key = `${relatedNode}\u0000${endUp}`;
-      if (!grouped.has(key)) grouped.set(key, { relatedNode, endUp, count: 0 });
-      grouped.get(key).count += 1;
-    });
-    return [...grouped.values()];
-  };
-  const incomingConnections = groupConnections(incoming, "in");
-  const outgoingConnections = groupConnections(outgoing, "out");
-  const connectionChips = (items) => {
-    if (!items.length) return '<span class="node-flow-empty">None</span>';
-    return items.map((connection) => `
-      <span class="node-flow-chip is-${String(connection.endUp).toLocaleLowerCase()}">
-        ${escapeHtml(nodeName(connection.relatedNode))}
-        <small>${escapeHtml(connection.endUp)}${connection.count > 1 ? ` ×${connection.count}` : ""}</small>
-      </span>
-    `).join("");
-  };
-  const lifecycleCount = (trigger) => events.filter((event) => event.Trigger === trigger).length;
-  dom.nodePanel.innerHTML = `
-    <div class="panel-page node-panel-page">
-      <div class="node-editor-shell">
-        <div class="node-root-row">
-          <div>
-            <span class="root-node-badge ${isGlobal ? "is-global" : ""}">${isGlobal ? "GLOBAL" : isRoot ? "ROOT" : "NODE"}</span>
-            <span>${escapeHtml(isGlobal ? t("套用至所有 Scene Node 的全域事件與選項作用域") : isRoot ? t("目前的遊戲起始節點") : t("可設為遊戲起始節點"))}</span>
-          </div>
-          ${isGlobal || isRoot ? "" : `<button class="quiet-button compact" id="setRootNodeButton" type="button">${escapeHtml(t("設為起始節點"))}</button>`}
-        </div>
-        <form id="nodeForm" class="bento-form">
-          <div class="form-section node-form-section node-identity-section">
-            <div class="form-grid two-columns">
-              <label class="field">
-                <span>Name</span>
-                <input name="Name" required value="${escapeHtml(node.Name || node.ID || "")}">
-              </label>
-              <label class="field">
-                <span>ID</span>
-                <input value="${escapeHtml(node.ID || "")}" disabled>
-                <input name="ID" type="hidden" value="${escapeHtml(node.ID || "")}">
-              </label>
-            </div>
-          </div>
-        </form>
-
-        <section class="node-overview" aria-label="Node overview">
-          <div class="node-overview-metrics">
-            <article><span>Events</span><strong>${events.length}</strong></article>
-            <article><span>Options</span><strong>${optionsCount}</strong></article>
-            <article><span>Content Labels</span><strong>${labelCount}</strong></article>
-            <article><span>Flow Links</span><strong>${outgoingConnections.length}</strong></article>
-          </div>
-          <div class="node-overview-details">
-            <article class="node-overview-card">
-              <header><span>FLOW</span><strong>${isGlobal ? "Contextual Transitions" : "Node Connections"}</strong></header>
-              <div class="node-flow-row">
-                <span>Incoming</span>
-                <div>${connectionChips(incomingConnections)}</div>
-              </div>
-              <div class="node-flow-row">
-                <span>Outgoing</span>
-                <div>${connectionChips(outgoingConnections)}</div>
-              </div>
-            </article>
-            <article class="node-overview-card">
-              <header><span>LIFECYCLE</span><strong>Event Phases</strong></header>
-              <div class="node-lifecycle-grid">
-                <div><span>On Enter</span><strong>${lifecycleCount("Auto:Enter")}</strong></div>
-                <div><span>On Node</span><strong>${lifecycleCount("Auto:Node")}</strong></div>
-                <div><span>On Exit</span><strong>${lifecycleCount("Auto:Exit")}</strong></div>
-              </div>
-            </article>
-          </div>
-        </section>
-
-        ${isGlobal ? "" : `<div class="editor-danger-zone">
-          <button class="danger-button" id="deleteNodeButton" type="button" ${isRoot ? `disabled title="${escapeHtml(t("請先將其他節點設為起始節點"))}"` : ""}>${escapeHtml(t("刪除節點"))}</button>
-        </div>`}
-      </div>
-    </div>
-  `;
-  const form = document.querySelector("#nodeForm");
-  form?.addEventListener("submit", saveNode);
-  form?.addEventListener("input", scheduleNodeAutosave);
-  form?.addEventListener("change", scheduleNodeAutosave);
-  document.querySelector("#setRootNodeButton")?.addEventListener("click", setSelectedNodeAsRoot);
-  document.querySelector("#deleteNodeButton")?.addEventListener("click", deleteNode);
+  nodeWorkspaceController.render({
+    detail: state.nodeDetail,
+    rootNodeId: state.rootNodeId,
+    globalNode: state.globalNode,
+    nodes: state.nodes,
+    graph: state.graph,
+    isGlobal: isGlobalNode(),
+  });
 }
 
 async function setSelectedNodeAsRoot() {
@@ -1093,7 +1013,7 @@ async function setSelectedNodeAsRoot() {
     state.issues = (await api("/api/validate")).issues || [];
     renderNodeList();
     renderNodePanel();
-    renderValidationPanel();
+    validationController.render();
     updateHeader();
     setSaveState(t("已同步"));
     toast(t("{name} 已設為起始節點", { name: state.nodeDetail.node.Name || nodeId }));
@@ -4594,42 +4514,6 @@ async function renderGraphPanel() {
   });
 }
 
-function renderValidationPanel() {
-  const errors = state.issues.filter((issue) => issue.level === "error").length;
-  const warnings = state.issues.filter((issue) => issue.level !== "error").length;
-  dom.validationPanel.innerHTML = `
-    <div class="panel-page wide">
-      <div class="section-heading">
-        <div><span class="section-kicker">PROJECT CHECK</span><h2>${t("專案檢查")}</h2><p>${t("{errors} 個錯誤，{warnings} 個提醒。", { errors, warnings })}</p></div>
-        <div class="section-actions"><button class="primary-button" id="runValidationButton" type="button">${t("重新檢查")}</button></div>
-      </div>
-      ${state.issues.length ? `
-        <div class="validation-list">${state.issues.map((issue) => `
-          <div class="issue-row ${escapeHtml(issue.level)}">
-            <span class="issue-level">${issue.level === "error" ? t("錯誤") : t("提醒")}</span>
-            <span class="issue-location" title="${escapeHtml(issue.location)}">${escapeHtml(issue.location)}</span>
-            <span class="issue-message">${escapeHtml(issue.message)}</span>
-          </div>
-        `).join("")}</div>
-      ` : `<div class="success-state">${t("未發現專案問題")}</div>`}
-    </div>
-  `;
-  document.querySelector("#runValidationButton")?.addEventListener("click", runValidation);
-}
-
-async function runValidation() {
-  if (!await flushAutosave()) return;
-  try {
-    const data = await api("/api/validate");
-    state.issues = data.issues || [];
-    updateHeader();
-    renderValidationPanel();
-    toast(state.issues.length ? t("找到 {count} 個項目", { count: state.issues.length }) : t("專案檢查通過"));
-  } catch (error) {
-    toast(error.message, "error");
-  }
-}
-
 async function refreshAfterSave() {
   const selectedPath = state.selectedNodePath;
   const project = await api("/api/project");
@@ -5090,7 +4974,7 @@ function bindGlobalEvents() {
   document.querySelector("#newNodeButton").addEventListener("click", openNodeDialog);
   document.querySelector("#emptyNewNodeButton").addEventListener("click", openNodeDialog);
   document.querySelector("#refreshProject").addEventListener("click", async () => { if (await flushAutosave()) await loadProject(); });
-  document.querySelector("#validateButton")?.addEventListener("click", async () => { if (await requestTabSwitch("validation")) await runValidation(); });
+  document.querySelector("#validateButton")?.addEventListener("click", async () => { if (await requestTabSwitch("validation")) await validationController.run(); });
   document.querySelector("#settingsButton").addEventListener("click", openSettings);
   dom.nodeSearch.addEventListener("input", renderNodeList);
   dom.nodeList.addEventListener("click", (event) => {
