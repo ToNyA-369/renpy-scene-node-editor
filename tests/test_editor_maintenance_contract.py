@@ -7,6 +7,10 @@ ROOT = Path(__file__).resolve().parents[1]
 APP_JS = (ROOT / "EDITOR" / "static" / "app.js").read_text(encoding="utf-8")
 INDEX_HTML = (ROOT / "EDITOR" / "static" / "index.html").read_text(encoding="utf-8")
 STYLES_CSS = (ROOT / "EDITOR" / "static" / "styles.css").read_text(encoding="utf-8")
+EDITOR_CSS = (ROOT / "EDITOR" / "static" / "css" / "editor.css").read_text(encoding="utf-8")
+COMPONENTS_CSS = (ROOT / "EDITOR" / "static" / "css" / "components.css").read_text(encoding="utf-8")
+NODE_CSS = (ROOT / "EDITOR" / "static" / "css" / "workspaces" / "node.css").read_text(encoding="utf-8")
+VALIDATION_CSS = (ROOT / "EDITOR" / "static" / "css" / "workspaces" / "validation.css").read_text(encoding="utf-8")
 TOKENS_CSS = (ROOT / "EDITOR" / "static" / "css" / "tokens.css").read_text(encoding="utf-8")
 
 
@@ -35,6 +39,8 @@ class EditorMaintenanceContractTests(unittest.TestCase):
             "/js/workspaces/textbox_profiles.js",
             "/js/workspaces/content_editor_support.js",
             "/js/workspaces/state_editor.js",
+            "/js/workspaces/node_workspace.js",
+            "/js/workspaces/validation_workspace.js",
             "/vendor/content_editor.js",
         ):
             with self.subTest(module=module):
@@ -51,6 +57,10 @@ class EditorMaintenanceContractTests(unittest.TestCase):
             "function conditionRowsHtml(",
             "function effectRowsHtml(",
             "function readWeighted(",
+            "const groupConnections = (",
+            'class="node-overview"',
+            "function renderValidationPanel(",
+            "async function runValidation(",
         ):
             with self.subTest(implementation=implementation):
                 self.assertNotIn(implementation, APP_JS)
@@ -61,15 +71,48 @@ class EditorMaintenanceContractTests(unittest.TestCase):
         self.assertNotIn("data-content-picker-toggle", APP_JS)
         self.assertIn("const LAYOUT = Object.freeze({", (ROOT / "EDITOR" / "static" / "js" / "ui" / "choice_picker.js").read_text(encoding="utf-8"))
 
-    def test_css_foundations_load_before_legacy_workspace_styles(self):
+    def test_css_foundations_and_current_editor_layer_load_in_contract_order(self):
         tokens = INDEX_HTML.index('href="/css/tokens.css"')
         base = INDEX_HTML.index('href="/css/base.css"')
         legacy = INDEX_HTML.index('href="/styles.css"')
+        components = INDEX_HTML.index('href="/css/components.css"')
+        node = INDEX_HTML.index('href="/css/workspaces/node.css"')
+        validation = INDEX_HTML.index('href="/css/workspaces/validation.css"')
+        editor = INDEX_HTML.index('href="/css/editor.css"')
         self.assertLess(tokens, base)
         self.assertLess(base, legacy)
         self.assertLess(INDEX_HTML.index('href="/vendor/content_editor.css"'), legacy)
-        self.assertIn("--canvas:", TOKENS_CSS)
+        self.assertLess(legacy, components)
+        self.assertLess(components, node)
+        self.assertLess(node, validation)
+        self.assertLess(validation, editor)
+        for token in (
+            "--canvas: #e5e5e2;",
+            "--surface: #f4f4f4;",
+            "--ink: #464646;",
+            "--accent: #5c7265;",
+            "--danger: #aa7878;",
+            "--panel-radius: 26px;",
+            "--control-height-compact: 34px;",
+            "--section-action-width: 96px;",
+            "--motion-medium: 220ms;",
+        ):
+            with self.subTest(token=token):
+                self.assertIn(token, TOKENS_CSS)
         self.assertFalse(STYLES_CSS.lstrip().startswith(":root {"))
+        self.assertNotRegex(STYLES_CSS, r"(?m)^:root\s*\{")
+        self.assertNotRegex(EDITOR_CSS, r"(?m)^:root\s*\{")
+        self.assertIn("Shared form and action primitives", COMPONENTS_CSS)
+        self.assertIn("height: var(--control-height);", COMPONENTS_CSS)
+        self.assertIn("width: var(--control-height-compact);", COMPONENTS_CSS)
+        self.assertIn("Node overview workspace", NODE_CSS)
+        self.assertIn(".node-overview {", NODE_CSS)
+        self.assertIn(".panel-page.node-panel-page {", NODE_CSS)
+        self.assertIn("Project validation workspace", VALIDATION_CSS)
+        self.assertNotIn(".node-overview {", EDITOR_CSS)
+        self.assertNotIn(".validation-list {", STYLES_CSS)
+        self.assertNotRegex(STYLES_CSS, r"(?m)^\.primary-button,\s*$")
+        self.assertIn("Current editor shell and workspace presentation", EDITOR_CSS)
 
     def test_content_editor_preserves_textarea_autosave_contract(self):
         self.assertIn('id="contentEditor"', APP_JS)

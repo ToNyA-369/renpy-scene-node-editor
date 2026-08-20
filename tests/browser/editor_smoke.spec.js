@@ -2044,6 +2044,14 @@ test("dynamic English surfaces render localized strings correctly across all wor
   await page.getByRole("button", { name: /^Validation/ }).click();
   await expect(page.getByRole("heading", { name: "Project Validation" })).toBeVisible();
   await expect(page.locator("#runValidationButton")).toHaveText("Re-check");
+  const validationResponse = page.waitForResponse((candidate) => (
+    candidate.url().endsWith("/api/validate")
+    && candidate.request().method() === "GET"
+    && candidate.ok()
+  ));
+  await page.locator("#runValidationButton").click();
+  await validationResponse;
+  await expect(page.locator("#toastRegion")).toContainText("Project validation passed");
 
   await page.evaluate(() => document.querySelector("#newNodeButton")?.click());
   await expect(page.locator("#nodeDialog")).toBeVisible();
@@ -2624,6 +2632,34 @@ test("interaction details expose keyboard focus and honor reduced motion", async
     .toBe("rgb(92, 114, 101)");
   await expect.poll(() => nameField.evaluate((field) => getComputedStyle(field).boxShadow))
     .not.toBe("none");
+
+  await eventTab.click();
+  const eventSectionAction = page.locator(".form-section-header .section-add-button").first();
+  await expect(eventSectionAction).toBeVisible();
+  const eventSectionActionStyle = await eventSectionAction.evaluate((button) => {
+    const style = getComputedStyle(button);
+    const rect = button.getBoundingClientRect();
+    return {
+      width: Math.round(rect.width),
+      height: Math.round(rect.height),
+      borderRadius: style.borderRadius,
+      fontWeight: style.fontWeight,
+    };
+  });
+  await page.locator('.tab[data-tab="stats"]').click();
+  const stateSectionAction = page.locator(".state-section-heading .state-add-button").first();
+  await expect(stateSectionAction).toBeVisible();
+  await expect.poll(() => stateSectionAction.evaluate((button) => {
+    const style = getComputedStyle(button);
+    const rect = button.getBoundingClientRect();
+    return {
+      width: Math.round(rect.width),
+      height: Math.round(rect.height),
+      borderRadius: style.borderRadius,
+      fontWeight: style.fontWeight,
+    };
+  })).toEqual(eventSectionActionStyle);
+  await page.locator('.tab[data-tab="node"]').click();
 
   await page.evaluate(() => document.querySelector("#settingsButton")?.click());
   const settingsDialog = page.locator("#settingsDialog");

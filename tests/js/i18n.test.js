@@ -66,6 +66,8 @@ test("untranslated Editor-owned literal completeness guard", () => {
     "js/core/event_contract.js",
     "js/ui/choice_picker.js",
     "js/workspaces/event_editor.js",
+    "js/workspaces/node_workspace.js",
+    "js/workspaces/validation_workspace.js",
   ];
   const modules = modulePaths.map((relative) => ({
     source: relative,

@@ -1,0 +1,164 @@
+/* Shared form and action primitives. Workspace-specific composition stays in editor.css. */
+.field {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.field > span,
+.field-label {
+  color: #39433f;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.field small {
+  color: var(--faint);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+input,
+select,
+textarea {
+  width: 100%;
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--control-radius);
+}
+
+input,
+select {
+  height: var(--control-height);
+  padding: 0 10px;
+}
+
+textarea {
+  min-height: 100px;
+  padding: 10px;
+  resize: vertical;
+}
+
+input:hover,
+select:hover,
+textarea:hover {
+  border-color: #a7b0a9;
+}
+
+input:disabled,
+select:disabled,
+textarea:disabled {
+  color: var(--faint);
+  background: var(--surface-soft);
+}
+
+.checkbox-field {
+  display: flex;
+  align-items: center;
+  min-height: var(--control-height);
+  gap: 8px;
+}
+
+.checkbox-field input {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+.checkbox-field span {
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.primary-button,
+.quiet-button,
+.danger-button,
+.icon-button,
+.row-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 36px;
+  padding: 0 13px;
+  gap: 5px;
+  border-radius: var(--control-radius);
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+.primary-button {
+  color: #ffffff;
+  background: var(--accent);
+  border: 1px solid var(--accent);
+}
+
+.primary-button:hover {
+  background: var(--accent-dark);
+  border-color: var(--accent-dark);
+}
+
+.quiet-button {
+  color: #39433f;
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+}
+
+.quiet-button:hover {
+  background: var(--surface-soft);
+}
+
+.danger-button {
+  color: var(--danger);
+  background: var(--surface);
+  border: 1px solid #e3b7b4;
+}
+
+.danger-button:hover {
+  background: var(--danger-soft);
+}
+
+.compact {
+  min-height: var(--control-height-compact);
+  padding: 0 10px;
+  font-size: 12px;
+}
+
+.icon-button,
+.row-button {
+  width: var(--control-height-compact);
+  min-width: var(--control-height-compact);
+  height: var(--control-height-compact);
+  min-height: var(--control-height-compact);
+  padding: 0;
+  color: var(--muted);
+  background: transparent;
+  border: 1px solid transparent;
+  font-size: 18px;
+}
+
+.icon-button:hover,
+.row-button:hover {
+  color: var(--ink);
+  background: var(--surface-soft);
+  border-color: var(--line);
+}
+
+.success-state {
+  padding: 28px;
+  color: var(--accent-dark);
+  background: var(--accent-soft);
+  border: 1px solid #b9dfd2;
+  border-radius: var(--radius);
+  text-align: center;
+}
+/* Shared disabled danger action state */
+.danger-button:disabled {
+  opacity: 0.46;
+  cursor: not-allowed;
+}
+
+.danger-button:disabled:hover {
+  background: var(--surface);
+}

@@ -18,6 +18,8 @@ js/ui/choice_picker.js           共用階層下拉選單
 js/workspaces/event_editor.js    Event 規則、權重選擇與 DOM 序列化
 js/workspaces/state_editor.js    Stats 群組與階層選單資料
 js/workspaces/graph_model.js     關聯圖關係、布局與路徑
+js/workspaces/node_workspace.js  Node 總覽資料、渲染與表單事件接線
+js/workspaces/validation_workspace.js 專案檢查渲染、刷新與失敗回饋
 app.js                           狀態組裝、畫面渲染與跨模組協調
 ```
 
@@ -28,6 +30,8 @@ app.js                           狀態組裝、畫面渲染與跨模組協調
 3. 純邏輯可直接由 `node:test` 執行。
 
 目前採瀏覽器原生腳本與明確 namespace，不加入 bundler 或第三方前端框架。`index.html` 是模組載入順序的唯一入口。
+
+工作區專屬樣式放在 `css/workspaces/`。Node 總覽與 Project Validation 已各自拆成 `node.css`、`validation.css`；共用 primitive 留在 `components.css`，`editor.css` 只保留 shell 與尚未拆分的組合規則。
 
 ## 常見擴充路徑
 
@@ -82,7 +86,11 @@ Event 表單的純資料轉換由 `tests/js/event_editor.test.js` 驗證；Edito
 
 - `css/tokens.css`：唯一的基礎色彩、尺寸與共用 token。
 - `css/base.css`：reset、字體、focus 等全頁預設。
-- `styles.css`：尚待漸進拆分的既有元件與工作區規則。
+- `css/components.css`：共用表單欄位與按鈕 primitive；工作區只能在必要情境覆寫。
+- `css/workspaces/node.css`：Node 總覽、root 狀態、flow／lifecycle 卡片與窄版規則。
+- `css/workspaces/validation.css`：專案檢查工作區的問題列與響應式規則。
+- `styles.css`：仍待漸進拆分的歷史元件與工作區規則。
+- `css/editor.css`：目前 Editor shell、工作區組合與回應式規則；固定載入於已抽出的 workspace CSS 之後。
 
 移動 CSS 時先維持 selector、屬性、載入順序完全相同，再以瀏覽器確認桌面、窄畫面與 reduced-motion。不可在「搬檔案」時順便調整視覺。
 
