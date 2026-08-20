@@ -198,7 +198,7 @@ Picture shares `ID`, `Name`, `Availability`, `Layout`, `Hover`, and sound fields
 
 Options have no lifecycle, condition expressions, or custom Screen source. Every displayed Option is actionable. Version 1 data and omitted `Availability` values are read as `ALWAYS`; Version 1 and 2 documents normalize to Version 3 on their next save without changing unprofiled presentation.
 
-`Elements` and TEXTBOX `Items` are ordered arrays. Pointer dragging from row whitespace reorders the existing arrays directly and adds no Group or Order field. Element order is the stable tie-breaker when `Z Order` values match; distinct `Z Order` values remain the explicit layer control. Item array order determines display and staggered entrance order.
+`Elements` and TEXTBOX `Items` are ordered arrays. Pointer dragging from row whitespace reorders the existing arrays directly and adds no Group or Order field. The Runtime merges the current node and Global Options, then renders them from smaller to larger `Z Order`; a larger value is visually topmost and receives overlapping pointer interaction first. Equal `Z Order` values preserve stable scope and Element-array order, with the later array entry on top. When PICTURE Alpha Hit Test is enabled, transparent image pixels do not block interaction with a lower layer. Item array order determines display and staggered entrance order.
 
 ## Event
 

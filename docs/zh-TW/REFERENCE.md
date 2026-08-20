@@ -208,7 +208,7 @@ Picture 使用相同的 `ID`、`Name`、`Availability`、`Layout`、`Hover` 與�
 
 Options 沒有生命週期、條件運算式或自訂 Screen 來源。所有已顯示的 Options 都可操作。Version 1 或省略 `Availability` 的資料視為 `ALWAYS`；Version 1／2 在下次儲存時正規化為 Version 3，未使用外觀設定檔時的顯示不變。
 
-`Elements` 與 TEXTBOX 的 `Items` 都是有序陣列。Editor 可由列留白以 Pointer 拖移並直接重排既有陣列，不新增 Group 或 Order 欄位。Element 順序在 `Z Order` 相同時提供穩定先後；不同 `Z Order` 仍依明確層級排序。Item 陣列順序決定顯示及逐項進場順序。
+`Elements` 與 TEXTBOX 的 `Items` 都是有序陣列。Editor 可由列留白以 Pointer 拖移並直接重排既有陣列，不新增 Group 或 Order 欄位。Runtime 會將目前節點與 Global Options 合併後依 `Z Order` 由小到大繪製；數字較大的 Element 位於上層，重疊時也優先接收滑鼠互動。`Z Order` 相同時保留作用域與 Element 陣列的穩定順序，陣列中較後方者位於較上層。啟用 PICTURE 的 Alpha Hit Test 時，圖片透明像素不攔截下層互動。Item 陣列順序決定顯示及逐項進場順序。
 
 ## Event
 

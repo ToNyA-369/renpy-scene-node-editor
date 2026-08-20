@@ -727,6 +727,23 @@ init -100 python:
         return scopes
 
 
+    def scene_option_z_order(element):
+        try:
+            return int(element.get("Layout", {}).get("Z Order", 10))
+        except (AttributeError, TypeError, ValueError):
+            return 10
+
+
+    def scene_option_render_elements(node_id):
+        elements = []
+        for option_node_id in scene_option_scope_ids(node_id):
+            elements.extend(
+                (option_node_id, element)
+                for element in scene_option_data(option_node_id).get("Elements", [])
+            )
+        return sorted(elements, key=lambda entry: scene_option_z_order(entry[1]))
+
+
     def scene_option_is_available(node_id, element, item=None):
         option = item if item is not None else element
         if str(option.get("Availability") or "ALWAYS").upper() != "CONTROLLED":

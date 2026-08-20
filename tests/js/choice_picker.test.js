@@ -8,6 +8,8 @@ const { LAYOUT, buildOptionHierarchy, hierarchyDepth } = require("../../EDITOR/s
 test("choice picker exposes shared layout values to specialized pickers", () => {
   assert.equal(LAYOUT.menuWidth, 240);
   assert.equal(LAYOUT.submenuGap, 14);
+  assert.equal(LAYOUT.itemHeight, 38);
+  assert.equal(LAYOUT.menuMaxHeight, 320);
   assert.ok(Object.isFrozen(LAYOUT));
 });
 

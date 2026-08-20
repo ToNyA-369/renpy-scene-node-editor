@@ -2548,7 +2548,8 @@ textarea:disabled {
 
   #eventForm > .section-heading,
   #eventForm > .form-section,
-  #eventForm > .collapsible-section {
+  #eventForm > .collapsible-section,
+  #eventForm > .event-rule-section {
     grid-column: 1;
   }
 
@@ -4802,7 +4803,8 @@ textarea:hover {
   }
 
   #eventForm > .event-primary-section,
-  #eventForm > .collapsible-section {
+  #eventForm > .collapsible-section,
+  #eventForm > .event-rule-section {
     padding: 20px;
     border-radius: 18px;
   }
@@ -5267,6 +5269,18 @@ textarea:hover {
   padding-inline: 30px;
 }
 
+#eventForm > .event-rule-section {
+  grid-column: 1 / -1;
+  min-width: 0;
+  padding-inline: 30px;
+  outline: none;
+}
+
+#eventForm > .event-rule-section:focus-visible {
+  border-color: var(--accent);
+  box-shadow: var(--focus-ring);
+}
+
 #eventForm .form-section-header {
   margin-bottom: 8px;
   padding-inline: 4px;
@@ -5275,6 +5289,10 @@ textarea:hover {
 #eventForm .collapsible-section-body {
   padding-top: 12px;
   border-top: 0;
+}
+
+#eventForm .event-section-body {
+  padding-top: 12px;
 }
 
 .form-section-header .section-add-button {
@@ -5408,7 +5426,8 @@ textarea:hover {
 
   .node-editor-shell .node-form-section,
   .node-editor-shell .node-identity-section,
-  #eventForm > .collapsible-section {
+  #eventForm > .collapsible-section,
+  #eventForm > .event-rule-section {
     padding: 20px;
   }
 
@@ -6258,12 +6277,14 @@ input.select-choice-trigger {
 }
 
 .content-choice-menu,
-.select-choice-menu,
-.content-label-submenu {
+.select-choice-menu {
   position: absolute;
+  inset: auto;
   z-index: 80;
   display: none;
+  box-sizing: border-box;
   width: 270px;
+  margin: 0;
   padding: 7px;
   gap: 4px;
   background: var(--surface);
@@ -6278,6 +6299,18 @@ input.select-choice-trigger {
   max-height: 320px;
   overflow: auto;
   overscroll-behavior: contain;
+}
+
+.content-choice-menu:popover-open,
+.select-choice-menu:popover-open {
+  right: auto;
+  bottom: auto;
+  width: min(240px, calc(100vw - 24px));
+  min-width: 0;
+  max-width: min(240px, calc(100vw - 24px));
+  height: max-content;
+  min-height: 0;
+  max-height: min(320px, calc(100vh - 24px));
 }
 
 .content-label-submenu::before,
@@ -6299,10 +6332,8 @@ input.select-choice-trigger {
 .content-choice-picker.open > .content-choice-menu,
 .select-choice-picker.open > .select-choice-menu,
 .content-file-branch:hover > .content-label-submenu,
-.content-file-branch:focus-within > .content-label-submenu,
 .content-file-branch.submenu-open > .content-label-submenu,
 .select-choice-branch:hover > .select-choice-submenu,
-.select-choice-branch:focus-within > .select-choice-submenu,
 .select-choice-branch.submenu-open > .select-choice-submenu {
   display: grid;
 }
@@ -6313,11 +6344,21 @@ input.select-choice-trigger {
 
 .content-file-choice,
 .content-label-submenu button {
+  box-sizing: border-box;
+  height: 38px;
   min-height: 38px;
+  max-height: 38px;
   padding: 8px 10px;
   border-color: transparent;
   border-radius: 9px;
+  font-family: inherit;
   font-size: 12px;
+  font-weight: 620;
+  line-height: 1.35;
+  letter-spacing: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .content-file-choice {
@@ -6327,10 +6368,19 @@ input.select-choice-trigger {
   gap: 10px;
 }
 
+.content-file-choice span,
+.content-label-submenu button {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .content-file-choice:hover,
 .content-file-choice:focus-visible,
+.content-file-choice.is-picker-active,
 .content-label-submenu button:hover,
-.content-label-submenu button:focus-visible {
+.content-label-submenu button:focus-visible,
+.content-label-submenu button.is-picker-active {
   background: var(--accent-soft);
   border-color: rgba(92, 114, 101, 0.45);
   outline: none;
@@ -6349,9 +6399,25 @@ input.select-choice-trigger {
 .content-label-submenu {
   position: fixed;
   z-index: 310;
+  display: none;
+  width: 270px;
+  overflow: visible;
+}
+
+.content-label-submenu-scroll,
+.select-choice-submenu-scroll {
+  display: grid;
+  box-sizing: border-box;
+  width: 100%;
   max-height: 320px;
+  padding: 7px;
+  gap: 4px;
   overflow: auto;
   overscroll-behavior: contain;
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  border-radius: 14px;
+  box-shadow: var(--panel-shadow);
 }
 
 .content-choice-empty {
@@ -6372,16 +6438,25 @@ input.select-choice-trigger {
 .select-choice-option,
 .select-choice-folder {
   position: relative;
+  box-sizing: border-box;
   width: 100%;
+  height: 38px;
   min-height: 38px;
+  max-height: 38px;
   padding: 8px 34px 8px 12px;
   color: var(--ink);
   background: transparent;
   border: 1px solid transparent;
   border-radius: 9px;
-  font: inherit;
+  font-family: inherit;
   font-size: 12px;
+  font-weight: 620;
+  line-height: 1.35;
+  letter-spacing: 0;
+  overflow: hidden;
   text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .select-choice-folder {
@@ -6391,11 +6466,20 @@ input.select-choice-trigger {
   padding-right: 12px;
 }
 
+.select-choice-folder span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .select-choice-option:hover,
 .select-choice-option:focus-visible,
+.select-choice-option.is-picker-active,
 .select-choice-option[aria-selected="true"],
 .select-choice-folder:hover,
 .select-choice-folder:focus-visible,
+.select-choice-folder.is-picker-active,
 .select-choice-branch.submenu-open > .select-choice-folder {
   background: var(--accent-soft);
   border-color: rgba(92, 114, 101, 0.45);
@@ -6438,15 +6522,7 @@ input.select-choice-trigger {
   z-index: 310;
   display: none;
   width: 270px;
-  max-height: 320px;
-  padding: 7px;
-  gap: 4px;
-  overflow: auto;
-  overscroll-behavior: contain;
-  background: var(--surface);
-  border: 1px solid var(--line-strong);
-  border-radius: 14px;
-  box-shadow: var(--panel-shadow);
+  overflow: visible;
 }
 
 /* Read-only directed GOTO / REPLACE graph. */
@@ -7486,6 +7562,13 @@ body *::-webkit-scrollbar {
 .end-up-control .select-choice-trigger {
   height: 42px;
   min-height: 42px;
+}
+
+.option-editor-page .select-choice-trigger {
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 680;
+  letter-spacing: 0;
 }
 
 .graph-canvas,

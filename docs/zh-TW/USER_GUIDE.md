@@ -63,7 +63,7 @@ Event 是目前節點對 Trigger 的反應。主要欄位：
 - `Conditions`：Event 是否能成為候選。
 - `Effects`：Event 執行時先套用的 Stat、Memory 或 Option Availability 改變。
 - `Content`：接著呼叫的 Ren'Py label，可使用權重。
-- `End up`：Content 返回後執行 REDO、GOTO、REPLACE 或 EXIT。GOTO／REPLACE 都可使用單一或權重 Next Node。
+- `End up`：Content 返回後執行 REDO、GOTO、REPLACE 或 EXIT。GOTO／REPLACE 都可使用單一或權重 Next Node；選單會以「群組 → 節點」呈現已群組節點，未群組節點維持第一層，保存值仍是穩定 Node ID。
 
 UI 中的 `Option` 技術格式仍是 `Action:<id>`。Event 選擇器會列出目前作用域 Options 已註冊的 Triggers；在 Global Node 編輯的 Option Trigger 會在所有實際節點的互動畫面可用。
 
@@ -104,7 +104,7 @@ Options 是固定資料化的玩家互動介面。所有顯示的選項都可操
 
 表單模式負責 Name、Text、Trigger、圖片與聲音。畫布模式負責位置、尺寸、圖層、Hover、顏色與視覺細節。
 
-表單模式的 Element 側欄與 TEXTBOX Items 都可直接拖移排序，不提供額外把手，也不建立群組。TEXTBOX Item 的整個卡片都是拖移面，只有叉叉刪除鍵維持獨立操作。Element 陣列順序會保存，並作為相同 Z Order 時的穩定先後順序；明確的 Z Order 仍是畫布圖層的主要控制。TEXTBOX Item 順序同時決定遊戲中的顯示與逐項進場順序。
+表單模式的 Element 側欄與 TEXTBOX Items 都可直接拖移排序，不提供額外把手，也不建立群組。TEXTBOX Item 的整個卡片都是拖移面，只有叉叉刪除鍵維持獨立操作。明確的 Z Order 是畫布與遊戲中的主要圖層控制：數值較大的 Element 位於上層，重疊時也優先收到點擊。Element 陣列順序會保存，並作為相同 Z Order 時的穩定先後順序；陣列中較後方者位於較上層。TEXTBOX Item 順序同時決定遊戲中的顯示與逐項進場順序。
 
 畫布模式以約 4:3 的寬度同時顯示左側預覽與右側 Inspector。Inspector 頂端固定顯示目前 Element、類型、外觀摘要與「佈局／樣式／效果／Item」分類；下方一次只呈現目前任務相關的控制，不再使用多層摺疊或跳到獨立頁面。點擊畫布上的 Text Box Item 會直接切到該 Item 分頁，修改顏色、文字或效果時仍可立即查看畫布回饋。設定檔可在 `game/DATA/TEXTBOX_PROFILES/` 建立與編輯獨立 JSON 檔，包含基礎色彩、文字樣式，以及懸停強調條、懸停文字色、Item 邊框、文字陰影、文字描邊、逐項進場六種可選特性。同一個設定檔可套用到任意 Scene Node 或 Global Options 的多個 Text Box；更新設定檔後，所有未個別覆寫的引用會一起更新。
 
@@ -210,9 +210,8 @@ GOTO 使用實線，REPLACE 使用同色虛線；所有連線路徑仍由節點�
 - Editor 預設自動儲存；較舊的儲存回應不會覆蓋較新的修改，切換節點或分頁前會完成目前待處理寫入。
 - 按 `Cmd + Z`（macOS）或 `Ctrl + Z`（Windows／Linux）可返回上一筆成功的 Editor 專案修改，不提供額外工具列按鈕。歷史最多保留 100 步且只存在於目前這次 Editor 執行期間，重新啟動後會清空。文字輸入框與演出程式碼編輯器保留各自的原生文字復原；游標離開文字欄位後，快捷鍵才會復原新增、刪除、拖移、群組或其他已寫入的結構化修改。復原前若有等待中的修改，Editor 會先把該快照納入交易再立即恢復前值；若寫入或恢復失敗，畫面不會假裝已復原。
 - 按 `Cmd + Backspace`（macOS）或 `Ctrl + Backspace`（Windows／Linux）可刪除目前功能項目，並可在設定中改鍵。Event 內會優先刪除聚焦的條件、效果或權重列；Options 會優先刪除聚焦的 Item，其他工作區則沿用目前項目的既有刪除與確認流程。文字輸入框與演出程式碼編輯器仍保留原生文字刪除，不會誤刪資料。
-- 在 Event 子項欄位按 Esc 會退出到所在條件、效果或權重列；在演出程式碼編輯器按 Esc 會退出到演出工作區。若 Monaco 正顯示建議或尋找等暫時介面，第一下 Esc 會先關閉該介面。退出後即可用刪除快捷鍵刪除結構項目，不必用滑鼠改變焦點。
-- 所有下拉選單都可用 `↑`／`↓` 巡覽、Home／End 前往首末項、`→` 進入子層、`←` 返回父層、Enter 選取及 Esc 關閉。
-- 新增 Event 後可直接輸入 Name；接著按 Tab 會依序前往 Trigger 模式、Trigger 值、Priority、Weight、Once，再進入條件、效果、演出與 End up。自動儲存更新畫面時會保留目前焦點。
+- Event 的 Conditions、Effects、Content、End up 固定展開，不再保留收合控制。新增 Event 後可直接輸入 Name；接著按 Tab 會依序前往 Trigger 模式、Trigger 值、Priority、Weight、Once，再以同一層級巡覽四個區塊。Once 聚焦時按 Enter 可切換值；區塊聚焦時按 Enter 進入現有欄位，按 `Cmd／Ctrl + Enter` 會新增對應子項並進入新項目。子項內的 Tab／Shift + Tab 只依欄位順序移動，通過最後欄位後才前往下一區塊；Esc 回到所屬區塊。生命週期 Event 會略過不存在的 Weight 與 End up。自動儲存更新畫面時會保留目前焦點。
+- 所有下拉選單（包含 Event Content label）都由同一個共用元件呈現，使用一致高度的選項列，選單本身會依目前層的項目數量長高；超過可視上限後才在該層捲動。點開任一下拉選單後即可用 `↑`／`↓` 巡覽目前層，Home／End 前往首末項。焦點抵達父層項目時會展開子選單，但要再按 `→` 才會把焦點移入；`←` 返回父層，Enter 選取，Esc 先關閉選單。
 - 頂部工作區 Bar 可直接橫向拖移改變分頁順序；上一個／下一個功能區快捷鍵會依畫面順序巡覽，但 Cmd／Ctrl + 1…7 仍固定前往原本功能。
 - 快捷鍵、工作區順序與 Editor 設定存於專案根目錄 `.scene-node-editor/settings.json`；支援繁體中文（`zh-Hant`）與英文（`en`）介面語言切換。切換語言時若有未儲存的變更或儲存失敗，系統會予以擋下、保持原語言並提示錯誤，確保創作者內容不會遺失。
 - 重新執行 Installer 只更新受管理 Editor／Runtime。

@@ -29,6 +29,7 @@ class EditorMaintenanceContractTests(unittest.TestCase):
             "/js/ui/group_drag.js",
             "/js/ui/list_reorder.js",
             "/js/workspaces/event_editor.js",
+            "/js/workspaces/event_focus_navigation.js",
             "/js/workspaces/graph_model.js",
             "/js/workspaces/graph_layout_client.js",
             "/js/workspaces/textbox_profiles.js",
@@ -54,8 +55,10 @@ class EditorMaintenanceContractTests(unittest.TestCase):
             with self.subTest(implementation=implementation):
                 self.assertNotIn(implementation, APP_JS)
 
-    def test_content_picker_uses_shared_choice_picker_layout(self):
-        self.assertIn("} = SceneChoicePicker.LAYOUT;", APP_JS)
+    def test_content_picker_uses_shared_choice_picker_component(self):
+        self.assertIn('<select name="contentWeightedId"', APP_JS)
+        self.assertNotIn('class="content-choice-picker"', APP_JS)
+        self.assertNotIn("data-content-picker-toggle", APP_JS)
         self.assertIn("const LAYOUT = Object.freeze({", (ROOT / "EDITOR" / "static" / "js" / "ui" / "choice_picker.js").read_text(encoding="utf-8"))
 
     def test_css_foundations_load_before_legacy_workspace_styles(self):

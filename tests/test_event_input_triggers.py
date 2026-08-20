@@ -187,8 +187,9 @@ class EventInputTriggerTest(unittest.TestCase):
         self.assertIn("screen scene_option_renderer(node_id, input_bindings=None):", source)
         self.assertIn("for keysym, trigger in (input_bindings or []):", source)
         self.assertIn("key keysym action Return(trigger)", source)
-        self.assertIn("for option_node_id in scene_option_scope_ids(node_id):", source)
-        self.assertIn("use scene_option_scope(option_node_id) id option_node_id", source)
+        self.assertIn("for option_node_id, element in scene_option_render_elements(node_id):", source)
+        self.assertIn("if scene_option_is_available(option_node_id, element):", source)
+        self.assertNotIn("use scene_option_scope(option_node_id)", source)
 
         runtime, _ = load_runtime_namespace()
         self.assertEqual(runtime["scene_option_scope_ids"]("root"), ["root", "__global__"])

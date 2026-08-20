@@ -10,6 +10,25 @@
   const CONDITION_OR_GROUP = "__or__";
   const CONDITION_CLAUSE_GROUP_PREFIX = "clause:";
 
+  function pickerSegment(value) {
+    return String(value || "").replaceAll("/", "／");
+  }
+
+  function nextNodeChoices(nodes) {
+    return (nodes || []).map((node) => {
+      const id = String(node?.id || node?.path || "");
+      const name = String(node?.name || node?.Name || id);
+      const group = normalizeEventGroup(node?.group ?? node?.Group);
+      return {
+        id,
+        name,
+        pickerPath: group === DEFAULT_EVENT_GROUP
+          ? ""
+          : `${pickerSegment(group)}/${pickerSegment(name)}`,
+      };
+    });
+  }
+
   function conditionDragGroup(clause) {
     const value = String(clause || "").trim();
     return value ? `${CONDITION_CLAUSE_GROUP_PREFIX}${value}` : CONDITION_OR_GROUP;
@@ -208,7 +227,7 @@
         const type = normalizeRuleType(condition.type);
         const isMemory = type === "memory";
         return `
-          <div class="repeat-row condition-row group-drag-item${loose ? " condition-logic-block" : ""}" data-index="${index}" data-condition-id="${index}" data-condition-clause="${escapeHtml(condition.clause || "")}" data-condition-type="${escapeHtml(type)}" aria-grabbed="false">
+          <div class="repeat-row condition-row group-drag-item${loose ? " condition-logic-block" : ""}" data-event-nav-item data-index="${index}" data-condition-id="${index}" data-condition-clause="${escapeHtml(condition.clause || "")}" data-condition-type="${escapeHtml(type)}" aria-grabbed="false">
             <label class="field"><span class="visually-hidden">${tr("條件類型")}</span><select name="conditionType" aria-label="${tr("條件類型")}">${optionTags(CONDITION_TYPES, type)}</select></label>
             ${isMemory ? `
               <label class="field"><span class="visually-hidden">${tr("記憶庫")}</span><select name="conditionBank" aria-label="${tr("記憶庫")}">${namedOptionTags(memoryChoices(), condition.bank || "memory")}</select></label>
@@ -246,7 +265,7 @@
         const opItems = effectOperators(type);
         if (isOption) {
           return `
-            <div class="repeat-row effect-row option-effect-row list-reorder-item" data-index="${index}" data-reorder-id="${index}" data-effect-type="${escapeHtml(type)}" aria-grabbed="false">
+            <div class="repeat-row effect-row option-effect-row list-reorder-item" data-event-nav-item data-index="${index}" data-reorder-id="${index}" data-effect-type="${escapeHtml(type)}" aria-grabbed="false">
               <label class="field option-effect-type-field"><span class="visually-hidden">${tr("效果類型")}</span><select name="effectType" aria-label="${tr("效果類型")}">${optionTags(effectTypeChoices(), type)}</select></label>
               <label class="field option-effect-target-field"><span class="visually-hidden">${tr("Option 目標")}</span><select name="effectOptionTarget" aria-label="${tr("Option 目標")}">${optionEffectOptionTags(effect)}</select></label>
               <label class="field option-effect-operation-field"><span class="visually-hidden">${tr("操作")}</span><select name="effectOp" aria-label="${tr("操作")}">${optionTags(opItems, effect.op)}</select></label>
@@ -261,7 +280,7 @@
           ? `<select name="effectId" aria-label="Stat">${namedOptionTags(statChoices(), effect.id)}</select>`
           : `<select name="effectBank" aria-label="${tr("記憶庫")}">${namedOptionTags(memoryChoices(), effect.bank || "memory")}</select>`;
         return `
-          <div class="repeat-row effect-row list-reorder-item" data-index="${index}" data-reorder-id="${index}" data-effect-type="${escapeHtml(type)}" aria-grabbed="false">
+          <div class="repeat-row effect-row list-reorder-item" data-event-nav-item data-index="${index}" data-reorder-id="${index}" data-effect-type="${escapeHtml(type)}" aria-grabbed="false">
             <label class="field"><span class="visually-hidden">${tr("效果類型")}</span><select name="effectType" aria-label="${tr("效果類型")}">${optionTags(effectTypeChoices(), type)}</select></label>
             <label class="field"><span class="visually-hidden">${isStat ? "Stat" : tr("記憶庫")}</span>${resourceField}</label>
             <label class="field"><span class="visually-hidden">${tr("操作")}</span><select name="effectOp" aria-label="${tr("操作")}">${optionTags(opItems, effect.op)}</select></label>
@@ -281,7 +300,7 @@
           ? contentPickerHtml(id, index)
           : `<label class="field"><span class="visually-hidden">${tr("節點名稱")}</span><select name="nextWeightedId" aria-label="${tr("節點名稱")}">${namedOptionTags(choices, id)}</select></label>`;
         return `
-          <div class="repeat-row weight-row list-reorder-item ${kind === "content" ? "content-weight-row" : ""}" data-index="${index}" data-reorder-id="${index}" data-weighted-kind="${kind}" aria-grabbed="false">
+          <div class="repeat-row weight-row list-reorder-item ${kind === "content" ? "content-weight-row" : ""}" data-event-nav-item data-index="${index}" data-reorder-id="${index}" data-weighted-kind="${kind}" aria-grabbed="false">
             ${choiceControl}
             <label class="field"><span class="visually-hidden">Weight</span><input name="${kind}WeightedValue" aria-label="${tr("權重")}" type="number" min="0.0001" step="any" value="${escapeHtml(weight)}"></label>
             <button class="row-button" type="button" data-remove-weighted="${kind}:${index}" title="${tr("移除項目")}" aria-label="${tr("移除項目")}">×</button>
@@ -381,6 +400,7 @@
     groupEvents,
     normalizeEventGroup,
     normalizeConditions,
+    nextNodeChoices,
     planConditionDrop,
     removeWeightedChoice,
   };

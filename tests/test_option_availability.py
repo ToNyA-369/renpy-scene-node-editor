@@ -246,6 +246,36 @@ class OptionAvailabilityRuntimeTest(unittest.TestCase):
         with self.assertRaisesRegex(Exception, "owning Options scope"):
             runtime["scene_apply_prepared"](prepared)
 
+    def test_render_elements_follow_z_order_with_stable_scope_and_array_ties(self):
+        runtime = self.runtime()
+        runtime["scene_catalog"]["options"]["shop"]["Elements"] = [
+            {"ID": "local_equal_first", "Layout": {"Z Order": 10}},
+            {"ID": "front", "Layout": {"Z Order": 30}},
+            {"ID": "back", "Layout": {"Z Order": 2}},
+            {"ID": "local_equal_second", "Layout": {"Z Order": 10}},
+        ]
+        runtime["scene_catalog"]["options"]["__global__"] = {
+            "Elements": [
+                {"ID": "global_equal", "Layout": {"Z Order": 10}},
+                {"ID": "global_middle", "Layout": {"Z Order": 20}},
+            ],
+        }
+
+        ordered = runtime["scene_option_render_elements"]("shop")
+
+        self.assertEqual(
+            [(scope, element["ID"]) for scope, element in ordered],
+            [
+                ("shop", "back"),
+                ("shop", "local_equal_first"),
+                ("shop", "local_equal_second"),
+                ("__global__", "global_equal"),
+                ("__global__", "global_middle"),
+                ("shop", "front"),
+            ],
+        )
+        self.assertEqual(runtime["scene_option_z_order"]({"Layout": {"Z Order": "bad"}}), 10)
+
 
 if __name__ == "__main__":
     unittest.main()

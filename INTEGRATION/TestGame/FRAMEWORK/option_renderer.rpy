@@ -16,19 +16,17 @@ screen scene_option_renderer(node_id, input_bindings=None):
         xfill True
         yfill True
 
-        for option_node_id in scene_option_scope_ids(node_id):
-            use scene_option_scope(option_node_id) id option_node_id
-
-
-screen scene_option_scope(node_id):
-    for element in scene_option_data(node_id).get("Elements", []):
-        if scene_option_is_available(node_id, element):
-            if element.get("Type") == "TEXTBOX":
-                use scene_option_textbox(node_id, element)
-            elif element.get("Type") == "PICTURE":
-                use scene_option_picture(node_id, element)
-            elif element.get("Type") == "HITBOX":
-                use scene_option_hitbox(node_id, element)
+        # Ren'Py Fixed children are rendered back-to-front. Sorting every
+        # visible scope together makes the largest Z Order both visually topmost
+        # and the first overlapping control to receive pointer interaction.
+        for option_node_id, element in scene_option_render_elements(node_id):
+            if scene_option_is_available(option_node_id, element):
+                if element.get("Type") == "TEXTBOX":
+                    use scene_option_textbox(option_node_id, element) id scene_option_widget_id(option_node_id, element.get("ID"))
+                elif element.get("Type") == "PICTURE":
+                    use scene_option_picture(option_node_id, element) id scene_option_widget_id(option_node_id, element.get("ID"))
+                elif element.get("Type") == "HITBOX":
+                    use scene_option_hitbox(option_node_id, element) id scene_option_widget_id(option_node_id, element.get("ID"))
 
 
 screen scene_option_textbox(node_id, element):

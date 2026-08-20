@@ -9,6 +9,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 FRONTEND = ROOT / "EDITOR" / "static" / "app.js"
+EVENT_EDITOR = ROOT / "EDITOR" / "static" / "js" / "workspaces" / "event_editor.js"
 sys.path.insert(0, str(ROOT / "EDITOR"))
 
 import app  # noqa: E402
@@ -268,12 +269,15 @@ class GlobalNodeContractTest(unittest.TestCase):
 
     def test_frontend_exposes_global_options_but_keeps_global_out_of_next_node_choices(self):
         source = FRONTEND.read_text(encoding="utf-8")
+        event_editor_source = EVENT_EDITOR.read_text(encoding="utf-8")
 
         self.assertIn('const GLOBAL_NODE_PATH = "@global"', source)
         self.assertIn("return EVENT_TRIGGER_MODES;", source)
         self.assertIn("const tabs = state.editorSettings.tabOrder || TAB_ORDER;", source)
         self.assertNotIn('if (tab === "options" && isGlobalNode())', source)
-        self.assertIn('return state.nodes.map((node)', source)
+        self.assertIn("return SceneEventEditor.nextNodeChoices(state.nodes);", source)
+        self.assertIn("function nextNodeChoices(nodes)", event_editor_source)
+        self.assertNotIn("state.globalNode", event_editor_source)
         self.assertIn('scope === "global"', source)
 
 

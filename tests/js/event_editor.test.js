@@ -85,6 +85,18 @@ test("weighted Event choices preserve string and map representations", () => {
   );
 });
 
+test("Next Node choices mirror Node authoring groups without changing stable IDs", () => {
+  assert.deepEqual(SceneEventEditor.nextNodeChoices([
+    { id: "root", name: "起點" },
+    { id: "market", name: "商店／白天", group: "探索/城鎮" },
+    { path: "inn", name: "旅店", group: "探索/城鎮" },
+  ]), [
+    { id: "root", name: "起點", pickerPath: "" },
+    { id: "market", name: "商店／白天", pickerPath: "探索／城鎮/商店／白天" },
+    { id: "inn", name: "旅店", pickerPath: "探索／城鎮/旅店" },
+  ]);
+});
+
 test("Event groups keep Normal first and preserve flat Event order", () => {
   const events = [
     { ID: "b", Group: "Story" },

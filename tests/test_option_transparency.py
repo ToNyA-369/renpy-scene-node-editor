@@ -178,7 +178,7 @@ class OptionSchemaTests(unittest.TestCase):
             ROOT / "INTEGRATION" / "TestGame" / "FRAMEWORK" / "option_renderer.rpy"
         ).read_text(encoding="utf-8")
 
-        self.assertIn("if scene_option_is_available(node_id, element):", renderer)
+        self.assertIn("if scene_option_is_available(option_node_id, element):", renderer)
         self.assertIn("$ items = scene_option_visible_items(node_id, element)", renderer)
         self.assertIn("if items:", renderer)
 

@@ -123,6 +123,8 @@ let expandedEventGroup = null;
 let pendingStatGroupFocus = null;
 let eventGroupDragController = null;
 let conditionGroupDragController = null;
+let eventFocusNavigationController = null;
+let pendingEventSectionEntry = null;
 let statGroupDragController = null;
 let eventRuleReorderControllers = [];
 let optionReorderControllers = [];
@@ -382,7 +384,7 @@ function warnMissingOptionTarget() {
 }
 
 function nodeChoices() {
-  return state.nodes.map((node) => ({ id: node.id, name: node.name || node.id }));
+  return SceneEventEditor.nextNodeChoices(state.nodes);
 }
 
 function optionEffectTargetValue(target) {
@@ -471,19 +473,7 @@ function contentLabelFile(label) {
 const selectChoicePicker = SceneChoicePicker.createChoicePicker({
   escapeHtml,
   generateId,
-  beforeOpen: () => closeContentPickers(),
 });
-const {
-  menuWidth: SELECT_MENU_WIDTH,
-  submenuGap: SUBMENU_GAP,
-} = SceneChoicePicker.LAYOUT;
-const {
-  clearSubmenuClose,
-  directMenuItems,
-  focusRelativeMenuItem,
-  scheduleSubmenuClose,
-  setSubmenuOpen,
-} = selectChoicePicker.hierarchy;
 
 function closeSelectPickers(except = null) {
   selectChoicePicker.close(except);
@@ -502,50 +492,28 @@ function observeSelects() {
 }
 
 function contentPickerHtml(label, index) {
-  const selectedFile = contentLabelFile(label);
-  const selectedName = selectedFile
-    ? contentLabelDisplayName(selectedFile, label)
-    : (label ? t("{name}（未找到）", { name: leafName(label) }) : t("尚未選擇"));
   const files = state.nodeDetail?.contents || [];
-  const fileRows = files.map((file) => {
+  const options = [];
+  files.forEach((file) => {
     const fileName = contentFileDisplayName(file);
     const labels = file.labels || [];
-    if (!labels.length) {
-      return `<button class="content-file-choice is-disabled" type="button" disabled><span>${escapeHtml(fileName)}</span><small>${escapeHtml(t("沒有 label"))}</small></button>`;
-    }
-    if (labels.length === 1) {
-      return `
-        <button class="content-file-choice" type="button" role="menuitem" data-content-label-choice="${escapeHtml(labels[0])}">
-          <span>${escapeHtml(contentLabelDisplayName(file, labels[0]))}</span>
-        </button>
-      `;
-    }
-    return `
-      <div class="content-file-branch">
-        <button class="content-file-choice" type="button" role="menuitem" aria-haspopup="menu" aria-expanded="false" data-content-file-expand>
-          <span>${escapeHtml(fileName)}</span><i aria-hidden="true">›</i>
-        </button>
-        <div class="content-label-submenu" role="menu" aria-label="${escapeHtml(fileName)} labels">
-          ${labels.map((item) => `
-            <button type="button" role="menuitem" data-content-label-choice="${escapeHtml(item)}">${escapeHtml(contentLabelDisplayName(file, item))}</button>
-          `).join("")}
-        </div>
-      </div>
-    `;
-  }).join("");
+    labels.forEach((item) => {
+      const displayName = contentLabelDisplayName(file, item);
+      const pickerPath = labels.length > 1 ? ` data-picker-path="${escapeHtml(`${fileName}/${displayName}`)}"` : "";
+      options.push(`<option value="${escapeHtml(item)}"${pickerPath}${item === label ? " selected" : ""}>${escapeHtml(displayName)}</option>`);
+    });
+  });
+  if (label && !contentLabelFile(label)) {
+    options.push(`<option value="${escapeHtml(label)}" selected>${escapeHtml(t("{name}（未找到）", { name: leafName(label) }))}</option>`);
+  }
+  if (!options.length) {
+    options.push(`<option value="" disabled selected>${escapeHtml(t("目前節點沒有 Content 文件。"))}</option>`);
+  }
   return `
-    <div class="field content-choice-field">
+    <label class="field content-choice-field" data-content-picker-index="${index}">
       <span class="visually-hidden">Content label</span>
-      <input name="contentWeightedId" type="hidden" value="${escapeHtml(label)}">
-      <div class="content-choice-picker" data-content-picker-index="${index}">
-        <button class="content-choice-trigger" type="button" aria-haspopup="menu" aria-expanded="false" data-content-picker-toggle>
-          <span><strong>${escapeHtml(selectedName)}</strong></span><i aria-hidden="true">⌄</i>
-        </button>
-        <div class="content-choice-menu" role="menu">
-          ${fileRows || `<div class="content-choice-empty">${escapeHtml(t("目前節點沒有 Content 文件。"))}</div>`}
-        </div>
-      </div>
-    </div>
+      <select name="contentWeightedId" aria-label="Content label">${options.join("")}</select>
+    </label>
   `;
 }
 
@@ -586,52 +554,6 @@ const {
   planConditionDrop,
   removeWeightedChoice,
 } = SceneEventEditor;
-
-function closeContentPickers(except = null) {
-  document.querySelectorAll(".content-choice-picker.open").forEach((picker) => {
-    if (picker === except) return;
-    picker.classList.remove("open");
-    picker.querySelector("[data-content-picker-toggle]")?.setAttribute("aria-expanded", "false");
-    picker.querySelectorAll(".content-file-branch").forEach((branch) => {
-      clearSubmenuClose(branch);
-      branch.classList.remove("submenu-open");
-      branch.querySelector(":scope > [data-content-file-expand]")?.setAttribute("aria-expanded", "false");
-    });
-  });
-}
-
-function positionContentSubmenu(branch) {
-  const trigger = branch?.querySelector(":scope > [data-content-file-expand]");
-  const submenu = branch?.querySelector(":scope > .content-label-submenu");
-  if (!trigger || !submenu) return;
-  const rect = trigger.getBoundingClientRect();
-  const parentRect = branch.parentElement.getBoundingClientRect();
-  const edge = 12;
-  const gap = SUBMENU_GAP;
-  const width = Math.min(SELECT_MENU_WIDTH, window.innerWidth - edge * 2);
-  const height = Math.min(submenu.scrollHeight || 320, 320);
-  const fitsRight = parentRect.right + gap + width <= window.innerWidth - edge;
-  submenu.classList.toggle("opens-left", !fitsRight);
-  submenu.style.width = `${width}px`;
-  submenu.style.left = `${fitsRight ? parentRect.right + gap : Math.max(edge, parentRect.left - gap - width)}px`;
-  submenu.style.top = `${Math.max(edge, Math.min(rect.top - 7, window.innerHeight - height - edge))}px`;
-}
-
-function positionContentMenu(picker) {
-  const trigger = picker?.querySelector(":scope > [data-content-picker-toggle]");
-  const menu = picker?.querySelector(":scope > .content-choice-menu");
-  if (!trigger || !menu) return;
-  const rect = trigger.getBoundingClientRect();
-  const edge = 12;
-  const width = Math.min(SELECT_MENU_WIDTH, window.innerWidth - edge * 2);
-  const height = Math.min(menu.scrollHeight, 320);
-  menu.style.width = `${width}px`;
-  menu.style.left = `${Math.max(edge, Math.min(rect.left, window.innerWidth - width - edge))}px`;
-  menu.style.top = `${rect.bottom + 7}px`;
-  if (rect.bottom + 7 + height > window.innerHeight - edge && rect.top > height + edge) {
-    menu.style.top = `${rect.top - height - 7}px`;
-  }
-}
 
 function updateDatalists() {
   dom.statNames.innerHTML = Object.keys(state.stats).sort().map((name) => `<option value="${escapeHtml(name)}"></option>`).join("");
@@ -780,6 +702,7 @@ async function assignNodeGroups(assignments, { focusGroup = null, order = null }
     state.nodes = result.nodes || state.nodes;
     pendingNodeGroupFocus = focusGroup;
     renderNodeList();
+    if (state.activeTab === "events" && state.eventDraft) renderEventsPanel({ preserveView: true });
     return true;
   } catch (error) {
     renderNodeList();
@@ -1377,7 +1300,7 @@ function captureEventPanelView() {
   const form = document.querySelector("#eventForm");
   const focused = form?.contains(document.activeElement) ? document.activeElement : null;
   const focusedPickerSelect = focused?.closest?.(".select-choice-picker")?.querySelector("select[name]");
-  const focusedContentPicker = focused?.closest?.(".content-choice-picker");
+  const focusedSection = focused?.matches?.("[data-event-section]") ? focused.dataset.eventSection : "";
   const focusName = focused?.name || focusedPickerSelect?.name || "";
   const focusPicker = Boolean(focusedPickerSelect);
   const focusIndex = focusName
@@ -1387,29 +1310,24 @@ function captureEventPanelView() {
     editorScrollTop: editor?.scrollTop || 0,
     editorScrollLeft: editor?.scrollLeft || 0,
     eventListScrollTop: eventList?.scrollTop || 0,
-    sectionStates: [...(form?.querySelectorAll("details.collapsible-section") || [])].map((section) => section.open),
+    focusedSection,
     focusName,
     focusIndex,
     focusPicker,
-    focusContentPickerIndex: focusedContentPicker?.dataset.contentPickerIndex ?? "",
   };
 }
 
 function restoreEventPanelView(view) {
   const form = document.querySelector("#eventForm");
-  [...(form?.querySelectorAll("details.collapsible-section") || [])].forEach((section, index) => {
-    if (view.sectionStates[index] !== undefined) section.open = view.sectionStates[index];
-  });
-  if (form && view.focusName && view.focusIndex >= 0) {
+  if (form && view.focusedSection) {
+    form.querySelector(`[data-event-section="${CSS.escape(view.focusedSection)}"]`)?.focus({ preventScroll: true });
+  } else if (form && view.focusName && view.focusIndex >= 0) {
     const candidates = [...form.querySelectorAll(`[name="${view.focusName}"]`)];
     const candidate = candidates[view.focusIndex];
     const focusTarget = view.focusPicker
       ? candidate?.closest(".select-choice-picker")?.querySelector("[data-select-picker-toggle]")
       : candidate;
     focusTarget?.focus({ preventScroll: true });
-  } else if (form && view.focusContentPickerIndex !== "") {
-    form.querySelector(`[data-content-picker-index="${CSS.escape(view.focusContentPickerIndex)}"] [data-content-picker-toggle]`)
-      ?.focus({ preventScroll: true });
   }
   const editor = document.querySelector("#eventEditorScroll");
   if (editor) {
@@ -1422,6 +1340,8 @@ function restoreEventPanelView(view) {
 
 function renderEventsPanel({ preserveView = false } = {}) {
   const view = preserveView ? captureEventPanelView() : null;
+  eventFocusNavigationController?.destroy();
+  eventFocusNavigationController = null;
   eventRuleReorderControllers.forEach((controller) => controller.destroy());
   eventRuleReorderControllers = [];
   conditionGroupDragController?.destroy();
@@ -1458,6 +1378,11 @@ function renderEventsPanel({ preserveView = false } = {}) {
   enhanceSelects(dom.eventsPanel);
   bindEventPanel();
   if (view) restoreEventPanelView(view);
+  if (pendingEventSectionEntry) {
+    const section = pendingEventSectionEntry;
+    pendingEventSectionEntry = null;
+    eventFocusNavigationController?.enterSection(section, { lastItem: true });
+  }
   if (pendingEventGroupFocus) {
     const input = document.querySelector(`[data-event-group-name="${CSS.escape(pendingEventGroupFocus)}"]`);
     pendingEventGroupFocus = null;
@@ -1505,42 +1430,42 @@ function eventEditorHtml(event) {
         <input name="ID" type="hidden" value="${escapeHtml(event.ID || "")}">
       </div>
 
-      <details class="form-section collapsible-section" open>
-        <summary class="form-section-header">
+      <section class="form-section event-rule-section" data-event-section="conditions" tabindex="0" aria-label="Conditions">
+        <div class="form-section-header">
           <div><h3>Conditions</h3><span>${escapeHtml(t("{count} 個條件", { count: event.Conditions?.length || 0 }))}</span></div>
           <button class="icon-button section-add-button add-button" id="addConditionButton" type="button" title="${escapeHtml(t("新增條件"))}" aria-label="${escapeHtml(t("新增條件"))}">＋</button>
-        </summary>
-        <div class="collapsible-section-body"><div class="repeat-list condition-logic-flow" id="conditionList">${conditionRowsHtml(event.Conditions || [])}<div class="condition-drop-tail" aria-hidden="true"></div></div></div>
-      </details>
+        </div>
+        <div class="event-section-body"><div class="repeat-list condition-logic-flow" id="conditionList">${conditionRowsHtml(event.Conditions || [])}<div class="condition-drop-tail" aria-hidden="true"></div></div></div>
+      </section>
 
-      <details class="form-section collapsible-section" open>
-        <summary class="form-section-header">
+      <section class="form-section event-rule-section" data-event-section="effects" tabindex="0" aria-label="Effects">
+        <div class="form-section-header">
           <div><h3>Effects</h3><span>${escapeHtml(t("{count} 個效果", { count: event.Effects?.length || 0 }))}</span></div>
           <button class="icon-button section-add-button add-button" id="addEffectButton" type="button" title="${escapeHtml(t("新增 Effect"))}" aria-label="${escapeHtml(t("新增 Effect"))}">＋</button>
-        </summary>
-        <div class="collapsible-section-body"><div class="repeat-list" id="effectList">${effectRowsHtml(event.Effects || [])}</div></div>
-      </details>
+        </div>
+        <div class="event-section-body"><div class="repeat-list" id="effectList">${effectRowsHtml(event.Effects || [])}</div></div>
+      </section>
 
-      <details class="form-section collapsible-section event-choice-section" open>
-        <summary class="form-section-header">
+      <section class="form-section event-rule-section event-choice-section" data-event-section="content" tabindex="0" aria-label="Content">
+        <div class="form-section-header">
           <div><h3>Content</h3><span>${escapeHtml(t("{count} 個演出", { count: choiceEntries(event.Content).length }))}</span></div>
           <button class="icon-button section-add-button add-button" type="button" data-add-weighted="content" title="${escapeHtml(t("新增演出"))}" aria-label="${escapeHtml(t("新增演出"))}">＋</button>
-        </summary>
-        <div class="collapsible-section-body">${choiceBlockHtml(event.Content, "content")}</div>
-      </details>
+        </div>
+        <div class="event-section-body">${choiceBlockHtml(event.Content, "content")}</div>
+      </section>
 
-      ${lifecycle ? "" : `<details class="form-section collapsible-section event-choice-section" open>
-        <summary class="form-section-header">
+      ${lifecycle ? "" : `<section class="form-section event-rule-section event-choice-section" data-event-section="end-up" tabindex="0" aria-label="End up">
+        <div class="form-section-header">
           <div><h3>End up</h3><span>${escapeHtml(event["End up"] || "REDO")}</span></div>
           ${endUpUsesNextNode(event["End up"]) ? `<button class="icon-button section-add-button add-button" type="button" data-add-weighted="next" title="${escapeHtml(t("新增節點"))}" aria-label="${escapeHtml(t("新增節點"))}">＋</button>` : ""}
-        </summary>
-        <div class="collapsible-section-body">
-          <div class="end-up-control">
+        </div>
+        <div class="event-section-body">
+          <div class="end-up-control" data-event-nav-item>
             <label class="field"><span class="visually-hidden">End up</span><select name="EndUp" aria-label="End up">${optionTags(END_UP_CHOICES, event["End up"] || "REDO")}</select></label>
           </div>
           <div id="nextNodeBlock">${endUpUsesNextNode(event["End up"]) ? choiceBlockHtml(event["Next Node"], "next") : ""}</div>
         </div>
-      </details>`}
+      </section>`}
 
       ${state.eventOriginalId ? `<div class="editor-danger-zone"><button class="danger-button" id="deleteEventButton" type="button">${escapeHtml(t("刪除事件"))}</button></div>` : ""}
     </form>
@@ -1617,6 +1542,44 @@ function bindEventPanel() {
   });
   const form = document.querySelector("#eventForm");
   if (!form) return;
+  const addCondition = ({ enter = false } = {}) => {
+    const condition = newStateRule("condition", "stat") || newStateRule("condition", "memory");
+    if (!condition) return false;
+    state.eventDraft = readEventForm();
+    state.eventDraft.Conditions = appendCondition(state.eventDraft.Conditions, condition);
+    if (enter) pendingEventSectionEntry = "conditions";
+    scheduleEventAutosave({ useDraft: true });
+    renderEventsPanel({ preserveView: true });
+    return true;
+  };
+  const addEffect = ({ enter = false } = {}) => {
+    const effect = newStateRule("effect", "stat") || newStateRule("effect", "memory");
+    if (!effect) return false;
+    state.eventDraft = readEventForm();
+    state.eventDraft.Effects.push(effect);
+    if (enter) pendingEventSectionEntry = "effects";
+    scheduleEventAutosave({ useDraft: true });
+    renderEventsPanel({ preserveView: true });
+    return true;
+  };
+  const addWeightedEntry = (kind, { enter = false } = {}) => {
+    state.eventDraft = readEventForm();
+    const key = kind === "content" ? "Content" : "Next Node";
+    const available = kind === "content" ? contentChoices() : nodeChoices();
+    if (!available.length) {
+      toast(kind === "content" ? t("目前節點沒有可用的 Content label。") : t("目前專案沒有 Scene Node。"), "error");
+      return false;
+    }
+    state.eventDraft[key] = addWeightedChoice(
+      state.eventDraft[key],
+      available,
+      kind === "content" ? "missingContent" : "missingNode",
+    );
+    if (enter) pendingEventSectionEntry = kind === "content" ? "content" : "end-up";
+    scheduleEventAutosave({ useDraft: true });
+    renderEventsPanel({ preserveView: true });
+    return true;
+  };
   conditionGroupDragController = SceneGroupDrag.createController({
     root: document.querySelector("#conditionList"),
     itemSelector: ".condition-row[data-condition-id]",
@@ -1661,121 +1624,16 @@ function bindEventPanel() {
     state.eventDraft = readEventForm();
     scheduleEventAutosave({ useDraft: true });
   });
-  form.addEventListener("keydown", (event) => {
-    if (event.key === "Escape" && event.target.closest(".content-choice-picker")) {
-      closeContentPickers();
-      event.target.closest(".content-choice-picker")?.querySelector("[data-content-picker-toggle]")?.focus();
-      event.preventDefault();
-      return;
-    }
-    const picker = event.target.closest(".content-choice-picker");
-    const pickerToggle = event.target.closest("[data-content-picker-toggle]");
-    const fileExpand = event.target.closest("[data-content-file-expand]");
-    const labelChoice = event.target.closest("[data-content-label-choice]");
-    if (pickerToggle && ["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) {
-      if (!picker.classList.contains("open")) pickerToggle.click();
-      const items = directMenuItems(
-        picker.querySelector(":scope > .content-choice-menu"),
-        "[data-content-file-expand]",
-        "[data-content-label-choice]",
-      );
-      items[["ArrowDown", "Home"].includes(event.key) ? 0 : items.length - 1]?.focus();
-      event.preventDefault();
-    } else if (fileExpand && ["ArrowRight", "Enter", " "].includes(event.key)) {
-      const branch = event.target.closest(".content-file-branch");
-      setSubmenuOpen(branch, true, positionContentSubmenu);
-      directMenuItems(
-        branch.querySelector(":scope > .content-label-submenu"),
-        "[data-content-file-expand]",
-        "[data-content-label-choice]",
-      )[0]?.focus();
-      event.preventDefault();
-    } else if (event.key === "ArrowLeft" && event.target.closest(".content-label-submenu")) {
-      const branch = event.target.closest(".content-label-submenu").parentElement;
-      setSubmenuOpen(branch, false, positionContentSubmenu);
-      branch.querySelector(":scope > [data-content-file-expand]")?.focus();
-      event.preventDefault();
-    } else if ((fileExpand || labelChoice) && ["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) {
-      focusRelativeMenuItem(
-        event.target,
-        event.key,
-        "[data-content-file-expand]",
-        "[data-content-label-choice]",
-      );
-      event.preventDefault();
-    } else if (labelChoice && ["Enter", " "].includes(event.key)) {
-      labelChoice.click();
-      event.preventDefault();
-    }
-  });
-  form.addEventListener("pointerover", (event) => {
-    let branch = event.target.closest(".content-file-branch");
-    while (branch && form.contains(branch)) {
-      clearSubmenuClose(branch);
-      branch = branch.parentElement?.closest(".content-file-branch");
-    }
-    const fileExpand = event.target.closest("[data-content-file-expand]");
-    if (fileExpand) setSubmenuOpen(fileExpand.closest(".content-file-branch"), true, positionContentSubmenu);
-  });
-  form.addEventListener("pointerout", (event) => {
-    const branch = event.target.closest(".content-file-branch");
-    if (branch && !branch.contains(event.relatedTarget)) scheduleSubmenuClose(branch);
-  });
-  form.addEventListener("focusin", (event) => {
-    const branch = event.target.closest(".content-file-branch");
-    if (branch) setSubmenuOpen(branch, true, positionContentSubmenu);
-  });
-  form.addEventListener("focusout", (event) => {
-    const picker = event.target.closest(".content-choice-picker");
-    if (picker && !picker.contains(event.relatedTarget)) closeContentPickers();
-  });
   document.querySelector("#deleteEventButton")?.addEventListener("click", deleteEvent);
   document.querySelector("#addConditionButton")?.addEventListener("click", (event) => {
     event.stopPropagation();
-    const condition = newStateRule("condition", "stat") || newStateRule("condition", "memory");
-    state.eventDraft = readEventForm();
-    state.eventDraft.Conditions = appendCondition(state.eventDraft.Conditions, condition);
-    scheduleEventAutosave({ useDraft: true });
-    renderEventsPanel({ preserveView: true });
+    addCondition();
   });
   document.querySelector("#addEffectButton")?.addEventListener("click", (event) => {
     event.stopPropagation();
-    const effect = newStateRule("effect", "stat") || newStateRule("effect", "memory");
-    state.eventDraft = readEventForm();
-    state.eventDraft.Effects.push(effect);
-    scheduleEventAutosave({ useDraft: true });
-    renderEventsPanel({ preserveView: true });
+    addEffect();
   });
   form.addEventListener("click", (event) => {
-    const pickerToggle = event.target.closest("[data-content-picker-toggle]");
-    const fileExpand = event.target.closest("[data-content-file-expand]");
-    const labelChoice = event.target.closest("[data-content-label-choice]");
-    if (pickerToggle) {
-      const picker = pickerToggle.closest(".content-choice-picker");
-      const opening = !picker.classList.contains("open");
-      closeContentPickers(opening ? picker : null);
-      picker.classList.toggle("open", opening);
-      pickerToggle.setAttribute("aria-expanded", String(opening));
-      if (opening) positionContentMenu(picker);
-      event.preventDefault();
-      return;
-    }
-    if (fileExpand) {
-      const branch = fileExpand.closest(".content-file-branch");
-      setSubmenuOpen(branch, true, positionContentSubmenu);
-      event.preventDefault();
-      return;
-    }
-    if (labelChoice) {
-      const picker = labelChoice.closest(".content-choice-picker");
-      const input = picker?.closest(".content-choice-field")?.querySelector('[name="contentWeightedId"]');
-      if (input) input.value = labelChoice.dataset.contentLabelChoice;
-      state.eventDraft = readEventForm();
-      scheduleEventAutosave({ useDraft: true });
-      renderEventsPanel({ preserveView: true });
-      event.preventDefault();
-      return;
-    }
     const conditionIndex = event.target.dataset.removeCondition;
     const effectIndex = event.target.dataset.removeEffect;
     const weighted = event.target.dataset.removeWeighted;
@@ -1796,23 +1654,25 @@ function bindEventPanel() {
       const key = kind === "content" ? "Content" : "Next Node";
       state.eventDraft[key] = removeWeightedChoice(state.eventDraft[key], indexText);
     } else if (addWeighted) {
-      state.eventDraft = readEventForm();
-      const key = addWeighted === "content" ? "Content" : "Next Node";
-      const available = addWeighted === "content" ? contentChoices() : nodeChoices();
-      if (!available.length) {
-        toast(addWeighted === "content" ? t("目前節點沒有可用的 Content label。") : t("目前專案沒有 Scene Node。"), "error");
-        return;
-      }
-      state.eventDraft[key] = addWeightedChoice(
-        state.eventDraft[key],
-        available,
-        addWeighted === "content" ? "missingContent" : "missingNode",
-      );
+      addWeightedEntry(addWeighted);
+      return;
     }
     if (conditionIndex !== undefined || effectIndex !== undefined || weighted || addWeighted) {
       scheduleEventAutosave({ useDraft: true });
       renderEventsPanel({ preserveView: true });
     }
+  });
+  eventFocusNavigationController = SceneEventFocusNavigation.createController({
+    form,
+    onAdd: (section) => {
+      if (section === "conditions") return addCondition({ enter: true });
+      if (section === "effects") return addEffect({ enter: true });
+      if (section === "content") return addWeightedEntry("content", { enter: true });
+      if (section === "end-up" && endUpUsesNextNode(readEventForm()["End up"])) {
+        return addWeightedEntry("next", { enter: true });
+      }
+      return false;
+    },
   });
   form.addEventListener("change", (event) => {
     if (event.target.name === "TriggerMode") {
@@ -5127,7 +4987,7 @@ function deleteInActiveTab() {
 }
 
 function hasOpenEditorTransient(target) {
-  if (target.closest(".select-choice-picker.open, .content-choice-picker.open")) return true;
+  if (target.closest(".select-choice-picker.open")) return true;
   const monaco = target.closest(".monaco-editor");
   if (!monaco) return false;
   return Boolean(monaco.querySelector([
@@ -5149,7 +5009,7 @@ function exitEditorFieldFocus(event) {
 
   let context = null;
   if (state.activeTab === "events" && target.closest("#eventForm")) {
-    context = target.closest(".condition-row, .effect-row, .weight-row") || document.querySelector("#eventForm");
+    context = target.closest("[data-event-section]") || document.querySelector("#eventForm");
   } else if (state.activeTab === "content" && dom.contentPanel.contains(target)) {
     context = dom.contentPanel;
   }
@@ -5268,7 +5128,6 @@ function bindGlobalEvents() {
     if (!dom.tabbar.contains(event.relatedTarget)) dom.tabbar.classList.remove("is-pointer-navigation");
   });
   document.addEventListener("click", (event) => {
-    if (!event.target.closest(".content-choice-picker")) closeContentPickers();
     if (!event.target.closest(".select-choice-picker")) closeSelectPickers();
   });
   document.querySelector("#openSidebar").addEventListener("click", toggleSidebar);
@@ -5279,9 +5138,8 @@ function bindGlobalEvents() {
     syncTabFocusIndicator({ immediate: true });
   });
   window.addEventListener("scroll", (event) => {
-    if (event.target instanceof Element && event.target.closest(".select-choice-menu, .select-choice-submenu, .content-choice-menu, .content-label-submenu")) return;
+    if (event.target instanceof Element && event.target.closest(".select-choice-menu, .select-choice-submenu")) return;
     closeSelectPickers();
-    closeContentPickers();
   }, true);
   document.querySelectorAll("[data-close-dialog]").forEach((button) => button.addEventListener("click", () => {
     document.querySelector(`#${button.dataset.closeDialog}`)?.close();
@@ -5377,6 +5235,12 @@ function bindGlobalEvents() {
       return;
     }
     if (exitEditorFieldFocus(event)) return;
+    if (
+      state.activeTab === "events"
+      && event.target.matches?.("[data-event-section]")
+      && (event.metaKey || event.ctrlKey)
+      && (event.key === "Enter" || event.code === "Enter")
+    ) return;
     const shortcut = shortcutFromEvent(event);
     const action = Object.entries(state.editorSettings.shortcuts).find(([, value]) => value && value === shortcut)?.[0];
     const isTyping = event.target.matches("input, textarea, select, [contenteditable='true']");

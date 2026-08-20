@@ -6,6 +6,8 @@
   if (root) root.SceneChoicePicker = api;
 })(typeof globalThis !== "undefined" ? globalThis : this, () => {
   const LAYOUT = Object.freeze({
+    itemHeight: 38,
+    menuMaxHeight: 320,
     menuWidth: 240,
     submenuGap: 14,
   });
@@ -39,6 +41,31 @@
 
   function createChoicePicker({ escapeHtml, generateId, beforeOpen = () => {} }) {
     const submenuCloseTimers = new WeakMap();
+    let pointerActivePicker = null;
+
+    const clearPointerActivePicker = () => {
+      window.setTimeout(() => { pointerActivePicker = null; }, 0);
+    };
+    window.addEventListener("pointerup", clearPointerActivePicker, true);
+    window.addEventListener("pointercancel", clearPointerActivePicker, true);
+
+    function showMenuSurface(menu) {
+      if (typeof menu?.showPopover !== "function") return;
+      try {
+        if (!menu.matches(":popover-open")) menu.showPopover();
+      } catch (_error) {
+        // Browsers without Popover API support keep using the fixed-position fallback.
+      }
+    }
+
+    function hideMenuSurface(menu) {
+      if (typeof menu?.hidePopover !== "function") return;
+      try {
+        if (menu.matches(":popover-open")) menu.hidePopover();
+      } catch (_error) {
+        // The menu may already have been detached by a workspace rerender.
+      }
+    }
 
     function clearSubmenuClose(branch) {
       const timer = submenuCloseTimers.get(branch);
@@ -48,7 +75,7 @@
 
     function closeSubmenuTree(branch) {
       if (!branch) return;
-      [branch, ...branch.querySelectorAll(".select-choice-branch, .content-file-branch")].forEach((item) => {
+      [branch, ...branch.querySelectorAll(".select-choice-branch")].forEach((item) => {
         clearSubmenuClose(item);
         item.classList.remove("submenu-open");
         item.querySelector(":scope > [aria-haspopup='menu']")?.setAttribute("aria-expanded", "false");
@@ -80,14 +107,29 @@
 
     function directMenuItems(menu, folderSelector, choiceSelector) {
       if (!menu) return [];
-      return [...menu.children].map((child) => {
+      const itemContainer = menu.querySelector(":scope > .select-choice-submenu-scroll") || menu;
+      return [...itemContainer.children].map((child) => {
         if (child.matches?.(choiceSelector)) return child;
         return child.querySelector?.(`:scope > ${folderSelector}`) || null;
       }).filter((item) => item && !item.disabled && item.offsetParent !== null);
     }
 
+    function fitMenuSurface(surface) {
+      if (!surface) return 0;
+      const edge = 12;
+      const limit = Math.min(LAYOUT.menuMaxHeight, Math.max(1, window.innerHeight - edge * 2));
+      surface.style.height = "auto";
+      surface.style.minHeight = "0";
+      surface.style.maxHeight = `${limit}px`;
+      const style = getComputedStyle(surface);
+      const borders = Number.parseFloat(style.borderTopWidth || "0") + Number.parseFloat(style.borderBottomWidth || "0");
+      const height = Math.min(limit, Math.ceil(surface.scrollHeight + borders));
+      surface.style.height = `${height}px`;
+      return height;
+    }
+
     function focusRelativeMenuItem(active, key, folderSelector, choiceSelector) {
-      const menu = active.closest(".select-choice-menu, .select-choice-submenu, .content-choice-menu, .content-label-submenu");
+      const menu = active.closest(".select-choice-menu, .select-choice-submenu");
       const items = directMenuItems(menu, folderSelector, choiceSelector);
       const current = items.indexOf(active);
       if (current < 0 || !items.length) return false;
@@ -101,7 +143,9 @@
     function close(except = null) {
       document.querySelectorAll(".select-choice-picker.open").forEach((picker) => {
         if (picker === except) return;
+        hideMenuSurface(picker.querySelector(":scope > .select-choice-menu"));
         picker.classList.remove("open");
+        picker.querySelectorAll(".is-picker-active").forEach((active) => active.classList.remove("is-picker-active"));
         picker.querySelector("[data-select-picker-toggle]")?.setAttribute("aria-expanded", "false");
         picker.querySelectorAll(".select-choice-branch").forEach((branch) => {
           clearSubmenuClose(branch);
@@ -153,8 +197,11 @@
           submenu.className = "select-choice-submenu";
           submenu.setAttribute("role", "menu");
           submenu.setAttribute("aria-label", name);
-          branch.folders.forEach((child, childName) => appendBranch(childName, child, submenu));
-          branch.options.forEach((item) => appendOption(item.element, submenu));
+          const submenuScroll = document.createElement("div");
+          submenuScroll.className = "select-choice-submenu-scroll";
+          branch.folders.forEach((child, childName) => appendBranch(childName, child, submenuScroll));
+          branch.options.forEach((item) => appendOption(item.element, submenuScroll));
+          submenu.append(submenuScroll);
           wrapper.append(folder, submenu);
           parent.append(wrapper);
         };
@@ -183,10 +230,11 @@
       const rect = trigger.getBoundingClientRect();
       const rootMenu = branch.closest(".select-choice-menu");
       if (!rootMenu) return;
+      const scrollSurface = submenu.querySelector(":scope > .select-choice-submenu-scroll");
       const rootRect = rootMenu.getBoundingClientRect();
       const edge = 12;
       const width = Math.min(SELECT_MENU_WIDTH, window.innerWidth - edge * 2);
-      const height = Math.min(submenu.scrollHeight, 320);
+      const height = fitMenuSurface(scrollSurface || submenu);
       let depth = 1;
       for (let parent = branch.parentElement; parent && parent !== rootMenu; parent = parent.parentElement) {
         if (parent.classList.contains("select-choice-submenu")) depth += 1;
@@ -200,6 +248,33 @@
       submenu.style.left = `${Math.max(edge, Math.min(requestedLeft, window.innerWidth - width - edge))}px`;
       submenu.style.top = `${Math.max(edge, Math.min(rect.top - 7, window.innerHeight - height - edge))}px`;
       submenu.style.zIndex = String(310 + depth);
+    }
+
+    function choiceRepresentative(menu, selected) {
+      const items = directMenuItems(menu, "[data-select-folder-toggle]", "[data-select-value]");
+      return items.find((item) => selected && (item === selected || item.closest(".select-choice-branch")?.contains(selected))) || items[0];
+    }
+
+    function focusMenuItem(picker, item) {
+      if (!item) return null;
+      picker.querySelectorAll(".is-picker-active").forEach((active) => active.classList.remove("is-picker-active"));
+      item.classList.add("is-picker-active");
+      item.focus();
+      return item;
+    }
+
+    function focusSelectedChoice(select, menu, picker = select.closest(".select-choice-picker")) {
+      const selected = [...menu.querySelectorAll("[data-select-value]")]
+        .find((choice) => !choice.disabled && choice.dataset.selectValue === select.value);
+      return focusMenuItem(picker, choiceRepresentative(menu, selected));
+    }
+
+    function focusIntoBranch(branch, select) {
+      const submenu = branch?.querySelector(":scope > .select-choice-submenu");
+      if (!submenu) return;
+      const selected = [...submenu.querySelectorAll("[data-select-value]")]
+        .find((choice) => !choice.disabled && choice.dataset.selectValue === select.value);
+      return focusMenuItem(select.closest(".select-choice-picker"), choiceRepresentative(submenu, selected));
     }
 
     function sync(select) {
@@ -228,7 +303,8 @@
       })));
       const domDepth = (container) => {
         let depth = 0;
-        container.querySelectorAll(":scope > .select-choice-branch").forEach((branch) => {
+        const branchContainer = container.querySelector(":scope > .select-choice-submenu-scroll") || container;
+        branchContainer.querySelectorAll(":scope > .select-choice-branch").forEach((branch) => {
           const submenu = branch.querySelector(":scope > .select-choice-submenu");
           if (submenu) depth = Math.max(depth, 1 + domDepth(submenu));
         });
@@ -250,9 +326,13 @@
         left = opensLeft ? Math.max(left, edge + depth * pitch) : Math.min(left, window.innerWidth - edge - totalWidth);
       }
       menu.style.width = `${width}px`;
+      menu.style.minWidth = "0";
+      menu.style.maxWidth = `${width}px`;
+      menu.style.right = "auto";
+      menu.style.bottom = "auto";
       menu.style.left = `${Math.max(edge, Math.min(left, window.innerWidth - width - edge))}px`;
       menu.style.top = `${rect.bottom + 7}px`;
-      const height = Math.min(menu.scrollHeight, 320);
+      const height = fitMenuSurface(menu);
       if (rect.bottom + 7 + height > window.innerHeight - edge && rect.top > height + edge) {
         menu.style.top = `${rect.top - height - 7}px`;
       }
@@ -270,7 +350,7 @@
       const trigger = document.createElement("input");
       trigger.type = "text";
       trigger.readOnly = true;
-      trigger.className = "content-choice-trigger select-choice-trigger";
+      trigger.className = "select-choice-trigger";
       trigger.dataset.selectPickerToggle = "";
       trigger.setAttribute("role", "combobox");
       trigger.setAttribute("aria-label", label);
@@ -281,6 +361,7 @@
       const menu = document.createElement("div");
       menu.id = menuId;
       menu.className = "select-choice-menu";
+      menu.setAttribute("popover", "manual");
       menu.setAttribute("role", "listbox");
       menu.setAttribute("aria-label", label);
 
@@ -292,6 +373,10 @@
       select.setAttribute("aria-hidden", "true");
       sync(select);
 
+      picker.addEventListener("pointerdown", (event) => {
+        if (event.button !== 0 || !event.isPrimary) return;
+        if (event.target.closest(".select-choice-menu")) pointerActivePicker = picker;
+      });
       picker.addEventListener("click", (event) => {
         const folder = event.target.closest("[data-select-folder-toggle]");
         if (folder) {
@@ -321,7 +406,11 @@
         trigger.setAttribute("aria-expanded", String(opening));
         if (opening) {
           populateMenu(select, picker);
+          showMenuSurface(menu);
           positionMenu(picker);
+          focusSelectedChoice(select, menu);
+        } else {
+          hideMenuSurface(menu);
         }
         event.preventDefault();
       });
@@ -339,47 +428,65 @@
         if (branch && !branch.contains(event.relatedTarget)) scheduleSubmenuClose(branch);
       });
       picker.addEventListener("focusin", (event) => {
+        const item = event.target.closest("[data-select-folder-toggle], [data-select-value]");
+        if (item) {
+          picker.querySelectorAll(".is-picker-active").forEach((active) => active.classList.remove("is-picker-active"));
+          item.classList.add("is-picker-active");
+        }
         const branch = event.target.closest(".select-choice-branch");
-        if (branch) setSubmenuOpen(branch, true, positionSubmenu);
+        if (branch) {
+          setSubmenuOpen(branch, true, positionSubmenu);
+          return;
+        }
+        const menu = event.target.closest(".select-choice-menu, .select-choice-submenu");
+        const container = menu?.querySelector(":scope > .select-choice-submenu-scroll") || menu;
+        [...(container?.children || [])].forEach((item) => {
+          if (item.classList?.contains("select-choice-branch")) closeSubmenuTree(item);
+        });
       });
       picker.addEventListener("focusout", (event) => {
-        if (!picker.contains(event.relatedTarget)) close();
+        if (!picker.contains(event.relatedTarget) && pointerActivePicker !== picker) close();
       });
       picker.addEventListener("keydown", (event) => {
-        const folder = event.target.closest("[data-select-folder-toggle]");
+        if (event.key === "Escape" && (picker.classList.contains("open") || event.target !== trigger)) {
+          close();
+          trigger.focus({ preventScroll: true });
+          event.preventDefault();
+          return;
+        }
+        const navigationKeys = ["ArrowDown", "ArrowUp", "Home", "End"];
+        if (event.target === trigger && navigationKeys.includes(event.key) && !picker.classList.contains("open")) {
+          trigger.click();
+          const options = directMenuItems(menu, "[data-select-folder-toggle]", "[data-select-value]");
+          if (event.key === "Home") focusMenuItem(picker, options[0]);
+          else if (event.key === "End") focusMenuItem(picker, options[options.length - 1]);
+          event.preventDefault();
+          return;
+        }
+        const activeItem = event.target.closest("[data-select-folder-toggle], [data-select-value]")
+          || picker.querySelector(".is-picker-active")
+          || focusSelectedChoice(select, menu, picker);
+        const folder = activeItem?.matches("[data-select-folder-toggle]") ? activeItem : null;
+        const choice = activeItem?.matches("[data-select-value]") ? activeItem : null;
         if (folder && ["Enter", " ", "ArrowRight"].includes(event.key)) {
           const branch = folder.closest(".select-choice-branch");
           setSubmenuOpen(branch, true, positionSubmenu);
-          directMenuItems(branch.querySelector(":scope > .select-choice-submenu"), "[data-select-folder-toggle]", "[data-select-value]")[0]?.focus();
+          focusIntoBranch(branch, select);
           event.preventDefault();
           return;
         }
-        if (event.key === "ArrowLeft" && event.target.closest(".select-choice-submenu")) {
-          const branch = event.target.closest(".select-choice-submenu").parentElement;
+        if (event.key === "ArrowLeft" && activeItem?.closest(".select-choice-submenu")) {
+          const branch = activeItem.closest(".select-choice-submenu").parentElement;
           setSubmenuOpen(branch, false, positionSubmenu);
-          branch.querySelector(":scope > [data-select-folder-toggle]")?.focus();
+          focusMenuItem(picker, branch.querySelector(":scope > [data-select-folder-toggle]"));
           event.preventDefault();
           return;
         }
-        if (event.target === trigger && ["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) {
-          if (!picker.classList.contains("open")) trigger.click();
-          const options = directMenuItems(menu, "[data-select-folder-toggle]", "[data-select-value]");
-          const selected = options.find((option) => option.getAttribute("aria-selected") === "true");
-          const edgeOption = ["ArrowDown", "Home"].includes(event.key) ? options[0] : options[options.length - 1];
-          (event.key === "Home" || event.key === "End" ? edgeOption : selected || edgeOption)?.focus();
-          event.preventDefault();
-          return;
-        }
-        const choice = event.target.closest("[data-select-value]");
-        if ((folder || choice) && ["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) {
-          focusRelativeMenuItem(event.target, event.key, "[data-select-folder-toggle]", "[data-select-value]");
+        if ((folder || choice) && navigationKeys.includes(event.key)) {
+          focusRelativeMenuItem(activeItem, event.key, "[data-select-folder-toggle]", "[data-select-value]");
           event.preventDefault();
         } else if (choice && ["Enter", " "].includes(event.key)) {
-          document.activeElement.click();
-          event.preventDefault();
-        } else if (event.key === "Escape") {
-          close();
-          trigger.focus({ preventScroll: true });
+          choice.click();
           event.preventDefault();
         }
       });
@@ -408,6 +515,7 @@
       hierarchy: {
         clearSubmenuClose,
         directMenuItems,
+        fitMenuSurface,
         focusRelativeMenuItem,
         scheduleSubmenuClose,
         setSubmenuOpen,

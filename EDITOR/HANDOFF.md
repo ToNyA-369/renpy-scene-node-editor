@@ -163,6 +163,8 @@ Textbox 外觀設定檔是專案共用、創作者擁有的 Version 1 JSON，每
 
 Runtime 以獨立 `scene_enabled_options` 保存受控目標，不污染 Stats／Memories。狀態採 reassignment 以支援 Ren'Py save／rollback，不因 REDO、GOTO、REPLACE、EXIT 自動重設，`scene_reset_state()` 開新遊戲時清空。Option Effect 只能控制 Event 所屬 Options 作用域：實際 Scene Node Event 只能控制同一節點，Global Event 只能控制 `__global__`；所有跨作用域引用都由 Editor、API 與 Runtime 拒絕。Editor 的 Effect 階層選單只顯示目前作用域的 Element／Item Name，JSON 仍保存穩定 Node／Element／Item ID。API 專案檢查及 Element／Item 刪除保護都必須包含 Option Effect。
 
+Options Renderer 會把目前節點與 Global Options 合併後依 Element `Z Order` 穩定升冪建立 Ren'Py `Fixed` 子項；較大的值最後繪製，並在重疊區域優先接收 Pointer。相同 `Z Order` 保留作用域與 Element 陣列順序，較後方者在上。PICTURE 啟用 Alpha Hit Test 時，透明像素仍可讓下層接收互動。
+
 ## 6. 編輯器目前狀態
 
 目前已實作：
@@ -176,14 +178,14 @@ Runtime 以獨立 `scene_enabled_options` 保存受控目標，不污染 Stats�
 - Node Schema 不保存 Background 或 Screen；兩者與音訊、轉場一樣由 Content 使用 Ren'Py 原生語法管理。
 - Editor 不提供 Screen 文件工作區或 CRUD API；Installer 也不管理創作者的 `gui.rpy`、`screens.rpy` 與其他介面文件。
 - 中文顯示名稱與穩定技術 ID 映射。
-- Event Conditions、Effects、Content、Next Node 與權重表單。
+- Event Conditions、Effects、Content、Next Node 與權重表單；Next Node 選單沿用 Scene Node 的 authoring Group 顯示「Group → Node」，未群組節點留在第一層，JSON 仍只保存穩定 Node ID。
 - Event Conditions 使用一層 OR-of-AND 語意群組：同一非空 `clause` 是 AND，不同 clause 與 `null` 獨立條件是 OR；舊平面 Conditions 仍按全 AND 讀取並在保存時正規化至 `and_1`。群組內外可直接拖移，單成員 AND 群組保留；只有單一 AND 群組時新增會加入該組，已有 OR 分支後新增為獨立條件。Effects／Content 權重／Next Node 權重維持無群組 Pointer 排序；Effects 直接保存並依陣列順序執行，權重 object 只保存 Editor 顯示順序而不改變機率。
 - Content 文件與 Textbox Profile 管理清單共用無群組 Pointer 排序。Scene Node 選單則組合 `js/ui/group_drag.js`，以 Node.json 的可選 `Group` 與 `Order` 保存停留成組、跨框移入／移出及整組排序，並由 `PUT /api/node-groups` 原子寫入；Global Node 固定在群組流之外。共用群組意圖停留時間為 500ms，未群組候選會向下展開 48px 的真實預留空間；Event／Node 群組內排序後以暫時 pinned-open 狀態保持展開至 pointerleave，整組預覽則以 220ms 從目前高度縮合。Node.json 的可選 `Content Order` 與 Profile 的可選 `Order` 同樣是 Editor-only metadata。缺值時保持既有穩定順序，首次拖移後才正規化，不得改變 ROOT、Stack、圖面布局或 Runtime。
 - 刪除 Content 權重列時，最後一列必須正規化為 `null`，不可保存空 object；空 object 會被 API 視為不合法權重表並造成正常刪除顯示 autosave 錯誤。
 - Event Trigger 的 Options 來源在 UI 顯示為 `Option`，JSON／Runtime 契約仍是 `Action:<id>`；Auto 顯示為 On Enter／On Node／On Exit，保存為 `Auto:Enter`／`Auto:Node`／`Auto:Exit`。
 - Event Content 使用創作者命名的文件第一層與 label 第二層的階層選單；只有一個 label 的文件在 UI 直接映射為創作者名稱，實際保存值仍是技術 label。
 - Event 的 `Group` 是單層 authoring metadata；缺值／空值正規化為固定 `Normal`，不參與 Runtime、Priority／Weight、生命週期或關聯圖。Event Pool 只保留一個展滿側欄的新增 Event 按鈕；未群組 Event 與群組卡片依 `Order` 共用同一排序流，末端永遠保留自然落點，可將 Event 排在最末群組之後。Pointer 拖移以真實元素即時騰出插入間隙並用 FLIP 位移推開 Event／群組；只有游標仍位於候選項目或群組的目前幾何邊界內，500ms 停留才可成組，未群組候選會向下展開 48px 預留空間，讓位移開後立即取消。普通點擊在 7px 拖移門檻前不得改動 DOM或阻擋 Event 選取。群組預設收起為較短的可改名欄位與數量，hover、鍵盤 focus、拖移進入時展開；群組內排序後保持展開至 pointerleave。名稱與數量之間的無圖示留白可將群組當成單一排序區塊拖移，浮動預覽以 220ms 從目前高度縮合，成員歸屬與內部順序不變。群組剩一個 Event 時自動解散；順序保存於可選、非負整數的 Editor-only `Order`，舊資料缺值時依現有穩定順序讀取。成功拖移只更新同步狀態、不顯示 Toast；批次群組與排序經 `/api/event-groups` 一次保存，失敗不得提交畫面狀態且仍需顯示錯誤。
-- 所有固定選項 `<select>` 由前端提升為共用自訂選單；長清單可在選單內捲動。圖片與音訊依路徑資料建立任意深度的父子選單，父子框之間固定保留間隔與透明滑鼠通道，並支援方向鍵、Enter、Esc；欄位只顯示檔名。原始欄位仍保留在表單內，確保既有表單讀取與 API payload 不變。
+- 所有固定選項 `<select>`（包含 Event Content label）由前端提升為同一個共用自訂選單；所有可選列固定為 38px，選單依目前層的實際內容長高並在 320px 後捲動。圖片、音訊與 Content 文件依路徑資料建立任意深度的父子選單，父子框之間固定保留間隔與透明滑鼠通道。滑鼠開啟後焦點立即進入選單；上下鍵在目前層巡覽，聚焦父層時只展開子選單，右鍵才把焦點移入，左鍵返回父層，Enter 選取，Esc 關閉。欄位只顯示創作者名稱。原始欄位仍保留在表單內，確保既有表單讀取與 API payload 不變。
 - Options 的 Hover Sound 與 Click Sound 只掃描 `game/audio/`。Event 不提供 BGM／SE Effect 或 Persistent；音訊演出由 Content 使用 Ren'Py 原生語法。
 - TEXTBOX、PICTURE、HITBOX 選項表單。
 - TEXTBOX 專案共用外觀設定檔：獨立檔案 CRUD、Profile 選擇、Feature 開關、稀疏局部覆寫、Editor 預覽、Runtime hover accent／text shadow／staggered entrance，以及缺檔回退與引用刪除保護。
@@ -295,7 +297,7 @@ EDITOR/static/index.html
   應用程式外殼、節點抽屜、七個功能區、對話框與設定結構。
 
 EDITOR/static/app.js
-  前端 composition root：狀態、各工作區渲染、Content 專用選單、跨模組協調、表單接線及 Options 畫布互動。
+  前端 composition root：狀態、各工作區渲染、跨模組協調、表單接線及 Options 畫布互動。
 
 EDITOR/static/js/core/i18n.js
   前端國際化（i18n）字典與 `t()` 格式化函式，支援 `zh-Hant`（繁體中文）與 `en`（英文）雙語切換。
@@ -332,6 +334,9 @@ EDITOR/static/js/ui/workspace_tab_reorder.js
 
 EDITOR/static/js/workspaces/event_editor.js
   Event Group 正規化／分組、Condition／Effect 列、Content／Next Node 權重表單、DOM 回讀與規則型別切換；依賴由 app.js 建立時明確注入。
+
+EDITOR/static/js/workspaces/event_focus_navigation.js
+  Event 表單的分層焦點控制：主欄位、固定展開區塊、子項欄位、區塊新增與 Esc 返回；不讀寫 Event JSON。
 
 EDITOR/static/js/workspaces/state_editor.js
   Stats 群組／順序正規化、工作區分組與 Group → Stat 階層選單資料；不改變平面 Stat ID。

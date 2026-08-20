@@ -467,19 +467,20 @@ test("critical editor interactions survive reload without browser errors", async
   await weightedEventButton.click();
   await expect(weightedEventButton).toHaveClass(/active/);
 
-  const contentPicker = page.locator("[data-content-picker-toggle]");
+  const contentPickerRoot = page.locator('[name="contentWeightedId"]').first().locator("xpath=..");
+  const contentPicker = contentPickerRoot.locator("[data-select-picker-toggle]");
   await expect(contentPicker).toBeVisible();
   await contentPicker.scrollIntoViewIfNeeded();
   await contentPicker.click();
-  await expect(page.locator(".content-choice-menu")).toBeVisible();
-  const contentFileBranch = page.locator("[data-content-file-expand]");
+  await expect(contentPickerRoot.locator(".select-choice-menu")).toBeVisible();
+  const contentFileBranch = contentPickerRoot.locator("[data-select-folder-toggle]");
   await expect(contentFileBranch).toHaveCount(1);
   await contentFileBranch.click();
-  const contentLabelChoice = page.locator('[data-content-label-choice="test_branch_success"]');
+  const contentLabelChoice = contentPickerRoot.locator('[data-select-value="test_branch_success"]');
   await expect(contentLabelChoice).toBeVisible();
-  const contentSubmenuGeometry = await page.evaluate(() => {
-    const menu = document.querySelector(".content-choice-menu").getBoundingClientRect();
-    const submenu = document.querySelector(".content-label-submenu").getBoundingClientRect();
+  const contentSubmenuGeometry = await contentPickerRoot.evaluate((picker) => {
+    const menu = picker.querySelector(".select-choice-menu").getBoundingClientRect();
+    const submenu = picker.querySelector(".select-choice-submenu").getBoundingClientRect();
     return {
       menuRight: menu.right,
       submenuLeft: submenu.left,
@@ -912,6 +913,44 @@ test("critical editor interactions survive reload without browser errors", async
   await page.getByRole("button", { name: /DATA Options 綜合測試/ }).click();
   const availability = page.locator('select[data-option-path="Availability"]');
   await expect(availability).toHaveValue("ALWAYS");
+  const availabilityPicker = availability.locator("xpath=..");
+  const availabilityTrigger = availabilityPicker.locator("[data-select-picker-toggle]");
+  await availabilityTrigger.click();
+  const optionPickerPresentation = await availabilityPicker.evaluate((picker) => {
+    const triggerStyle = getComputedStyle(picker.querySelector("[data-select-picker-toggle]"));
+    const optionStyle = getComputedStyle(picker.querySelector(".select-choice-option"));
+    const menuRect = picker.querySelector(".select-choice-menu").getBoundingClientRect();
+    return {
+      triggerFontSize: triggerStyle.fontSize,
+      triggerFontWeight: triggerStyle.fontWeight,
+      triggerLetterSpacing: triggerStyle.letterSpacing,
+      optionFontSize: optionStyle.fontSize,
+      optionFontWeight: optionStyle.fontWeight,
+      optionLetterSpacing: optionStyle.letterSpacing,
+      menuWidth: menuRect.width,
+      menuHeight: menuRect.height,
+    };
+  });
+  expect(optionPickerPresentation).toMatchObject({
+    triggerFontSize: "12px",
+    triggerFontWeight: "680",
+    triggerLetterSpacing: "normal",
+    optionFontSize: "12px",
+    optionFontWeight: "620",
+    optionLetterSpacing: "normal",
+  });
+  expect(optionPickerPresentation.menuWidth).toBeLessThanOrEqual(242);
+  expect(optionPickerPresentation.menuHeight).toBeLessThanOrEqual(322);
+  const availabilityValues = await availability.locator("option").evaluateAll((options) => options.map((option) => option.value));
+  const selectedAvailabilityIndex = availabilityValues.indexOf("ALWAYS");
+  const nextAvailability = availabilityValues[(selectedAvailabilityIndex + 1) % availabilityValues.length];
+  await page.keyboard.press("ArrowDown");
+  const nextAvailabilityChoice = availabilityPicker.locator(`[data-select-value="${nextAvailability}"]`);
+  await expect(nextAvailabilityChoice).toBeFocused();
+  await expect(nextAvailabilityChoice).toHaveClass(/is-picker-active/);
+  await page.keyboard.press("ArrowUp");
+  await expect(availabilityPicker.locator('[data-select-value="ALWAYS"]')).toBeFocused();
+  await page.keyboard.press("Escape");
   await waitForOptionsSave(page, async () => {
     await availability.selectOption("CONTROLLED", { force: true });
   });
@@ -1612,47 +1651,80 @@ test("keyboard authoring follows Event focus order, navigates every picker, and 
   await page.keyboard.press("End");
   await expect(page.locator("#eventForm .select-choice-menu:visible [data-select-value]").last()).toBeFocused();
   await page.keyboard.press("Escape");
+  await expect(triggerValuePicker).toBeFocused();
 
-  const contentSave = page.waitForResponse((candidate) => (
-    candidate.url().endsWith("/api/events")
-    && candidate.request().method() === "POST"
-    && candidate.ok()
-  ));
-  await page.locator("#eventForm [data-add-weighted='content']").click();
-  const contentPicker = page.locator("#eventForm [data-content-picker-toggle]").first();
+  await page.keyboard.press("Tab");
+  await expect(page.locator('#eventForm [name="Priority"]')).toBeFocused();
+  await page.keyboard.press("Tab");
+  await expect(page.locator('#eventForm [name="Weight"]')).toBeFocused();
+  await page.keyboard.press("Tab");
+  const once = page.locator('#eventForm [name="Once"]');
+  await expect(once).toBeFocused();
+  const onceBefore = await once.isChecked();
+  await waitForEventSave(page, () => page.keyboard.press("Enter"));
+  expect(await once.isChecked()).toBe(!onceBefore);
+
+  await page.keyboard.press("Tab");
+  const conditionsSection = page.locator('[data-event-section="conditions"]');
+  await expect(conditionsSection).toBeFocused();
+  await expect(page.locator("#eventForm details.collapsible-section")).toHaveCount(0);
+  await expect(page.locator("#eventForm [data-event-section]")).toHaveCount(4);
+  await waitForEventSave(page, () => page.keyboard.press("Control+Enter"));
+  const conditionType = page.locator('.condition-row [name="conditionType"]').first().locator("xpath=..").locator("[data-select-picker-toggle]");
+  const conditionId = page.locator('.condition-row [name="conditionId"]').first().locator("xpath=..").locator("[data-select-picker-toggle]");
+  const conditionOp = page.locator('.condition-row [name="conditionOp"]').first().locator("xpath=..").locator("[data-select-picker-toggle]");
+  await expect(conditionType).toBeFocused();
+  await page.keyboard.press("Tab");
+  await expect(conditionId).toBeFocused();
+  await page.keyboard.press("Tab");
+  await expect(conditionOp).toBeFocused();
+  await page.keyboard.press("Tab");
+  await expect(page.locator('.condition-row [name="conditionValue"]').first()).toBeFocused();
+  await page.keyboard.press("Tab");
+  const effectsSection = page.locator('[data-event-section="effects"]');
+  await expect(effectsSection).toBeFocused();
+  await page.keyboard.press("Shift+Tab");
+  await expect(conditionsSection).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(conditionType).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(conditionsSection).toBeFocused();
+
+  await page.keyboard.press("Tab");
+  await expect(effectsSection).toBeFocused();
+  await waitForEventSave(page, () => page.keyboard.press("Control+Enter"));
+  await expect(page.locator('.effect-row [name="effectType"]').first().locator("xpath=..").locator("[data-select-picker-toggle]")).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(effectsSection).toBeFocused();
+
+  await page.keyboard.press("Tab");
+  const contentSection = page.locator('[data-event-section="content"]');
+  await expect(contentSection).toBeFocused();
+  await waitForEventSave(page, () => page.keyboard.press("Control+Enter"));
+  const contentPicker = page.locator('#eventForm [name="contentWeightedId"]').first().locator("xpath=..").locator("[data-select-picker-toggle]");
   await expect(contentPicker).toBeVisible();
-  await contentPicker.focus();
-  await contentSave;
   await expect(contentPicker).toBeFocused();
   await page.keyboard.press("Home");
-  const contentMenuItem = page.locator("#eventForm .content-choice-menu:visible [data-content-label-choice], #eventForm .content-choice-menu:visible [data-content-file-expand]").first();
+  const contentMenuItem = page.locator("#eventForm .select-choice-menu:visible [data-select-value], #eventForm .select-choice-menu:visible [data-select-folder-toggle]").first();
   await expect(contentMenuItem).toBeFocused();
   await page.keyboard.press("Escape");
+  await expect(contentPicker).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(contentSection).toBeFocused();
+  await page.keyboard.press("Tab");
+  const endUpSection = page.locator('[data-event-section="end-up"]');
+  await expect(endUpSection).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(page.locator('#eventForm [name="EndUp"]').locator("xpath=..").locator("[data-select-picker-toggle]")).toBeFocused();
 
   await expect.poll(() => page.locator("select:not([multiple])").evaluateAll((selects) => (
     selects.every((select) => select.dataset.selectEnhanced === "true" && select.tabIndex === -1)
   ))).toBe(true);
 
-  const addEffectSave = page.waitForResponse((candidate) => (
-    candidate.url().endsWith("/api/events")
-    && candidate.request().method() === "POST"
-    && candidate.ok()
-  ));
-  await page.locator("#addEffectButton").click();
-  await addEffectSave;
   const effectRow = page.locator("#effectList .effect-row").first();
   await effectRow.locator('[name="effectValue"]').focus();
   await page.keyboard.press("Escape");
-  await expect(effectRow).toBeFocused();
-
-  const removeEffectSave = page.waitForResponse((candidate) => (
-    candidate.url().endsWith("/api/events")
-    && candidate.request().method() === "POST"
-    && candidate.ok()
-  ));
-  await page.keyboard.press("Control+Backspace");
-  await removeEffectSave;
-  await expect(page.locator("#effectList .effect-row")).toHaveCount(0);
+  await expect(page.locator('[data-event-section="effects"]')).toBeFocused();
 
   let deleteRequests = 0;
   page.on("request", (request) => {
@@ -1675,6 +1747,173 @@ test("keyboard authoring follows Event focus order, navigates every picker, and 
   await deleteResponse;
   expect(deleteRequests).toBe(1);
   await expect(page.locator("#saveState")).toHaveText("已同步");
+});
+
+test("choice picker mouse selection survives Safari focusout without a related target", async ({ page }) => {
+  await page.goto(editorUrl);
+  await page.evaluate(() => {
+    const fixture = document.createElement("label");
+    fixture.id = "choicePickerPointerFixture";
+    fixture.innerHTML = `
+      <span>Pointer fixture</span>
+      <select aria-label="Pointer fixture">
+        <option value="first">First</option>
+        <option value="second">Second</option>
+        <option value="nested_top" data-picker-path="Folder/Top">Top</option>
+        <option value="nested_middle" data-picker-path="Folder/Middle">Middle</option>
+        <option value="nested_lower" data-picker-path="Folder/Lower">Lower</option>
+        <option value="nested_bottom" data-picker-path="Folder/Bottom">Bottom</option>
+      </select>
+    `;
+    document.body.append(fixture);
+  });
+
+  const fixture = page.locator("#choicePickerPointerFixture");
+  const select = fixture.locator("select");
+  await expect(select).toHaveAttribute("data-select-enhanced", "true");
+  const trigger = fixture.locator("[data-select-picker-toggle]");
+  await trigger.evaluate((element) => element.click());
+  const picker = fixture.locator(".select-choice-picker");
+  const secondChoice = fixture.locator('[data-select-value="second"]');
+  await expect(picker).toHaveClass(/open/);
+  await expect(fixture.locator(".select-choice-menu")).toHaveAttribute("popover", "manual");
+  expect(await fixture.locator(".select-choice-menu").evaluate((menu) => (
+    typeof menu.showPopover !== "function" || menu.matches(":popover-open")
+  ))).toBe(true);
+  const firstMenuGeometry = await fixture.locator(".select-choice-menu").evaluate((menu) => {
+    const rect = menu.getBoundingClientRect();
+    const style = getComputedStyle(menu);
+    const items = [...menu.children].map((child) => (
+      child.matches(".select-choice-option") ? child : child.querySelector(":scope > .select-choice-folder")
+    )).filter(Boolean);
+    const itemHeights = items.map((item) => item.getBoundingClientRect().height);
+    const expectedHeight = itemHeights.reduce((sum, height) => sum + height, 0)
+      + Number.parseFloat(style.rowGap || style.gap) * Math.max(0, items.length - 1)
+      + Number.parseFloat(style.paddingTop) + Number.parseFloat(style.paddingBottom)
+      + Number.parseFloat(style.borderTopWidth) + Number.parseFloat(style.borderBottomWidth);
+    return { width: rect.width, height: rect.height, expectedHeight, itemHeights };
+  });
+  expect(firstMenuGeometry.width).toBeLessThanOrEqual(242);
+  expect(firstMenuGeometry.height).toBeLessThanOrEqual(322);
+  expect(new Set(firstMenuGeometry.itemHeights)).toEqual(new Set([38]));
+  expect(firstMenuGeometry.height).toBeCloseTo(firstMenuGeometry.expectedHeight, 0);
+
+  await page.evaluate(() => {
+    const fixtureRoot = document.querySelector("#choicePickerPointerFixture");
+    const triggerElement = fixtureRoot.querySelector("[data-select-picker-toggle]");
+    const choice = fixtureRoot.querySelector('[data-select-value="second"]');
+    choice.dispatchEvent(new PointerEvent("pointerdown", {
+      bubbles: true,
+      button: 0,
+      isPrimary: true,
+      pointerId: 41,
+    }));
+    triggerElement.dispatchEvent(new FocusEvent("focusout", {
+      bubbles: true,
+      relatedTarget: null,
+    }));
+  });
+
+  await expect(picker).toHaveClass(/open/);
+  await secondChoice.click();
+  await expect(select).toHaveValue("second");
+  await expect(trigger).toHaveValue("Second");
+  await expect(picker).not.toHaveClass(/open/);
+
+  const folder = fixture.locator("[data-select-folder-toggle]");
+  const openMenu = async () => {
+    await trigger.evaluate((element) => element.click());
+    await expect(picker).toHaveClass(/open/);
+  };
+  const openNestedMenu = async () => {
+    await openMenu();
+    await folder.click();
+    await expect(fixture.locator(".select-choice-branch")).toHaveClass(/submenu-open/);
+  };
+
+  await openMenu();
+  const typography = await fixture.evaluate((root) => {
+    const optionStyle = getComputedStyle(root.querySelector(".select-choice-option"));
+    const folderStyle = getComputedStyle(root.querySelector(".select-choice-folder"));
+    const fields = ["fontFamily", "fontSize", "fontWeight", "lineHeight", "letterSpacing"];
+    return Object.fromEntries(fields.map((field) => [field, [optionStyle[field], folderStyle[field]]]));
+  });
+  Object.values(typography).forEach(([optionValue, folderValue]) => expect(optionValue).toBe(folderValue));
+  await expect(secondChoice).toBeFocused();
+  await page.keyboard.press("ArrowDown");
+  await expect(folder).toBeFocused();
+  await expect(fixture.locator(".select-choice-branch")).toHaveClass(/submenu-open/);
+  await expect(fixture.locator(".select-choice-submenu")).toBeVisible();
+  const submenuGeometry = await fixture.locator(".select-choice-submenu-scroll").evaluate((surface) => {
+    const style = getComputedStyle(surface);
+    const itemHeights = [...surface.children].map((item) => item.getBoundingClientRect().height);
+    const expectedHeight = itemHeights.reduce((sum, height) => sum + height, 0)
+      + Number.parseFloat(style.rowGap || style.gap) * Math.max(0, itemHeights.length - 1)
+      + Number.parseFloat(style.paddingTop) + Number.parseFloat(style.paddingBottom)
+      + Number.parseFloat(style.borderTopWidth) + Number.parseFloat(style.borderBottomWidth);
+    return { height: surface.getBoundingClientRect().height, expectedHeight, itemHeights };
+  });
+  expect(new Set(submenuGeometry.itemHeights)).toEqual(new Set([38]));
+  expect(submenuGeometry.height).toBeCloseTo(submenuGeometry.expectedHeight, 0);
+  await page.keyboard.press("ArrowRight");
+  await expect(fixture.locator('[data-select-value="nested_top"]')).toBeFocused();
+  await page.keyboard.press("ArrowLeft");
+  await expect(folder).toBeFocused();
+  await folder.hover();
+  await expect(fixture.locator(".select-choice-branch")).toHaveClass(/submenu-open/);
+
+  const travel = await fixture.evaluate((root) => {
+    const menu = root.querySelector(".select-choice-menu").getBoundingClientRect();
+    const branch = root.querySelector(".select-choice-branch");
+    const folderButton = branch.querySelector(":scope > .select-choice-folder").getBoundingClientRect();
+    const submenu = branch.querySelector(":scope > .select-choice-submenu").getBoundingClientRect();
+    const opensRight = submenu.left > menu.right;
+    return {
+      folderX: folderButton.left + folderButton.width / 2,
+      folderY: folderButton.top + folderButton.height / 2,
+      bridgeX: opensRight ? (menu.right + submenu.left) / 2 : (submenu.right + menu.left) / 2,
+      bridgeY: Math.max(submenu.top + 2, Math.min(folderButton.top + folderButton.height / 2, submenu.bottom - 2)),
+    };
+  });
+  await page.mouse.move(travel.folderX, travel.folderY);
+  await page.mouse.move(travel.bridgeX, travel.bridgeY);
+  await page.waitForTimeout(240);
+  await expect(fixture.locator(".select-choice-branch")).toHaveClass(/submenu-open/);
+  const bridgeOwner = await page.evaluate(({ x, y }) => (
+    document.elementFromPoint(x, y)?.closest(".select-choice-submenu")?.className || ""
+  ), { x: travel.bridgeX, y: travel.bridgeY });
+  expect(bridgeOwner).toContain("select-choice-submenu");
+
+  await page.keyboard.press("ArrowRight");
+  await expect(fixture.locator('[data-select-value="nested_top"]')).toBeFocused();
+  await page.keyboard.press("ArrowDown");
+  await expect(fixture.locator('[data-select-value="nested_middle"]')).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(select).toHaveValue("nested_middle");
+
+  await openNestedMenu();
+  await fixture.locator('[data-select-value="nested_lower"]').click();
+  await expect(select).toHaveValue("nested_lower");
+  await expect(trigger).toHaveValue("Lower");
+
+  await openNestedMenu();
+  const bottomPoint = await fixture.locator('[data-select-value="nested_bottom"]').evaluate((choice) => {
+    const rect = choice.getBoundingClientRect();
+    const blocker = document.createElement("button");
+    blocker.id = "choicePickerUnderlyingControl";
+    blocker.type = "button";
+    blocker.style.cssText = `position:fixed;z-index:999999;left:${rect.left}px;top:${rect.top}px;width:${rect.width}px;height:${rect.height}px`;
+    document.body.append(blocker);
+    return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+  });
+  expect(await page.evaluate(({ x, y }) => (
+    document.elementFromPoint(x, y)?.closest('[data-select-value="nested_bottom"]')?.dataset.selectValue || ""
+  ), bottomPoint)).toBe("nested_bottom");
+  await page.mouse.click(bottomPoint.x, bottomPoint.y);
+  await expect(select).toHaveValue("nested_bottom");
+  await expect(trigger).toHaveValue("Bottom");
+  await page.locator("#choicePickerUnderlyingControl").evaluate((element) => element.remove());
+  await fixture.evaluate((element) => element.remove());
 });
 
 test("textbox appearance profiles are reusable, previewed, and persisted", async ({ page }) => {
@@ -2071,6 +2310,10 @@ test("creator-managed Node, Content, and Textbox Profile lists persist drag orde
   await page.locator("#textboxProfileDialog").evaluate((dialog) => dialog.close());
 
   await openNodeSidebar(page);
+  await page.locator('#nodeList [data-node-path="branch_lab"]').click();
+  await page.getByRole("button", { name: /^事件 / }).click();
+  await page.locator('[data-event-id="branch_random"]').click();
+  await openNodeSidebar(page);
   const nodeGroupSave = page.waitForResponse((candidate) => (
     candidate.url().endsWith("/api/node-groups") && candidate.request().method() === "PUT" && candidate.ok()
   ));
@@ -2108,6 +2351,19 @@ test("creator-managed Node, Content, and Textbox Profile lists persist drag orde
   const groupedProject = await (await page.request.get(`${editorUrl}/api/project`)).json();
   expect(groupedProject.nodes.filter((node) => ["outcome_success", "outcome_fallback"].includes(node.path)).map((node) => node.group))
     .toEqual(["新群組", "新群組"]);
+  await page.locator("#sidebarScrim").click();
+  const groupedNames = Object.fromEntries(groupedProject.nodes.map((node) => [node.id || node.path, node.name]));
+  const nextNodeSelect = page.locator('select[name="nextWeightedId"]').first();
+  await expect(nextNodeSelect.locator('option[value="outcome_success"]'))
+    .toHaveAttribute("data-picker-path", `新群組/${groupedNames.outcome_success}`);
+  await expect(nextNodeSelect.locator('option[value="outcome_fallback"]'))
+    .toHaveAttribute("data-picker-path", `新群組/${groupedNames.outcome_fallback}`);
+  const nextNodePicker = nextNodeSelect.locator("xpath=..");
+  await nextNodePicker.locator("[data-select-picker-toggle]").click();
+  const nodeGroupChoice = nextNodePicker.locator("[data-select-folder-toggle]").filter({ hasText: "新群組" });
+  await expect(nodeGroupChoice).toBeVisible();
+  await nodeGroupChoice.click();
+  await expect(nextNodePicker.locator('[data-select-value="outcome_success"]')).toBeVisible();
 });
 
 test("Content mounts the offline Ren'Py editor and keeps autosave persistence", async ({ page }) => {
