@@ -15,6 +15,7 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parent.parent
+EXPECTED_VERSION = (ROOT / "VERSION").read_text(encoding="utf-8").strip()
 sys.path.insert(0, str(ROOT / "tools"))
 LOCAL_OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 
@@ -34,7 +35,7 @@ class InstallerTest(unittest.TestCase):
 
             self.assertEqual(resolved_project, project_root)
             self.assertEqual(resolved_game, game_root)
-            self.assertEqual(version, "0.3.0-alpha")
+            self.assertEqual(version, EXPECTED_VERSION)
             self.assertTrue(launcher.exists())
             self.assertTrue(os.access(launcher, os.X_OK))
             self.assertTrue((project_root / ".scene-node-editor" / "EDITOR" / "app.py").exists())
@@ -225,7 +226,7 @@ class InstallerTest(unittest.TestCase):
             manifest = json.loads(
                 (project_root / ".scene-node-editor" / "manifest.json").read_text(encoding="utf-8")
             )
-            self.assertEqual(manifest["version"], "0.3.0-alpha")
+            self.assertEqual(manifest["version"], EXPECTED_VERSION)
             self.assertEqual(manifest["managed_runtime_files"], list(install.RUNTIME_FILES))
             self.assertEqual(manifest["managed_context_files"], list(install.MANAGED_CONTEXT_FILES))
 
