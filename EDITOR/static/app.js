@@ -44,6 +44,9 @@ const {
 const {
   AUTO_TRIGGER_CHOICES,
   END_UP_CHOICES,
+  EVENT_PRIORITY_DEFAULT,
+  EVENT_PRIORITY_MAX,
+  EVENT_PRIORITY_MIN,
   EVENT_TRIGGER_MODES,
   MOUSE_TRIGGER_CHOICES,
   actionTriggerName,
@@ -86,6 +89,7 @@ const state = {
   statsDraft: {},
   memories: {},
   memoriesDraft: {},
+  memoryTags: {},
   issues: [],
   selectedNodePath: null,
   nodeDetail: null,
@@ -118,12 +122,15 @@ let pendingTabPreview = null;
 let tabIndicatorTransitionFrame = 0;
 let pendingNodeGroupFocus = null;
 let pendingEventGroupFocus = null;
+let pendingNodeGroupDropOpen = null;
+let pendingEventGroupDropOpen = null;
 let expandedNodeGroup = null;
 let expandedEventGroup = null;
 let pendingStatGroupFocus = null;
 let eventGroupDragController = null;
 let conditionGroupDragController = null;
 let eventFocusNavigationController = null;
+let eventTagPrefixController = null;
 let pendingEventSectionEntry = null;
 let statGroupDragController = null;
 let eventRuleReorderControllers = [];
@@ -395,6 +402,26 @@ function memoryChoices() {
   return Object.entries(state.memories).map(([id, values]) => ({ id, name: values.Name || id }));
 }
 
+function memoryTagChoices(bankId) {
+  return [...new Set(state.memoryTags?.[bankId] || [])]
+    .sort((left, right) => String(left).localeCompare(String(right), undefined, { sensitivity: "base" }));
+}
+
+function rememberMemoryTags(event) {
+  (event?.Effects || []).forEach((effect) => {
+    const type = String(effect?.type || "").toLocaleLowerCase();
+    const operation = String(effect?.op || "").toLocaleLowerCase();
+    const tagId = String(effect?.id || "").trim();
+    if (!["memory", "tag"].includes(type) || operation !== "add" || !tagId) return;
+    const bankId = String(effect.bank || "memory").trim() || "memory";
+    const tags = memoryTagChoices(bankId);
+    if (!tags.includes(tagId)) tags.push(tagId);
+    state.memoryTags[bankId] = tags.sort((left, right) => (
+      String(left).localeCompare(String(right), undefined, { sensitivity: "base" })
+    ));
+  });
+}
+
 function warnMissingStat(kind) {
   toast(t("目前專案沒有任何 Stat。請先到「狀態」建立 Stat，再新增 Stat {kind}。", { kind: t(kind) }), "error");
 }
@@ -632,6 +659,7 @@ function nodeListItemHtml(node) {
 }
 
 function renderNodeList() {
+  const previousEditingGroup = SceneGroupDrag.editingGroupName(dom.nodeList, ".node-group[data-group-drop]");
   nodeGroupDragController?.destroy();
   nodeGroupDragController = null;
   const query = dom.nodeSearch.value.trim().toLocaleLowerCase();
@@ -644,6 +672,10 @@ function renderNodeList() {
     const haystack = `${node.name || ""} ${node.id} ${node.path}`.toLocaleLowerCase();
     return !query || haystack.includes(query);
   });
+  const selectedNode = state.nodes.find((node) => node.path === state.selectedNodePath);
+  const currentEditingGroup = selectedNode && normalizeNodeGroup(selectedNode.group) !== DEFAULT_EVENT_GROUP
+    ? normalizeNodeGroup(selectedNode.group)
+    : null;
   if (!nodes.length && !globalMatches) {
     dom.nodeList.innerHTML = `<div class="node-list-empty">${state.nodes.length ? escapeHtml(t("沒有符合的節點")) : escapeHtml(t("尚未建立 Scene Node"))}</div>`;
     return;
@@ -662,7 +694,7 @@ function renderNodeList() {
   const blocksHtml = nodeListBlocks(nodes).map((block) => {
     if (block.type === "item") return nodeListItemHtml(block.node);
     return `
-      <section class="event-group node-group ${expandedNodeGroup === block.name ? "is-group-pinned-open" : ""}" data-group-drop="${escapeHtml(block.name)}" aria-label="${escapeHtml(block.name)}">
+      <section class="event-group node-group ${expandedNodeGroup === block.name ? "is-group-pinned-open" : ""} ${block.nodes.some((node) => node.path === state.selectedNodePath) ? "is-group-editing" : ""}" data-group-drop="${escapeHtml(block.name)}" aria-label="${escapeHtml(block.name)}">
         <div class="event-group-header node-group-header">
           <input class="event-group-name node-group-name" value="${escapeHtml(block.name)}" data-node-group-name="${escapeHtml(block.name)}" aria-label="${escapeHtml(t("群組名稱"))}">
           <div class="group-block-drag-space node-group-drag-space" aria-hidden="true"></div>
@@ -673,6 +705,18 @@ function renderNodeList() {
     `;
   }).join("");
   dom.nodeList.innerHTML = `${globalHtml}<div class="node-pool-flow" data-node-ungrouped-drop>${blocksHtml}<div class="group-loose-drop-tail node-loose-drop-tail" aria-hidden="true"></div></div>`;
+  SceneGroupDrag.animateEditingGroupExit(dom.nodeList, {
+    groupSelector: ".node-group[data-group-drop]",
+    previousGroup: previousEditingGroup,
+    currentGroup: currentEditingGroup,
+  });
+  if (pendingNodeGroupDropOpen) {
+    SceneGroupDrag.animateGroupDropOpen(dom.nodeList, {
+      groupSelector: ".node-group[data-group-drop]",
+      groupName: pendingNodeGroupDropOpen,
+    });
+    pendingNodeGroupDropOpen = null;
+  }
   if (!query && nodes.length > 1) {
     nodeGroupDragController = SceneGroupDrag.createController({
       root: dom.nodeList.querySelector(".node-pool-flow"),
@@ -714,13 +758,22 @@ function renderNodeList() {
   }
 }
 
-async function assignNodeGroups(assignments, { focusGroup = null, order = null } = {}) {
+async function assignNodeGroups(assignments, {
+  focusGroup = null,
+  order = null,
+  droppedGroup = null,
+  openDroppedGroup = null,
+} = {}) {
   if (!Object.keys(assignments || {}).length && !order) return true;
   if (!await flushAutosave()) return false;
   try {
     const result = await api("/api/node-groups", { method: "PUT", body: { assignments, order } });
     state.nodes = result.nodes || state.nodes;
     pendingNodeGroupFocus = focusGroup;
+    if (droppedGroup) {
+      expandedNodeGroup = openDroppedGroup || null;
+      pendingNodeGroupDropOpen = openDroppedGroup || null;
+    }
     renderNodeList();
     if (state.activeTab === "events" && state.eventDraft) renderEventsPanel({ preserveView: true });
     return true;
@@ -766,7 +819,13 @@ async function applyNodeGroupBlockDrop({ sourceGroup, targetId, position }) {
     defaultGroup: DEFAULT_EVENT_GROUP,
   });
   if (!plan) return false;
-  return assignNodeGroups({}, { order: plan.order });
+  const selectedNode = state.nodes.find((node) => node.path === state.selectedNodePath);
+  const selectedGroup = selectedNode ? normalizeNodeGroup(selectedNode.group) : DEFAULT_EVENT_GROUP;
+  return assignNodeGroups({}, {
+    order: plan.order,
+    droppedGroup: sourceGroup,
+    openDroppedGroup: selectedGroup === sourceGroup ? sourceGroup : null,
+  });
 }
 
 async function loadProject({ preserveNode = true } = {}) {
@@ -788,6 +847,7 @@ async function loadProject({ preserveNode = true } = {}) {
     state.statsDraft = clone(state.stats);
     state.memories = data.memories || { memory: { Name: "Memory" } };
     state.memoriesDraft = clone(state.memories);
+    state.memoryTags = data.memoryTags || {};
     state.issues = data.issues || [];
     const preferred = previous === state.globalNode?.path
       ? previous
@@ -815,6 +875,11 @@ async function selectNode(path, { preserveTab = false } = {}) {
   try {
     const detail = await api(`/api/node?path=${encodeURIComponent(path)}`);
     detail.events = normalizeEventEntries(detail.events);
+    const selectedNode = state.nodes.find((node) => node.path === path);
+    const destinationGroup = selectedNode && normalizeNodeGroup(selectedNode.group) !== DEFAULT_EVENT_GROUP
+      ? normalizeNodeGroup(selectedNode.group)
+      : null;
+    if (path !== state.selectedNodePath && expandedNodeGroup !== destinationGroup) expandedNodeGroup = null;
     state.selectedNodePath = path;
     state.nodeDetail = detail;
     state.selectedEventId = detail.events[0]?.data?.ID || null;
@@ -994,6 +1059,7 @@ function renderNodePanel() {
     globalNode: state.globalNode,
     nodes: state.nodes,
     graph: state.graph,
+    memories: state.memories,
     isGlobal: isGlobalNode(),
   });
 }
@@ -1134,7 +1200,7 @@ function defaultEvent(id = generateId("event")) {
     Group: DEFAULT_EVENT_GROUP,
     Order: nextOrder,
     Trigger: eventActionChoices()[0]?.id || "Auto:Node",
-    Priority: 5,
+    Priority: EVENT_PRIORITY_DEFAULT,
     Weight: 1,
     Once: false,
     Conditions: [],
@@ -1183,7 +1249,7 @@ function eventListItemHtml(event, group) {
         <strong>${escapeHtml(event.Name || event.ID || event._file)}</strong>
         <span>${escapeHtml(eventTriggerDisplayName(event.Trigger))}</span>
       </span>
-      <span class="priority-badge" title="Priority">${escapeHtml(event.Priority ?? 5)}</span>
+      <span class="priority-badge" title="Priority">${escapeHtml(event.Priority ?? EVENT_PRIORITY_DEFAULT)}</span>
     </button>
   `;
 }
@@ -1196,7 +1262,7 @@ function eventListHtml() {
       ${eventPoolBlocks(events).map((block) => block.type === "item"
         ? eventListItemHtml(block.event, DEFAULT_EVENT_GROUP)
         : `
-          <section class="event-group ${expandedEventGroup === block.name ? "is-group-pinned-open" : ""}" data-group-drop="${escapeHtml(block.name)}">
+          <section class="event-group ${expandedEventGroup === block.name ? "is-group-pinned-open" : ""} ${block.events.some((event) => event.ID === state.selectedEventId) ? "is-group-editing" : ""}" data-group-drop="${escapeHtml(block.name)}">
             <div class="event-group-header">
               <input class="event-group-name" data-event-group-name="${escapeHtml(block.name)}" aria-label="${escapeHtml(t("群組名稱"))}" maxlength="80" value="${escapeHtml(block.name)}">
               <div class="group-block-drag-space event-group-drag-space" title="${escapeHtml(t("拖移群組"))}" aria-label="${escapeHtml(t("拖移群組"))}"></div>
@@ -1260,8 +1326,11 @@ function restoreEventPanelView(view) {
 
 function renderEventsPanel({ preserveView = false } = {}) {
   const view = preserveView ? captureEventPanelView() : null;
+  const previousEditingGroup = SceneGroupDrag.editingGroupName(dom.eventsPanel, ".event-group[data-group-drop]");
   eventFocusNavigationController?.destroy();
   eventFocusNavigationController = null;
+  eventTagPrefixController?.destroy();
+  eventTagPrefixController = null;
   eventRuleReorderControllers.forEach((controller) => controller.destroy());
   eventRuleReorderControllers = [];
   conditionGroupDragController?.destroy();
@@ -1272,6 +1341,8 @@ function renderEventsPanel({ preserveView = false } = {}) {
     dom.eventsPanel.innerHTML = "";
     return;
   }
+  const selectedEventGroup = normalizeEventGroup(state.eventDraft?.Group);
+  const currentEditingGroup = selectedEventGroup !== DEFAULT_EVENT_GROUP ? selectedEventGroup : null;
   const leftHidden = state.leftPanelHidden.events;
   dom.eventsPanel.innerHTML = `
     <div class="event-workspace ${leftHidden ? "left-panel-hidden" : ""}">
@@ -1295,6 +1366,18 @@ function renderEventsPanel({ preserveView = false } = {}) {
       </div>
     </div>
   `;
+  SceneGroupDrag.animateEditingGroupExit(dom.eventsPanel, {
+    groupSelector: ".event-group[data-group-drop]",
+    previousGroup: previousEditingGroup,
+    currentGroup: currentEditingGroup,
+  });
+  if (pendingEventGroupDropOpen) {
+    SceneGroupDrag.animateGroupDropOpen(dom.eventsPanel, {
+      groupSelector: ".event-group[data-group-drop]",
+      groupName: pendingEventGroupDropOpen,
+    });
+    pendingEventGroupDropOpen = null;
+  }
   enhanceSelects(dom.eventsPanel);
   bindEventPanel();
   if (view) restoreEventPanelView(view);
@@ -1337,7 +1420,7 @@ function eventEditorHtml(event) {
           </div>
         </div>
         <div class="form-grid event-primary-settings-grid ${lifecycle ? "is-lifecycle" : ""}">
-          <label class="field"><span>Priority</span><input name="Priority" type="number" min="0" max="5" step="1" value="${escapeHtml(event.Priority ?? 5)}"></label>
+          <label class="field"><span>Priority</span><input name="Priority" type="number" min="${EVENT_PRIORITY_MIN}" max="${EVENT_PRIORITY_MAX}" step="1" value="${escapeHtml(event.Priority ?? EVENT_PRIORITY_DEFAULT)}"></label>
           ${lifecycle ? "" : `<label class="field"><span>Weight</span><input name="Weight" type="number" min="0.0001" step="any" value="${escapeHtml(event.Weight ?? 1)}"></label>`}
           <label class="field event-once-field">
             <span>Once</span>
@@ -1404,7 +1487,7 @@ function readEventForm() {
     Group: normalizeEventGroup(state.eventDraft?.Group),
     Order: Math.max(0, Math.trunc(numberValue(state.eventDraft?.Order, 0))),
     Trigger: trigger,
-    Priority: Math.trunc(numberValue(form.elements.Priority.value, 5)),
+    Priority: Math.trunc(numberValue(form.elements.Priority.value, EVENT_PRIORITY_DEFAULT)),
     Once: form.elements.Once.checked,
     Conditions: conditions,
     Effects: effects,
@@ -1462,6 +1545,16 @@ function bindEventPanel() {
   });
   const form = document.querySelector("#eventForm");
   if (!form) return;
+  eventTagPrefixController = ScenePrefixPicker.createController({
+    root: form,
+    inputSelector: "[data-memory-tag-input]",
+    generateId,
+    getItems: (input) => {
+      const row = input.closest(".condition-row, .effect-row");
+      const bank = row?.querySelector('[name="conditionBank"], [name="effectBank"]')?.value || "memory";
+      return memoryTagChoices(bank);
+    },
+  });
   const addCondition = ({ enter = false } = {}) => {
     const condition = newStateRule("condition", "stat") || newStateRule("condition", "memory");
     if (!condition) return false;
@@ -1693,6 +1786,8 @@ async function selectEvent(id) {
   if (id !== state.selectedEventId && !await flushAutosave()) return;
   const entry = state.nodeDetail.events.find((item) => item.data.ID === id);
   if (!entry) return;
+  const destinationGroup = normalizeEventGroup(entry.data.Group);
+  if (id !== state.selectedEventId && expandedEventGroup !== destinationGroup) expandedEventGroup = null;
   state.selectedEventId = id;
   state.eventOriginalId = id;
   state.eventDraft = clone(entry.data);
@@ -1702,10 +1797,12 @@ async function selectEvent(id) {
 async function createEventDraft(group = DEFAULT_EVENT_GROUP) {
   if (!await flushAutosave()) return;
   const id = generateId("event");
+  const destinationGroup = normalizeEventGroup(group);
+  if (expandedEventGroup !== destinationGroup) expandedEventGroup = null;
   state.selectedEventId = id;
   state.eventOriginalId = null;
   state.eventDraft = defaultEvent(id);
-  state.eventDraft.Group = normalizeEventGroup(group);
+  state.eventDraft.Group = destinationGroup;
   renderEventsPanel();
   scheduleEventAutosave();
   const nameInput = document.querySelector('#eventForm [name="Name"]');
@@ -1741,7 +1838,14 @@ async function renameEventGroup(source, target) {
   }
 }
 
-async function assignEventGroups(assignments, { focusGroup = null, order = null, message = null, notify = true } = {}) {
+async function assignEventGroups(assignments, {
+  focusGroup = null,
+  order = null,
+  message = null,
+  notify = true,
+  droppedGroup = null,
+  openDroppedGroup = null,
+} = {}) {
   if (!Object.keys(assignments || {}).length && !order) return true;
   if (!await flushAutosave()) return false;
   setSaveState(t("儲存中..."), "saving");
@@ -1760,6 +1864,10 @@ async function assignEventGroups(assignments, { focusGroup = null, order = null,
     }
     if (state.eventDraft && updates.has(state.eventDraft.ID)) state.eventDraft = clone(updates.get(state.eventDraft.ID));
     pendingEventGroupFocus = focusGroup;
+    if (droppedGroup) {
+      expandedEventGroup = openDroppedGroup || null;
+      pendingEventGroupDropOpen = openDroppedGroup || null;
+    }
     renderEventsPanel({ preserveView: true });
     setSaveState(t("已同步"));
     if (notify) toast(message || (focusGroup ? t("群組已建立") : t("Event 排序已更新")));
@@ -1814,7 +1922,13 @@ async function applyEventGroupBlockDrop({ sourceGroup, targetId, position }) {
     defaultGroup: DEFAULT_EVENT_GROUP,
   });
   if (!plan) return false;
-  return assignEventGroups({}, { order: plan.order, notify: false });
+  const selectedGroup = normalizeEventGroup(state.eventDraft?.Group);
+  return assignEventGroups({}, {
+    order: plan.order,
+    notify: false,
+    droppedGroup: sourceGroup,
+    openDroppedGroup: selectedGroup === sourceGroup ? sourceGroup : null,
+  });
 }
 
 async function persistEventSnapshot(snapshot, task = null) {
@@ -1822,6 +1936,7 @@ async function persistEventSnapshot(snapshot, task = null) {
     method: "POST",
     body: { node: snapshot.node, originalId: snapshot.originalId, event: snapshot.event },
   });
+  rememberMemoryTags(saved);
   if (task && !isCurrentAutosaveTask(task)) return saved;
   if (state.selectedNodePath !== snapshot.node || !state.nodeDetail) return saved;
   const originalId = snapshot.originalId || snapshot.event.ID;
@@ -4529,6 +4644,7 @@ async function refreshAfterSave() {
   state.statsDraft = clone(state.stats);
   state.memories = project.memories || { memory: { Name: "Memory" } };
   state.memoriesDraft = clone(state.memories);
+  state.memoryTags = project.memoryTags || {};
   state.issues = project.issues || [];
   if (selectedPath && (selectedPath === state.globalNode?.path || state.nodes.some((node) => node.path === selectedPath))) {
     state.nodeDetail = await api(`/api/node?path=${encodeURIComponent(selectedPath)}`);
@@ -4871,7 +4987,7 @@ function deleteInActiveTab() {
 }
 
 function hasOpenEditorTransient(target) {
-  if (target.closest(".select-choice-picker.open")) return true;
+  if (target.closest(".select-choice-picker.open, .prefix-choice-picker.open")) return true;
   const monaco = target.closest(".monaco-editor");
   if (!monaco) return false;
   return Boolean(monaco.querySelector([

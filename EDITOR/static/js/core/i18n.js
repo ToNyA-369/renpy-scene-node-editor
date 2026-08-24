@@ -285,6 +285,7 @@
     "條件類型": "Condition type",
     "記憶庫": "Memory bank",
     "記憶標籤": "Memory tag",
+    "尚未註冊 Memory Tag": "No Memory Tags registered",
     "標籤": "Tag",
     "判斷": "Operator",
     "Stat": "Stat",

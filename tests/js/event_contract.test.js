@@ -9,6 +9,10 @@ test("event contract publishes every supported trigger and End up mode", () => {
   assert.deepEqual(contract.EVENT_TRIGGER_MODES.map((item) => item.id), ["Auto", "Action", "Keyboard", "Mouse"]);
   assert.deepEqual(contract.AUTO_TRIGGER_CHOICES.map((item) => item.id), ["Auto:Enter", "Auto:Node", "Auto:Exit"]);
   assert.deepEqual(contract.END_UP_CHOICES, ["REDO", "GOTO", "REPLACE", "EXIT"]);
+  assert.deepEqual(
+    [contract.EVENT_PRIORITY_MIN, contract.EVENT_PRIORITY_MAX, contract.EVENT_PRIORITY_DEFAULT],
+    [0, 9, 5],
+  );
 });
 
 test("only GOTO and REPLACE require Next Node", () => {

@@ -7,6 +7,7 @@ const {
   createController,
   createViewModel,
   groupConnections,
+  registeredMemoryTags,
   renderHtml,
 } = require("../../EDITOR/static/js/workspaces/node_workspace.js");
 
@@ -51,6 +52,37 @@ test("node overview derives metrics, names, and lifecycle counts from project st
   assert.deepEqual(model.lifecycle, { enter: 1, node: 2, exit: 0 });
   assert.equal(model.incomingConnections[0].name, "Start");
   assert.equal(model.outgoingConnections[0].name, "Result");
+});
+
+test("node overview groups registered Memory Tags by creator-facing bank", () => {
+  const events = [
+    {
+      Effects: [
+        { type: "memory", bank: "memory", id: "key_found", op: "add" },
+        { type: "memory", bank: "chapter", id: "intro_seen", op: "add" },
+        { type: "memory", bank: "memory", id: "key_found", op: "add" },
+        { type: "memory", bank: "memory", id: "not_registered", op: "remove" },
+      ],
+    },
+    { Effects: [{ type: "tag", id: "legacy_tag", op: "add" }] },
+  ];
+  assert.deepEqual(registeredMemoryTags(events, {
+    memory: { Name: "Memory" },
+    chapter: { Name: "章節記錄" },
+  }), [
+    { id: "memory", name: "Memory", tags: ["key_found", "legacy_tag"] },
+    { id: "chapter", name: "章節記錄", tags: ["intro_seen"] },
+  ]);
+
+  const html = renderHtml(createViewModel({
+    detail: { node: { ID: "branch", Name: "Branch" }, events: events.map((data) => ({ data })) },
+    memories: { memory: { Name: "Memory" }, chapter: { Name: "章節記錄" } },
+  }));
+  assert.match(html, /<strong>Registered Tags<\/strong>/);
+  assert.match(html, /章節記錄/);
+  assert.doesNotMatch(html, /<small>chapter<\/small>/);
+  assert.match(html, /intro_seen/);
+  assert.doesNotMatch(html, /not_registered/);
 });
 
 test("node template preserves root safety, global scope, and escaped creator names", () => {

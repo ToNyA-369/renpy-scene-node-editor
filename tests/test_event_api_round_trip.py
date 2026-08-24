@@ -112,6 +112,69 @@ class EventApiRoundTripTest(unittest.TestCase):
         self.assertEqual(self.saved_event("root", "single_goto"), goto)
         self.assertEqual(self.saved_event("root", "enter_scene"), lifecycle_golden)
 
+    def test_priority_accepts_zero_through_nine_and_rejects_values_outside_the_range(self):
+        base = {
+            "ID": "priority_nine",
+            "Name": "Priority Nine",
+            "Group": "Normal",
+            "Trigger": "Auto:Node",
+            "Priority": 9,
+            "Once": False,
+            "Conditions": [],
+            "Effects": [],
+            "Content": None,
+            "Weight": 1,
+            "End up": "REDO",
+            "Next Node": None,
+        }
+        self.assertEqual(app.save_event({"node": "root", "event": base})["Priority"], 9)
+        for invalid_priority in (-1, 10):
+            invalid = {**base, "ID": f"priority_{invalid_priority}", "Priority": invalid_priority}
+            with self.assertRaisesRegex(app.ApiError, "0 到 9"):
+                app.save_event({"node": "root", "event": invalid})
+
+    def test_project_memory_tag_scan_groups_registered_add_effects_by_bank(self):
+        base = {
+            "Name": "Memory Tags",
+            "Group": "Normal",
+            "Trigger": "Auto:Node",
+            "Priority": 5,
+            "Once": False,
+            "Conditions": [],
+            "Content": None,
+            "Weight": 1,
+            "End up": "REDO",
+            "Next Node": None,
+        }
+        app.save_event({
+            "node": "root",
+            "event": {
+                **base,
+                "ID": "registered_tags",
+                "Effects": [
+                    {"type": "memory", "bank": "memory", "id": "test_key", "op": "add"},
+                    {"type": "memory", "bank": "memory", "id": "ignored_remove", "op": "remove"},
+                    {"type": "memory", "bank": "daily", "id": "visited", "op": "add"},
+                ],
+            },
+        })
+        app.save_event({
+            "node": "root",
+            "event": {
+                **base,
+                "ID": "deduplicated_tags",
+                "Effects": [
+                    {"type": "memory", "bank": "memory", "id": "test_key", "op": "add"},
+                    {"type": "memory", "bank": "memory", "op": "clear"},
+                ],
+            },
+        })
+
+        self.assertEqual(app.scan_memory_tags(), {
+            "daily": ["visited"],
+            "memory": ["test_key"],
+        })
+
     def test_global_event_round_trips_option_trigger_and_scope_owned_effect(self):
         golden = {
             "ID": "global_clock",

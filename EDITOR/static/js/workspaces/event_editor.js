@@ -231,7 +231,7 @@
             <label class="field"><span class="visually-hidden">${tr("條件類型")}</span><select name="conditionType" aria-label="${tr("條件類型")}">${optionTags(CONDITION_TYPES, type)}</select></label>
             ${isMemory ? `
               <label class="field"><span class="visually-hidden">${tr("記憶庫")}</span><select name="conditionBank" aria-label="${tr("記憶庫")}">${namedOptionTags(memoryChoices(), condition.bank || "memory")}</select></label>
-              <label class="field"><span class="visually-hidden">${tr("記憶標籤")}</span><input name="conditionId" aria-label="${tr("記憶標籤")}" value="${escapeHtml(condition.id || "")}" placeholder="${tr("標籤")}"></label>
+              <label class="field"><span class="visually-hidden">${tr("記憶標籤")}</span><input name="conditionId" data-memory-tag-input aria-label="${tr("記憶標籤")}" value="${escapeHtml(condition.id || "")}" placeholder="${tr("標籤")}"></label>
               <label class="field"><span class="visually-hidden">${tr("判斷")}</span><select name="conditionOp" aria-label="${tr("判斷")}">${optionTags(conditionOperators(type), condition.op)}</select></label>
             ` : `
               <label class="field"><span class="visually-hidden">Stat</span><select name="conditionId" aria-label="Stat">${namedOptionTags(statChoices(), condition.id)}</select></label>
@@ -275,7 +275,7 @@
         }
         const valueField = isStat
           ? `<label class="field"><span class="visually-hidden">${tr("值")}</span><input name="effectValue" aria-label="${tr("值")}" type="number" step="any" value="${escapeHtml(effect.value ?? 0)}"></label>`
-          : `<label class="field"><span class="visually-hidden">${tr("記憶標籤")}</span><input name="effectId" aria-label="${tr("記憶標籤")}" value="${escapeHtml(effect.id || "")}" placeholder="${effect.op === "clear" ? tr("清空整個記憶庫") : tr("標籤")}" ${effectUsesId(type, effect.op) ? "" : "disabled"}></label>`;
+          : `<label class="field"><span class="visually-hidden">${tr("記憶標籤")}</span><input name="effectId" data-memory-tag-input aria-label="${tr("記憶標籤")}" value="${escapeHtml(effect.id || "")}" placeholder="${effect.op === "clear" ? tr("清空整個記憶庫") : tr("標籤")}" ${effectUsesId(type, effect.op) ? "" : "disabled"}></label>`;
         const resourceField = isStat
           ? `<select name="effectId" aria-label="Stat">${namedOptionTags(statChoices(), effect.id)}</select>`
           : `<select name="effectBank" aria-label="${tr("記憶庫")}">${namedOptionTags(memoryChoices(), effect.bank || "memory")}</select>`;

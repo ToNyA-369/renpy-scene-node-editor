@@ -26,12 +26,39 @@
     return [...grouped.values()];
   }
 
+  function registeredMemoryTags(events = [], memories = {}) {
+    const banks = new Map();
+    events.forEach((event) => {
+      (event?.Effects || []).forEach((effect) => {
+        const type = String(effect?.type || "").toLocaleLowerCase();
+        const operation = String(effect?.op || "").toLocaleLowerCase();
+        const tagId = String(effect?.id || "").trim();
+        if (!["memory", "tag"].includes(type) || operation !== "add" || !tagId) return;
+        const bankId = String(effect.bank || "memory").trim() || "memory";
+        if (!banks.has(bankId)) {
+          banks.set(bankId, {
+            id: bankId,
+            name: String(memories?.[bankId]?.Name || bankId),
+            tags: [],
+            tagIds: new Set(),
+          });
+        }
+        const bank = banks.get(bankId);
+        if (bank.tagIds.has(tagId)) return;
+        bank.tagIds.add(tagId);
+        bank.tags.push(tagId);
+      });
+    });
+    return [...banks.values()].map(({ tagIds: _tagIds, ...bank }) => bank);
+  }
+
   function createViewModel({
     detail,
     rootNodeId = null,
     globalNode = null,
     nodes = [],
     graph = { edges: [] },
+    memories = {},
     isGlobal = false,
   } = {}) {
     if (!detail?.node) return null;
@@ -58,6 +85,7 @@
       flowLinkCount: outgoingConnections.length,
       incomingConnections: incomingConnections.map((connection) => ({ ...connection, name: nodeName(connection.relatedNode) })),
       outgoingConnections: outgoingConnections.map((connection) => ({ ...connection, name: nodeName(connection.relatedNode) })),
+      registeredMemoryTags: registeredMemoryTags(events, memories),
       lifecycle: {
         enter: events.filter((event) => event.Trigger === "Auto:Enter").length,
         node: events.filter((event) => event.Trigger === "Auto:Node").length,
@@ -78,6 +106,14 @@
         </span>
       `).join("");
     };
+    const memoryTags = model.registeredMemoryTags.length
+      ? model.registeredMemoryTags.map((bank) => `
+        <section class="node-memory-bank">
+          <header><strong>${escapeHtml(bank.name)}</strong></header>
+          <div>${bank.tags.map((tag) => `<span class="node-memory-tag">${escapeHtml(tag)}</span>`).join("")}</div>
+        </section>
+      `).join("")
+      : `<span class="node-flow-empty">${escapeHtml(t("尚未註冊 Memory Tag"))}</span>`;
     return `
       <div class="panel-page node-panel-page">
         <div class="node-editor-shell">
@@ -131,6 +167,10 @@
                   <div><span>On Exit</span><strong>${model.lifecycle.exit}</strong></div>
                 </div>
               </article>
+              <article class="node-overview-card node-memory-card">
+                <header><span>MEMORY</span><strong>Registered Tags</strong></header>
+                <div class="node-memory-bank-list">${memoryTags}</div>
+              </article>
             </div>
           </section>
 
@@ -168,5 +208,5 @@
     return Object.freeze({ render });
   }
 
-  return Object.freeze({ createController, createViewModel, groupConnections, renderHtml });
+  return Object.freeze({ createController, createViewModel, groupConnections, registeredMemoryTags, renderHtml });
 });

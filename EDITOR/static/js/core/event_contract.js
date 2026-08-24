@@ -24,6 +24,9 @@
     Object.freeze({ id: "Mouse:WheelDown", name: "滾輪向下" }),
   ]);
   const END_UP_CHOICES = Object.freeze(["REDO", "GOTO", "REPLACE", "EXIT"]);
+  const EVENT_PRIORITY_MIN = 0;
+  const EVENT_PRIORITY_MAX = 9;
+  const EVENT_PRIORITY_DEFAULT = 5;
 
   function actionTriggerName(trigger) {
     const value = String(trigger || "").trim();
@@ -137,6 +140,9 @@
   return {
     AUTO_TRIGGER_CHOICES,
     END_UP_CHOICES,
+    EVENT_PRIORITY_DEFAULT,
+    EVENT_PRIORITY_MAX,
+    EVENT_PRIORITY_MIN,
     EVENT_TRIGGER_MODES,
     MOUSE_TRIGGER_CHOICES,
     actionTriggerName,

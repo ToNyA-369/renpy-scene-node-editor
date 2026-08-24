@@ -61,7 +61,7 @@
 - `Order`：可選的非負整數，只保存 Scene Node 列表拖移順序。
 - `Content Order`：可選的字串陣列，只保存該 authoring scope 的 Content 文件清單順序。
 
-`Group`、Scene Node `Order` 與 Content `Content Order` 都是 Editor-only metadata；舊資料缺值時依既有穩定掃描順序顯示，首次拖移後才寫入。Scene Node 群組沿用 Event Pool 的停留成組、跨框移入／移出、整組排序與單一成員自動解散行為；Global Node 固定在群組流之外。這些資訊不參與 ROOT、Stack、Event 選擇、關聯圖布局或 Runtime。
+`Group`、Scene Node `Order` 與 Content `Content Order` 都是 Editor-only metadata；舊資料缺值時依既有穩定掃描順序顯示，首次拖移後才寫入。Scene Node 群組沿用 Event Pool 的停留成組、跨框移入／移出、整組排序與單一成員自動解散行為；選中成員時群組保持展開，改選外部節點後則沿展開的反向路徑縮合，收合完成且 pointerleave 前不接受 hover 重新展開。整組落位保存後，只有包含目前選取節點的群組才從拖移時的標題高度重新展開。Global Node 固定在群組流之外。這些資訊不參與 ROOT、Stack、Event 選擇、關聯圖布局或 Runtime。
 
 ## Global Node
 
@@ -229,7 +229,9 @@ Options 沒有生命週期、條件運算式或自訂 Screen 來源。所有已�
 }
 ```
 
-`Group` 是只供 Editor 整理 Event Pool 的單層創作者資訊；省略或留空時會正規化為固定的 `Normal`。`Normal` 在介面上表示未群組，不顯示群組標題。可選的非負整數 `Order` 同樣只供 Editor 保存拖曳順序；舊 Event 缺值時沿用原本的穩定讀取順序。兩者都不參與 Trigger 比對、Priority、Weight、生命週期順序、關聯圖或 Runtime 執行。Pointer 拖移預覽逐事件更新，幾何判定與 DOM 重排則以 animation frame 合併；中線遲滯避免插入位置抖動，最近的可捲動容器支援漸進邊緣自動捲動。拖移生命週期由視窗持續接收，因此元素跨容器重排不會中斷後續 pointer 事件。真實插入間隙以短促 FLIP 位移推開 Event／群組區塊；排序流有永遠存在的末端留白，跨出或跨入群組邊界即改變歸屬，不使用專用未群組按鈕。只有游標持續位於候選項目目前的幾何邊界內，500ms 停留計時才會成立；未群組候選下方會展開 48px 的群組預留空間，讓位後離開邊界則取消成組。群組預設收起為精簡名稱與數量，hover、鍵盤 focus 或拖移進入時展開；群組內排序後保持展開至 pointerleave。名稱旁的無圖示留白是群組區塊拖移面，起拖時浮動預覽會以 220ms 縮合並以成員原順序整組移動。只剩一個 Event 時自動解散。成功拖移不產生 Toast，失敗仍顯示錯誤。
+`Priority` 必須是 0–9 的整數；新 Event 缺值時預設為 5。Runtime 仍只取數字最小的符合層級，或在生命週期 Events 中依數字由小到大執行。
+
+`Group` 是只供 Editor 整理 Event Pool 的單層創作者資訊；省略或留空時會正規化為固定的 `Normal`。`Normal` 在介面上表示未群組，不顯示群組標題。可選的非負整數 `Order` 同樣只供 Editor 保存拖曳順序；舊 Event 缺值時沿用原本的穩定讀取順序。兩者都不參與 Trigger 比對、Priority、Weight、生命週期順序、關聯圖或 Runtime 執行。Pointer 拖移預覽逐事件更新，幾何判定與 DOM 重排則以 animation frame 合併；中線遲滯避免插入位置抖動，最近的可捲動容器支援漸進邊緣自動捲動。拖移生命週期由視窗持續接收，因此元素跨容器重排不會中斷後續 pointer 事件。真實插入間隙以短促 FLIP 位移推開 Event／群組區塊；排序流有永遠存在的末端留白，跨出或跨入群組邊界即改變歸屬，不使用專用未群組按鈕。只有游標持續位於候選項目目前的幾何邊界內，500ms 停留計時才會成立；未群組候選下方會展開 48px 的群組預留空間，讓位後離開邊界則取消成組。群組預設收起為精簡名稱與數量，hover、鍵盤 focus、拖移進入或選中內部 Event 時展開；改選外部 Event 會先還原重繪前的展開幾何，再使用與展開相同的 220ms 曲線反向縮合，動畫完成且 pointerleave 前不重新接受 hover。群組內排序後保持展開至 pointerleave。名稱旁的無圖示留白是群組區塊拖移面，起拖時浮動預覽會以 220ms 縮合並以成員原順序整組移動；落位保存後，只有包含目前選取 Event 的群組才從相同標題高度展開，其他群組維持收合。只剩一個 Event 時自動解散。成功拖移不產生 Toast，失敗仍顯示錯誤。
 
 `Content` 與 `Next Node` 可為 `null`、單一字串或權重物件：
 

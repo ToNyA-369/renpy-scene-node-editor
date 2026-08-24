@@ -137,7 +137,7 @@ body.sidebar-open .sidebar-scrim {
   display: grid;
   min-height: 76px;
   align-content: start;
-  gap: 6px;
+  gap: 8px;
   border-radius: 16px;
 }
 
@@ -562,10 +562,6 @@ body.sidebar-open .sidebar-scrim {
   transition: background-color 140ms ease, border-color 140ms ease, box-shadow 140ms ease, transform 180ms cubic-bezier(0.2, 0.82, 0.2, 1);
 }
 
-.event-group + .event-group {
-  margin-top: 6px;
-}
-
 .event-group-header {
   display: flex;
   min-height: 38px;
@@ -605,9 +601,16 @@ body.sidebar-open .sidebar-scrim {
 .event-group:focus-within .event-group-items-shell,
 .event-group.is-group-drop-ready .event-group-items-shell,
 .event-group.is-group-preview-open .event-group-items-shell,
+.event-group.is-group-editing .event-group-items-shell,
 .event-group.is-group-pinned-open .event-group-items-shell {
   grid-template-rows: 1fr;
   opacity: 1;
+}
+
+.event-group.is-group-selection-collapsing .event-group-items-shell,
+.event-group.is-group-drop-collapsed .event-group-items-shell {
+  grid-template-rows: 0fr;
+  opacity: 0;
 }
 
 .event-group.is-group-block-dragging .event-group-items-shell {
@@ -686,7 +689,7 @@ body.sidebar-open .sidebar-scrim {
   display: grid;
   min-height: 72px;
   align-content: start;
-  gap: 6px;
+  gap: 8px;
   border: 1px solid transparent;
   border-radius: 15px;
   transition: background-color var(--motion-fast) ease, border-color var(--motion-fast) ease, box-shadow var(--motion-fast) ease;
@@ -870,6 +873,12 @@ body.sidebar-open .sidebar-scrim {
 
 .is-list-reordering .list-reorder-item:not(.is-list-reorder-dragging) {
   will-change: transform;
+}
+
+.is-list-reordering,
+.is-list-reordering * {
+  -webkit-user-select: none !important;
+  user-select: none !important;
 }
 
 .memory-row.list-reorder-item td:first-child {
@@ -2528,12 +2537,14 @@ textarea:hover {
 .content-weight-row,
 .content-choice-field,
 .content-choice-picker,
+.prefix-choice-picker,
 .select-choice-picker {
   min-width: 0;
   overflow: visible;
 }
 
 .content-choice-picker,
+.prefix-choice-picker,
 .select-choice-picker {
   position: relative;
   width: 100%;
@@ -2678,6 +2689,7 @@ input.select-choice-trigger {
 }
 
 .content-choice-picker.open > .content-choice-menu,
+.prefix-choice-picker.open > .prefix-choice-menu,
 .select-choice-picker.open > .select-choice-menu,
 .content-file-branch:hover > .content-label-submenu,
 .content-file-branch.submenu-open > .content-label-submenu,

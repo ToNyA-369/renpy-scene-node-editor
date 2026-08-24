@@ -310,6 +310,11 @@
       const rect = source.getBoundingClientRect();
       const rootRect = root.getBoundingClientRect();
       const rootStyle = window.getComputedStyle(root);
+      try {
+        press.handle.setPointerCapture?.(press.pointerId);
+      } catch (_error) {
+        // Synthetic test events and interrupted pointers may not be capturable.
+      }
       press.grabX = press.startX - rect.left;
       press.grabY = press.startY - rect.top;
       press.previewWidth = rect.width;
@@ -330,6 +335,13 @@
       queuePoint(event);
     };
     const clearVisuals = () => {
+      try {
+        if (press?.handle?.hasPointerCapture?.(press.pointerId)) {
+          press.handle.releasePointerCapture(press.pointerId);
+        }
+      } catch (_error) {
+        // Pointer capture may already have been released by pointerup/cancel.
+      }
       source?.classList.remove("is-list-reorder-dragging");
       if (source) source.style.visibility = "";
       source?.setAttribute("aria-grabbed", "false");
@@ -409,7 +421,6 @@
         originalNextSibling: item.nextSibling,
         dragging: false,
       };
-      handle.setPointerCapture?.(event.pointerId);
     };
     const pointerMove = (event) => {
       if (!press || event.pointerId !== press.pointerId) return;
@@ -425,6 +436,10 @@
     };
 
     root.addEventListener("pointerdown", pointerDown, { signal });
+    root.addEventListener("selectstart", (event) => {
+      if (!press || event.target.closest?.("input, textarea, [contenteditable='true']")) return;
+      event.preventDefault();
+    }, { signal });
     window.addEventListener("pointermove", pointerMove, { capture: true, signal });
     window.addEventListener("pointerup", (event) => finishPointer(event), { capture: true, signal });
     window.addEventListener("pointercancel", (event) => finishPointer(event, true), { capture: true, signal });

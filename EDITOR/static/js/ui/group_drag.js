@@ -31,6 +31,64 @@
     return String(value || "").trim() || defaultGroup;
   }
 
+  function editingGroupName(root, groupSelector) {
+    return root?.querySelector(`${groupSelector}.is-group-editing`)?.dataset.groupDrop || null;
+  }
+
+  function animateEditingGroupExit(root, {
+    groupSelector,
+    previousGroup,
+    currentGroup = null,
+  }) {
+    if (!root || !previousGroup || previousGroup === currentGroup) return false;
+    const group = [...root.querySelectorAll(groupSelector)]
+      .find((candidate) => candidate.dataset.groupDrop === previousGroup);
+    const shell = group?.querySelector(":scope > .event-group-items-shell");
+    if (!group || !shell) return false;
+
+    group.classList.remove("is-group-selection-collapsing", "is-group-pinned-open");
+    group.classList.add("is-group-editing");
+    shell.getBoundingClientRect();
+
+    const view = root.ownerDocument?.defaultView || globalThis;
+    const requestFrame = view.requestAnimationFrame?.bind(view) || ((callback) => view.setTimeout(callback, 16));
+    requestFrame(() => {
+      if (!group.isConnected) return;
+      group.classList.add("is-group-selection-collapsing");
+      group.classList.remove("is-group-editing");
+      const finish = () => {
+        group.classList.remove("is-group-selection-collapsing");
+      };
+      const reducedMotion = view.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches;
+      view.setTimeout(() => {
+        if (!group.isConnected) return;
+        if (group.matches(":hover")) group.addEventListener("pointerleave", finish, { once: true });
+        else finish();
+      }, reducedMotion ? 0 : 240);
+    });
+    return true;
+  }
+
+  function animateGroupDropOpen(root, { groupSelector, groupName }) {
+    if (!root || !groupName) return false;
+    const group = [...root.querySelectorAll(groupSelector)]
+      .find((candidate) => candidate.dataset.groupDrop === groupName);
+    const shell = group?.querySelector(":scope > .event-group-items-shell");
+    if (!group || !shell) return false;
+    const view = root.ownerDocument?.defaultView || globalThis;
+    if (view.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches) return true;
+
+    group.classList.add("is-group-drop-opening", "is-group-drop-collapsed");
+    shell.getBoundingClientRect();
+    const requestFrame = view.requestAnimationFrame?.bind(view) || ((callback) => view.setTimeout(callback, 16));
+    requestFrame(() => {
+      if (!group.isConnected) return;
+      group.classList.remove("is-group-drop-collapsed");
+      view.setTimeout(() => group.classList.remove("is-group-drop-opening"), 240);
+    });
+    return true;
+  }
+
   function uniqueGroupName(items, baseName, defaultGroup = "Normal") {
     const names = new Set((items || []).map((item) => normalizeGroup(item.group, defaultGroup).toLocaleLowerCase()));
     const base = String(baseName || "New Group").trim() || "New Group";
@@ -276,11 +334,11 @@
     const clearDropTarget = () => {
       root.querySelectorAll(".is-group-drop-ready").forEach((element) => element.classList.remove("is-group-drop-ready"));
     };
-    const clearVisuals = () => {
+    const clearVisuals = ({ keepGroupCollapsed = false } = {}) => {
       clearCandidate();
       clearDropTarget();
       source?.classList.remove("is-group-dragging-item");
-      source?.classList.remove("is-group-block-dragging");
+      if (!keepGroupCollapsed) source?.classList.remove("is-group-block-dragging");
       if (source) source.style.visibility = "";
       source?.setAttribute("aria-grabbed", "false");
       preview?.remove();
@@ -617,7 +675,8 @@
           : { sourceId: getItemId(record.source), ...dropReady }
         : null;
       if (record.dragging) suppressClickUntil = Date.now() + 80;
-      clearVisuals();
+      const keepGroupCollapsed = record.kind === "group" && Boolean(detail) && !cancelled;
+      clearVisuals({ keepGroupCollapsed });
       if (record.dragging && (cancelled || !detail)) restoreSource(record);
       try {
         if (record.handle?.hasPointerCapture?.(record.pointerId)) record.handle.releasePointerCapture(record.pointerId);
@@ -636,9 +695,11 @@
       Promise.resolve(dropHandler(detail))
         .then((saved) => {
           if (saved === false && record.source.isConnected) restoreSource(record);
+          record.source.classList.remove("is-group-block-dragging");
         })
         .catch((error) => {
           if (record.source.isConnected) restoreSource(record);
+          record.source.classList.remove("is-group-block-dragging");
           onError(error);
         });
     };
@@ -681,8 +742,11 @@
 
   return {
     DEFAULT_DWELL_MS,
+    animateEditingGroupExit,
+    animateGroupDropOpen,
     createController,
     edgeScrollDelta,
+    editingGroupName,
     insertionPosition,
     normalizeGroup,
     planGroupDrop,
