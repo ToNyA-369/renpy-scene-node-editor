@@ -1,8 +1,10 @@
 /* Node overview workspace */
 
 .panel-page.node-panel-page {
-  width: min(100%, 1280px);
-  padding: 28px 38px 64px;
+  width: 100%;
+  max-width: none;
+  margin: 0;
+  padding: 0 0 64px;
 }
 
 .node-editor-shell {
@@ -140,11 +142,16 @@
 .node-overview-details {
   display: grid;
   grid-template-columns: minmax(0, 1.45fr) minmax(280px, 0.75fr);
-  gap: 12px;
+  column-gap: 12px;
+  row-gap: 18px;
 }
 
 .node-overview-card {
   padding: 22px 24px;
+}
+
+.node-memory-card {
+  grid-column: 1 / -1;
 }
 
 .node-overview-card header {
@@ -241,13 +248,65 @@
   font-variant-numeric: tabular-nums;
 }
 
+.node-memory-bank-list {
+  display: grid;
+  gap: 10px;
+}
+
+.node-memory-bank {
+  display: grid;
+  grid-template-columns: minmax(150px, 0.32fr) minmax(0, 1fr);
+  align-items: center;
+  min-height: 58px;
+  padding: 11px 13px;
+  gap: 14px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 13px;
+}
+
+.node-memory-bank > header {
+  display: grid;
+  min-width: 0;
+  margin: 0;
+}
+
+.node-memory-bank > header strong {
+  overflow: hidden;
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 620;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.node-memory-bank > div {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.node-memory-tag {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 5px 9px;
+  color: var(--ink);
+  background: var(--surface-soft);
+  border: 1px solid var(--line-strong);
+  border-radius: 9px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 10px;
+}
+
 .node-editor-shell .form-section:first-of-type {
   border-top: 1px solid var(--line-strong);
 }
 
 @media (max-width: 760px) {
   .panel-page.node-panel-page {
-    padding: 20px 16px 42px;
+    padding: 0 0 42px;
   }
 
   .node-editor-shell {
@@ -270,6 +329,10 @@
 
   .node-overview-metrics {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .node-memory-bank {
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .node-editor-shell .bento-form .node-form-section,

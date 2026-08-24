@@ -73,7 +73,7 @@ REPLACE 是 `[父, 目前] → [父, 目標]` 的單一 Stack 操作。它先跑
 ### 3.3 Event 決策
 
 - `Auto:Node` 與每次玩家輸入 Trigger 只會對應到一個 Event。
-- Priority 數字越小越優先，目前範圍為 0 到 5，0 和 1 保留給系統或特殊事件。
+- Priority 數字越小越優先，合法範圍為 0 到 9，新 Event 預設為 5；0 和 1 可保留給系統或特殊事件。
 - 同 Trigger、Conditions 通過且 Priority 相同時，才使用 Weight 抽選。
 - Event 的 Content 與 GOTO／REPLACE Next Node 都可另外使用權重物件。
 - `Once: true` 等同由系統在預設 `memory` 記憶庫註冊 `once:<event_id>` 標籤。
@@ -171,20 +171,20 @@ Options Renderer 會把目前節點與 Global Options 合併後依 Element `Z Or
 
 - 空白專案初始化 ROOT 節點、安全辨識各語系 Ren'Py 預設範本並接線 `script.rpy`、切換起始節點與 Root 刪除保護。
 - 單一 Memory 架構：預設 `Memory`、自訂記憶庫、標籤 add/remove/clear、Runtime API 與舊 Tag 延遲遷移。
-- Scene Node、Event、Stats、Memory Banks 與 Content 的建立與編輯。
+- Scene Node、Event、Stats、Memory Banks 與 Content 的建立與編輯。Node 功能摘要的 `Registered Tags` 會從該節點 Events 的 Memory `add` Effects 唯讀彙整已註冊 Tags，依 Memory Bank 的創作者名稱分組且不顯示技術 ID；Condition、remove、clear 與內部 Once key 不得誤列為註冊。`/api/project` 另以 `memoryTags` 依 Bank 提供整個專案的相同註冊集合，Event Memory Tag 欄位以可自由輸入的 prefix combobox 重用這些候選，不建立 Tag schema。
 - Global Node 擁有與 Scene Node 相同的 Options 工作區；Runtime 在任何實際節點互動時疊加目前節點與 Global Options。Global Event 可使用 Option Trigger，Option Effect 只能控制 `__global__` 作用域目標。
-- Stats 工作區只保留一個新增 Stat 按鈕，`Normal` 在畫面上是不帶標題的未群組排序流。`js/ui/group_drag.js` 提供與 Event 共用的 Pointer 拖移控制器：fixed preview 逐 Pointer 事件緊貼游標，插入判定與 DOM 重排以 `requestAnimationFrame` 合併為每幀一次；真實元素作為即時插入間隙，其他 Stat／群組區塊以可中斷的 160ms FLIP 位移讓位。拖移生命週期由 `window` 持續接收，避免元素跨容器重排時遺失 pointer capture；元素中線帶小幅遲滯以避免前後反覆跳動，靠近最近可捲動祖先的上下邊緣時依距離漸進自動捲動。排序流末端永遠保留自然落點，因此即使畫面只有群組也可直接移出，停留 500ms 至預留群組空間展開才建立群組，來源只剩一個 Stat 時自動解散。Stat 整列外框與欄位間留白是拖移面，不設獨立把手；輸入框與刪除按鈕維持原操作，拖移期間以 `user-select: none` 防止掃過文字被標記。Stat 群組名稱旁的無圖示留白可將整組作為單一排序區塊拖移，成員與內部順序保持不變。Name／Min／Init／Max 只在 Stats 頂部顯示一次，所有未群組列及群組內列使用同一 CSS Grid 欄寬；群組框以外擴配合內距，讓列不貼邊且不破壞全域欄位對齊。順序保存於可選、非負整數的 Editor-only `Order`；舊資料缺值時依現有穩定順序讀取，首次排序後正規化。所有成功拖移只更新同步狀態，不顯示完成 Toast；失敗仍顯示錯誤。State 外框與 Event／Options 一樣使用完整工作區寬度，Stats 左框與 Memory 右框直接對齊分頁邊界；Event 的 Stat Condition／Effect 共用 Group → Stat 階層選單。Group／Order 僅為 authoring metadata，Runtime 與存檔維持平面 Stat ID。
+- Stats 工作區只保留一個新增 Stat 按鈕，`Normal` 在畫面上是不帶標題的未群組排序流。`js/ui/group_drag.js` 提供與 Event 共用的 Pointer 拖移控制器：fixed preview 逐 Pointer 事件緊貼游標，插入判定與 DOM 重排以 `requestAnimationFrame` 合併為每幀一次；真實元素作為即時插入間隙，其他 Stat／群組區塊以可中斷的 160ms FLIP 位移讓位。拖移生命週期由 `window` 持續接收，避免元素跨容器重排時遺失 pointer capture；元素中線帶小幅遲滯以避免前後反覆跳動，靠近最近可捲動祖先的上下邊緣時依距離漸進自動捲動。排序流末端永遠保留自然落點，因此即使畫面只有群組也可直接移出，停留 500ms 至預留群組空間展開才建立群組，來源只剩一個 Stat 時自動解散。Stat 整列外框與欄位間留白是拖移面，不設獨立把手；輸入框與刪除按鈕維持原操作，拖移期間以 `user-select: none` 防止掃過文字被標記。Memory Bank 排序也必須在起拖前阻止非輸入區文字選取，起拖後連同列內輸入內容強制取消選取，放手後立即恢復原生文字編輯。Stat 群組名稱旁的無圖示留白可將整組作為單一排序區塊拖移，成員與內部順序保持不變。Name／Min／Init／Max 只在 Stats 頂部顯示一次，所有未群組列及群組內列使用同一 CSS Grid 欄寬；群組框以外擴配合內距，讓列不貼邊且不破壞全域欄位對齊。順序保存於可選、非負整數的 Editor-only `Order`；舊資料缺值時依現有穩定順序讀取，首次排序後正規化。所有成功拖移只更新同步狀態，不顯示完成 Toast；失敗仍顯示錯誤。State 外框與 Event／Options 一樣使用完整工作區寬度，Stats 左框與 Memory 右框直接對齊分頁邊界；Event 的 Stat Condition／Effect 共用 Group → Stat 階層選單。Group／Order 僅為 authoring metadata，Runtime 與存檔維持平面 Stat ID。
 - Options Picture 與 Preview Background 只掃描 `game/images/`，並以子目錄階層選單呈現；選定欄位只顯示葉節點檔名。Preview Background 留空時不顯示預覽圖，也不影響遊戲場景。
 - Node Schema 不保存 Background 或 Screen；兩者與音訊、轉場一樣由 Content 使用 Ren'Py 原生語法管理。
 - Editor 不提供 Screen 文件工作區或 CRUD API；Installer 也不管理創作者的 `gui.rpy`、`screens.rpy` 與其他介面文件。
 - 中文顯示名稱與穩定技術 ID 映射。
 - Event Conditions、Effects、Content、Next Node 與權重表單；Next Node 選單沿用 Scene Node 的 authoring Group 顯示「Group → Node」，未群組節點留在第一層，JSON 仍只保存穩定 Node ID。
 - Event Conditions 使用一層 OR-of-AND 語意群組：同一非空 `clause` 是 AND，不同 clause 與 `null` 獨立條件是 OR；舊平面 Conditions 仍按全 AND 讀取並在保存時正規化至 `and_1`。群組內外可直接拖移，單成員 AND 群組保留；只有單一 AND 群組時新增會加入該組，已有 OR 分支後新增為獨立條件。Effects／Content 權重／Next Node 權重維持無群組 Pointer 排序；Effects 直接保存並依陣列順序執行，權重 object 只保存 Editor 顯示順序而不改變機率。
-- Content 文件與 Textbox Profile 管理清單共用無群組 Pointer 排序。Scene Node 選單則組合 `js/ui/group_drag.js`，以 Node.json 的可選 `Group` 與 `Order` 保存停留成組、跨框移入／移出及整組排序，並由 `PUT /api/node-groups` 原子寫入；Global Node 固定在群組流之外。共用群組意圖停留時間為 500ms，未群組候選會向下展開 48px 的真實預留空間；Event／Node 群組內排序後以暫時 pinned-open 狀態保持展開至 pointerleave，整組預覽則以 220ms 從目前高度縮合。Node.json 的可選 `Content Order` 與 Profile 的可選 `Order` 同樣是 Editor-only metadata。缺值時保持既有穩定順序，首次拖移後才正規化，不得改變 ROOT、Stack、圖面布局或 Runtime。
+- Content 文件與 Textbox Profile 管理清單共用無群組 Pointer 排序。Scene Node 選單則組合 `js/ui/group_drag.js`，以 Node.json 的可選 `Group` 與 `Order` 保存停留成組、跨框移入／移出及整組排序，並由 `PUT /api/node-groups` 原子寫入；Global Node 固定在群組流之外。共用群組意圖停留時間為 500ms，未群組候選會向下展開 48px 的真實預留空間；Event／Node 群組內排序後以暫時 pinned-open 狀態保持展開至 pointerleave，整組預覽則以 220ms 從目前高度縮合。包含目前選取 Node 或正在編輯 Event 的群組必須持續展開，不受 pointerleave 影響；選取移至其他群組或未群組元素後，舊群組恢復預設折疊。Node.json 的可選 `Content Order` 與 Profile 的可選 `Order` 同樣是 Editor-only metadata。缺值時保持既有穩定順序，首次拖移後才正規化，不得改變 ROOT、Stack、圖面布局或 Runtime。
 - 刪除 Content 權重列時，最後一列必須正規化為 `null`，不可保存空 object；空 object 會被 API 視為不合法權重表並造成正常刪除顯示 autosave 錯誤。
 - Event Trigger 的 Options 來源在 UI 顯示為 `Option`，JSON／Runtime 契約仍是 `Action:<id>`；Auto 顯示為 On Enter／On Node／On Exit，保存為 `Auto:Enter`／`Auto:Node`／`Auto:Exit`。
 - Event Content 使用創作者命名的文件第一層與 label 第二層的階層選單；只有一個 label 的文件在 UI 直接映射為創作者名稱，實際保存值仍是技術 label。
-- Event 的 `Group` 是單層 authoring metadata；缺值／空值正規化為固定 `Normal`，不參與 Runtime、Priority／Weight、生命週期或關聯圖。Event Pool 只保留一個展滿側欄的新增 Event 按鈕；未群組 Event 與群組卡片依 `Order` 共用同一排序流，末端永遠保留自然落點，可將 Event 排在最末群組之後。Pointer 拖移以真實元素即時騰出插入間隙並用 FLIP 位移推開 Event／群組；只有游標仍位於候選項目或群組的目前幾何邊界內，500ms 停留才可成組，未群組候選會向下展開 48px 預留空間，讓位移開後立即取消。普通點擊在 7px 拖移門檻前不得改動 DOM或阻擋 Event 選取。群組預設收起為較短的可改名欄位與數量，hover、鍵盤 focus、拖移進入時展開；群組內排序後保持展開至 pointerleave。名稱與數量之間的無圖示留白可將群組當成單一排序區塊拖移，浮動預覽以 220ms 從目前高度縮合，成員歸屬與內部順序不變。群組剩一個 Event 時自動解散；順序保存於可選、非負整數的 Editor-only `Order`，舊資料缺值時依現有穩定順序讀取。成功拖移只更新同步狀態、不顯示 Toast；批次群組與排序經 `/api/event-groups` 一次保存，失敗不得提交畫面狀態且仍需顯示錯誤。
+- Event 的 `Group` 是單層 authoring metadata；缺值／空值正規化為固定 `Normal`，不參與 Runtime、Priority／Weight、生命週期或關聯圖。Event Pool 只保留一個展滿側欄的新增 Event 按鈕；未群組 Event 與群組卡片依 `Order` 共用同一排序流，末端永遠保留自然落點，可將 Event 排在最末群組之後。Pointer 拖移以真實元素即時騰出插入間隙並用 FLIP 位移推開 Event／群組；只有游標仍位於候選項目或群組的目前幾何邊界內，500ms 停留才可成組，未群組候選會向下展開 48px 預留空間，讓位移開後立即取消。普通點擊在 7px 拖移門檻前不得改動 DOM或阻擋 Event 選取。群組預設收起為較短的可改名欄位與數量，hover、鍵盤 focus、拖移進入時展開；包含目前正在編輯 Event 的群組也固定展開，直到改選其他群組或未群組 Event；群組內排序後保持展開至 pointerleave。名稱與數量之間的無圖示留白可將群組當成單一排序區塊拖移，浮動預覽以 220ms 從目前高度縮合，成員歸屬與內部順序不變。群組剩一個 Event 時自動解散；順序保存於可選、非負整數的 Editor-only `Order`，舊資料缺值時依現有穩定順序讀取。成功拖移只更新同步狀態、不顯示 Toast；批次群組與排序經 `/api/event-groups` 一次保存，失敗不得提交畫面狀態且仍需顯示錯誤。
 - 所有固定選項 `<select>`（包含 Event Content label）由前端提升為同一個共用自訂選單；所有可選列固定為 38px，選單依目前層的實際內容長高並在 320px 後捲動。圖片、音訊與 Content 文件依路徑資料建立任意深度的父子選單，父子框之間固定保留間隔與透明滑鼠通道。滑鼠開啟後焦點立即進入選單；上下鍵在目前層巡覽，聚焦父層時只展開子選單，右鍵才把焦點移入，左鍵返回父層，Enter 選取，Esc 關閉。欄位只顯示創作者名稱。原始欄位仍保留在表單內，確保既有表單讀取與 API payload 不變。
 - Options 的 Hover Sound 與 Click Sound 只掃描 `game/audio/`。Event 不提供 BGM／SE Effect 或 Persistent；音訊演出由 Content 使用 Ren'Py 原生語法。
 - TEXTBOX、PICTURE、HITBOX 選項表單。
@@ -323,11 +323,14 @@ EDITOR/static/js/core/state_rule_contract.js
 EDITOR/static/js/ui/choice_picker.js
   所有原生 select 的共用階層選單、任意目錄深度、鍵盤操作與定位。
 
+EDITOR/static/js/ui/prefix_picker.js
+  Event Memory Tag 自由輸入欄位的共用前綴建議：沿用 choice picker 尺寸與選項樣式，保留滑鼠、方向鍵、Home／End、Enter、Esc 與 Tab 行為；只篩選候選，不限制新 Tag。
+
 EDITOR/static/js/ui/group_drag.js
-  Event／Stats／Node 共用 Pointer 拖移、即時插入間隙、FLIP 讓位、跨群組歸屬與 500ms 停留成組；純資料排序／解散規劃可由 Node 測試直接呼叫。
+  Event／Stats／Node 共用 Pointer 拖移、即時插入間隙、FLIP 讓位、跨群組歸屬與 500ms 停留成組；同時負責 Event／Node 因選取切換而重繪時，從既有展開幾何反向收合舊群組。整組落位後，只有目前選取元素位於該群組時，才從標題高度重新展開；其他群組維持收合。收合進行中會抑制 hover，直到動畫完成且 pointerleave 後才重新武裝。純資料排序／解散規劃可由 Node 測試直接呼叫。
 
 EDITOR/static/js/ui/list_reorder.js
-  Scene Nodes、Event Effects／Content／Next Node、Options Elements／Textbox Items、Content 文件、Textbox Profiles 與 Memory Banks 共用的無群組 Pointer 排序；提供 7px 起拖門檻、1:1 預覽、表格列 colgroup 幾何複製、即時插入間隙、中線遲滯、FLIP 讓位、邊緣自動捲動與 reduced-motion 回退，並以依賴注入的 `onDrop` 保存各工作區既有資料順序。Event Conditions 改由 `group_drag.js` 組合語意 AND 群組與 OR 分支。
+  Scene Nodes、Event Effects／Content／Next Node、Options Elements／Textbox Items、Content 文件、Textbox Profiles 與 Memory Banks 共用的無群組 Pointer 排序；提供 7px 起拖門檻、1:1 預覽、表格列 colgroup 幾何複製、即時插入間隙、中線遲滯、FLIP 讓位、邊緣自動捲動與 reduced-motion 回退，並以依賴注入的 `onDrop` 保存各工作區既有資料順序。Pointer capture 只能在超過門檻、確定開始拖移後建立，門檻前的普通 click 必須保留給卡片內的選取與控制元件。Event Conditions 改由 `group_drag.js` 組合語意 AND 群組與 OR 分支。
 
 EDITOR/static/js/ui/workspace_tab_reorder.js
   工作區 Bar 專用的單軌 Pointer 排序。拖移期間不複製、不隱藏也不搬動 DOM；直接以原分頁跟隨水平指標，拖移本體不套用一般按鈕的按壓縮放或 transform transition，確保起始幾何正確且維持 1:1 跟手；其他分頁只以短促 transform 讓出預定槽位，放手後才一次提交 DOM 與 Editor-only `tabOrder`。作用中分頁的背景隨本體移動，獨立 focus indicator 在拖移／落位期間隱藏並於 FLIP settle 後以實際小數像素矩形同步。`mouseup` 是 Safari 遺失 `pointerup` 時的冪等後備；儲存失敗會沿相同路徑動畫回原順序。

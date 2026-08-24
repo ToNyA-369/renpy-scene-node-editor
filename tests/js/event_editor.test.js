@@ -244,8 +244,9 @@ test("Event row rendering keeps current selectors and Memory clear semantics", (
 
   assert.match(conditionHtml, /data-condition-type="memory"/);
   assert.match(conditionHtml, /name="conditionBank"/);
+  assert.match(conditionHtml, /name="conditionId" data-memory-tag-input/);
   assert.match(effectHtml, /data-effect-type="memory"/);
-  assert.match(effectHtml, /name="effectId"[^>]*disabled/);
+  assert.match(effectHtml, /name="effectId" data-memory-tag-input[^>]*disabled/);
   assert.match(effectHtml, /data-effect-type="option"/);
   assert.match(effectHtml, /name="effectOptionTarget"/);
   assert.match(effectHtml, /option-effect-operation-field/);

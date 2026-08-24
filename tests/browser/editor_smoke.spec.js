@@ -909,6 +909,27 @@ test("critical editor interactions survive reload without browser errors", async
 
   await page.locator("#openSidebar").click();
   await page.locator('#nodeList [data-node-path="options_lab"]').click();
+  await page.getByRole("button", { name: "節點", exact: true }).click();
+  const nodeWorkspaceGeometry = await page.locator("#nodePanel").evaluate((panel) => {
+    const panelRect = panel.getBoundingClientRect();
+    const shellRect = panel.querySelector(".node-editor-shell").getBoundingClientRect();
+    return {
+      left: shellRect.left - panelRect.left,
+      right: panelRect.right - shellRect.right,
+      top: shellRect.top - panelRect.top,
+    };
+  });
+  expect(Math.abs(nodeWorkspaceGeometry.left)).toBeLessThan(1);
+  expect(Math.abs(nodeWorkspaceGeometry.right)).toBeLessThan(1);
+  expect(Math.abs(nodeWorkspaceGeometry.top)).toBeLessThan(1);
+  const defaultMemoryTags = page.locator('.node-memory-bank:has-text("Memory")');
+  await expect(page.locator(".node-memory-card > header strong")).toHaveText("Registered Tags");
+  await expect(defaultMemoryTags.locator(".node-memory-tag", { hasText: "test_key" })).toBeVisible();
+  const sessionMemoryTags = page.locator('.node-memory-bank:has-text("測試階段記憶")');
+  await expect(sessionMemoryTags.locator("header small")).toHaveCount(0);
+  await expect(sessionMemoryTags).not.toContainText("test_session");
+  await expect(sessionMemoryTags.locator(".node-memory-tag", { hasText: "hitbox_clicked" })).toBeVisible();
+
   await page.getByRole("button", { name: "選項", exact: true }).click();
   await page.getByRole("button", { name: /DATA Options 綜合測試/ }).click();
   const availability = page.locator('select[data-option-path="Availability"]');
@@ -1048,6 +1069,90 @@ test("critical editor interactions survive reload without browser errors", async
   await expect(page.getByRole("button", { name: "節點", exact: true })).toBeVisible();
 
   expect(browserErrors, browserErrors.join("\n")).toEqual([]);
+});
+
+test("Node overview keeps the Memory card on the shared section rhythm", async ({ page }) => {
+  await page.setViewportSize({ width: 1680, height: 900 });
+  await page.goto(editorUrl);
+  await expect(page.locator("#saveState")).toHaveText(/^(已同步|已自動儲存|Synced|Autosaved)$/);
+  await page.locator('[data-tab="node"]').click();
+  await expect(page.locator(".node-overview")).toBeVisible();
+
+  const nodeOverviewGaps = await page.locator(".node-overview").evaluate((overview) => {
+    const metrics = overview.querySelector(".node-overview-metrics").getBoundingClientRect();
+    const details = overview.querySelector(".node-overview-details");
+    const upperCards = [...details.querySelectorAll(":scope > .node-overview-card:not(.node-memory-card)")]
+      .map((card) => card.getBoundingClientRect());
+    const memory = details.querySelector(".node-memory-card").getBoundingClientRect();
+    return {
+      section: Math.min(...upperCards.map((card) => card.top)) - metrics.bottom,
+      memory: memory.top - Math.max(...upperCards.map((card) => card.bottom)),
+    };
+  });
+
+  expect(nodeOverviewGaps.section).toBeGreaterThan(0);
+  expect(Math.abs(nodeOverviewGaps.memory - nodeOverviewGaps.section)).toBeLessThan(1);
+});
+
+test("Event Memory Tag fields provide project-wide prefix suggestions", async ({ page }) => {
+  await page.setViewportSize({ width: 1680, height: 900 });
+  await page.goto(editorUrl);
+  await page.locator("#openSidebar").click();
+  await page.locator('#nodeList [data-node-path="options_lab"]').evaluate((button) => button.click());
+  await expect(page.locator("#nodePath")).toContainText("options_lab");
+  await page.locator('[data-tab="events"]').click();
+  await page.locator('[data-event-id="use_key"]').click();
+
+  const memoryTagInput = page.locator('.condition-row[data-condition-type="memory"] [name="conditionId"]');
+  await memoryTagInput.fill("test");
+  const prefixMenu = page.locator(".prefix-choice-menu:visible");
+  const prefixChoice = prefixMenu.locator('[data-prefix-value="test_key"]');
+  await expect(prefixChoice).toBeVisible();
+  const prefixPresentation = await prefixMenu.evaluate((menu) => {
+    const option = menu.querySelector(".select-choice-option");
+    const menuRect = menu.getBoundingClientRect();
+    const optionRect = option.getBoundingClientRect();
+    const optionStyle = getComputedStyle(option);
+    return {
+      menuWidth: menuRect.width,
+      optionHeight: optionRect.height,
+      optionFontSize: optionStyle.fontSize,
+      optionFontWeight: optionStyle.fontWeight,
+    };
+  });
+  expect(prefixPresentation).toEqual({
+    menuWidth: 240,
+    optionHeight: 38,
+    optionFontSize: "12px",
+    optionFontWeight: "620",
+  });
+  await prefixChoice.click();
+  await expect(memoryTagInput).toHaveValue("test_key");
+
+  await memoryTagInput.fill("tes");
+  await expect(prefixMenu).toBeVisible();
+  await expect(memoryTagInput).toBeFocused();
+  await expect(memoryTagInput.locator("xpath=..")).toHaveClass(/open/);
+  await memoryTagInput.press("Escape");
+  await expect(prefixMenu).toBeHidden();
+  await expect(memoryTagInput).toBeFocused();
+  await memoryTagInput.press("ArrowDown");
+  await expect(prefixMenu).toBeVisible();
+  await memoryTagInput.press("Enter");
+  await expect(memoryTagInput).toHaveValue("test_key");
+
+  const hitboxEvent = page.locator('[data-event-id="hitbox_mark"]');
+  await hitboxEvent.click();
+  await expect(hitboxEvent).toHaveClass(/active/);
+  await expect(page.locator('.effect-row[data-effect-type="memory"] [name="effectBank"]')).toHaveValue("test_session");
+  const sessionTagInput = page.locator('.effect-row[data-effect-type="memory"] [name="effectId"]');
+  await sessionTagInput.fill("hit");
+  const sessionPrefixMenu = page.locator(".prefix-choice-menu:visible");
+  const sessionTagChoice = sessionPrefixMenu.locator('[data-prefix-value="hitbox_clicked"]');
+  await expect(sessionTagChoice).toBeVisible();
+  await expect(sessionPrefixMenu.locator('[data-prefix-value="test_key"]')).toHaveCount(0);
+  await sessionTagChoice.click();
+  await expect(sessionTagInput).toHaveValue("hitbox_clicked");
 });
 
 test("Stats use the same dwell grouping, rollback, and singleton dissolution", async ({ page }) => {
@@ -1331,13 +1436,65 @@ test("Event groups form through dwell-drag and dissolve when one item remains", 
   const renamedGroup = page.locator('[data-group-drop="主線流程"]');
   await expect(renamedGroup).toBeVisible();
   await expect(renamedGroup.locator("button")).toHaveCount(2);
+  const eventSidebarGaps = await page.locator(".event-pool-flow").evaluate((flow) => {
+    const children = [...flow.children].filter((child) => (
+      child.matches(".event-group, [data-group-item-id]")
+    ));
+    return children.slice(1).map((child, index) => {
+      const previous = children[index].getBoundingClientRect();
+      const current = child.getBoundingClientRect();
+      return current.top - previous.bottom;
+    });
+  });
+  expect(eventSidebarGaps.length).toBeGreaterThan(0);
+  expect(eventSidebarGaps.every((gap) => Math.abs(gap - 8) < 1)).toBe(true);
+  await expect(renamedGroup).toHaveClass(/is-group-editing/);
+  await expect.poll(() => renamedGroup.locator(".event-group-items-shell").evaluate((shell) => (
+    shell.getBoundingClientRect().height
+  ))).toBeGreaterThan(20);
+
+  const looseEventBeforeGroup = page.locator(".event-pool-flow > [data-group-item-id]").first();
+  await expect(looseEventBeforeGroup).toBeVisible();
+  await looseEventBeforeGroup.click();
+  await expect(renamedGroup).toHaveClass(/is-group-selection-collapsing/);
+  const collapsingGroupHeader = await renamedGroup.locator(".event-group-header").boundingBox();
+  if (!collapsingGroupHeader) throw new Error("Collapsing Event group header is not visible");
+  await page.mouse.move(
+    collapsingGroupHeader.x + collapsingGroupHeader.width / 2,
+    collapsingGroupHeader.y + collapsingGroupHeader.height / 2,
+  );
+  const eventCollapseHeights = await renamedGroup.evaluate(async (group) => {
+    const shell = group.querySelector(".event-group-items-shell");
+    const heights = [];
+    for (let frame = 0; frame < 8; frame += 1) {
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+      heights.push(shell.getBoundingClientRect().height);
+    }
+    return heights;
+  });
+  expect(eventCollapseHeights[0] - eventCollapseHeights.at(-1)).toBeGreaterThan(1);
+  expect(eventCollapseHeights.some((height) => height > 2 && height < eventCollapseHeights[0] - 1)).toBe(true);
+  await expect.poll(() => renamedGroup.locator(".event-group-items-shell").evaluate((shell) => (
+    shell.getBoundingClientRect().height
+  ))).toBeLessThan(2);
+  await expect(renamedGroup).toHaveClass(/is-group-selection-collapsing/);
+  await page.locator('#eventForm [name="Name"]').click();
   await page.mouse.move(1000, 700);
+  await expect(renamedGroup).not.toHaveClass(/is-group-selection-collapsing/);
+  await expect(renamedGroup).not.toHaveClass(/is-group-editing/);
   await expect.poll(() => renamedGroup.locator(".event-group-items-shell").evaluate((shell) => (
     shell.getBoundingClientRect().height
   ))).toBeLessThan(2);
   const groupHeaderBox = await renamedGroup.locator(".event-group-header").boundingBox();
   if (!groupHeaderBox) throw new Error("Event group header is not visible");
   await page.mouse.move(groupHeaderBox.x + groupHeaderBox.width / 2, groupHeaderBox.y + groupHeaderBox.height / 2);
+  await expect.poll(() => renamedGroup.locator(".event-group-items-shell").evaluate((shell) => (
+    shell.getBoundingClientRect().height
+  ))).toBeGreaterThan(20);
+
+  await renamedGroup.locator("[data-event-id]").first().click();
+  await page.locator('#eventForm [name="Name"]').click();
+  await expect(renamedGroup).toHaveClass(/is-group-editing/);
   await expect.poll(() => renamedGroup.locator(".event-group-items-shell").evaluate((shell) => (
     shell.getBoundingClientRect().height
   ))).toBeGreaterThan(20);
@@ -1397,6 +1554,19 @@ test("Event groups form through dwell-drag and dissolve when one item remains", 
   );
   await moveGroupResponse;
   await expect(page.locator(".toast", { hasText: "Event 排序已更新" })).toHaveCount(0);
+  const droppedEventGroup = page.locator('[data-group-drop="主線流程"]');
+  await expect(droppedEventGroup).toHaveClass(/is-group-drop-opening/);
+  const eventDropOpenHeights = await droppedEventGroup.evaluate(async (group) => {
+    const shell = group.querySelector(".event-group-items-shell");
+    const heights = [];
+    for (let frame = 0; frame < 8; frame += 1) {
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+      heights.push(shell.getBoundingClientRect().height);
+    }
+    return heights;
+  });
+  expect(eventDropOpenHeights.at(-1) - eventDropOpenHeights[0]).toBeGreaterThan(1);
+  expect(eventDropOpenHeights.some((height) => height > eventDropOpenHeights[0] + 1)).toBe(true);
   await expect.poll(() => page.locator(".event-pool-flow").evaluate((flow) => {
     const blocks = [...flow.children].filter((child) => (
       child.matches(".event-group, [data-group-item-id]")
@@ -1654,7 +1824,11 @@ test("keyboard authoring follows Event focus order, navigates every picker, and 
   await expect(triggerValuePicker).toBeFocused();
 
   await page.keyboard.press("Tab");
-  await expect(page.locator('#eventForm [name="Priority"]')).toBeFocused();
+  const priorityField = page.locator('#eventForm [name="Priority"]');
+  await expect(priorityField).toBeFocused();
+  await expect(priorityField).toHaveAttribute("min", "0");
+  await expect(priorityField).toHaveAttribute("max", "9");
+  await expect(priorityField).toHaveValue("5");
   await page.keyboard.press("Tab");
   await expect(page.locator('#eventForm [name="Weight"]')).toBeFocused();
   await page.keyboard.press("Tab");
@@ -2192,6 +2366,25 @@ test("shared drag sorting persists Event rules, Options, and Memory order", asyn
   await expect(page.locator("[data-option-element-select]").first()).toHaveAttribute("data-option-element-select", "hitbox_mark");
 
   await page.locator('[data-option-element-select="data_actions"]').click();
+  const firstTextboxItem = page.locator(".option-items-list [data-option-item-order-id]").first();
+  const secondTextboxItem = page.locator(".option-items-list [data-option-item-order-id]").nth(1);
+  const firstTextboxItemId = await firstTextboxItem.getAttribute("data-option-item-order-id");
+  const secondTextboxItemId = await secondTextboxItem.getAttribute("data-option-item-order-id");
+  await expect(firstTextboxItem.locator(".option-item-entry")).toHaveClass(/active/);
+  const firstTextboxItemName = page.locator('[data-option-item-path="Name"]');
+  const editedTextboxItemName = `${await firstTextboxItemName.inputValue()} Smoke`;
+  const textboxItemEditSave = page.waitForResponse((candidate) => (
+    candidate.url().endsWith("/api/options") && candidate.request().method() === "PUT" && candidate.ok()
+  ));
+  await firstTextboxItemName.fill(editedTextboxItemName);
+  await secondTextboxItem.locator(`[data-option-item-select="${secondTextboxItemId}"]`).click();
+  await expect(secondTextboxItem.locator(".option-item-entry")).toHaveClass(/active/);
+  await expect(page.locator('[data-option-item-path="Name"]')).not.toHaveValue(editedTextboxItemName);
+  await textboxItemEditSave;
+  const switchedOptions = await (await page.request.get(`${editorUrl}/api/node?path=options_lab`)).json();
+  expect(switchedOptions.options.Elements.find((entry) => entry.ID === "data_actions").Items
+    .find((item) => item.ID === firstTextboxItemId).Name).toBe(editedTextboxItemName);
+
   const optionItemSave = page.waitForResponse((candidate) => (
     candidate.url().endsWith("/api/options") && candidate.request().method() === "PUT" && candidate.ok()
   ));
@@ -2228,9 +2421,16 @@ test("shared drag sorting persists Event rules, Options, and Memory order", asyn
       expect(Math.abs(previewBox.width - sourceBox.width)).toBeLessThan(2);
       expect(Math.abs(previewBox.height - sourceBox.height)).toBeLessThan(2);
       await expect(preview.locator('input[name="memoryName"]')).toHaveValue("測試階段記憶");
+      expect(await page.locator("#memoriesBody").evaluate((body) => ({
+        inputUserSelect: getComputedStyle(body.querySelector('input[name="memoryName"]')).userSelect,
+        selection: window.getSelection()?.toString() || "",
+      }))).toEqual({ inputUserSelect: "none", selection: "" });
     },
   );
   await memorySave;
+  await expect.poll(() => page.locator('#memoriesBody input[name="memoryName"]').first().evaluate((input) => (
+    getComputedStyle(input).userSelect
+  ))).not.toBe("none");
   await expect(page.locator(".memory-row").first()).toHaveAttribute("data-memory-id", "test_session");
 
   const savedBranch = await (await page.request.get(`${editorUrl}/api/node?path=branch_lab`)).json();
@@ -2341,6 +2541,18 @@ test("creator-managed Node, Content, and Textbox Profile lists persist drag orde
   const nodeGroup = page.locator("#nodeList .node-group").filter({ has: page.locator('[data-node-path="outcome_success"]') });
   await expect(nodeGroup).toHaveCount(1);
   await expect(nodeGroup.locator(".node-item")).toHaveCount(2);
+  const nodeSidebarGaps = await page.locator("#nodeList .node-pool-flow").evaluate((flow) => {
+    const children = [...flow.children].filter((child) => (
+      child.matches(".node-group, [data-group-item-id]")
+    ));
+    return children.slice(1).map((child, index) => {
+      const previous = children[index].getBoundingClientRect();
+      const current = child.getBoundingClientRect();
+      return current.top - previous.bottom;
+    });
+  });
+  expect(nodeSidebarGaps.length).toBeGreaterThan(0);
+  expect(nodeSidebarGaps.every((gap) => Math.abs(gap - 8) < 1)).toBe(true);
   await expect.poll(() => nodeGroup.locator(".node-item").first().evaluate((item) => getComputedStyle(item).backgroundColor))
     .toBe("rgba(0, 0, 0, 0)");
   const nodeReorderSave = page.waitForResponse((candidate) => (
@@ -2356,6 +2568,26 @@ test("creator-managed Node, Content, and Textbox Profile lists persist drag orde
   await expect.poll(() => page.locator("#nodeList .node-group .event-group-items-shell").evaluate((shell) => (
     shell.getBoundingClientRect().height
   ))).toBeGreaterThan(20);
+  const nodeGroupBlockSave = page.waitForResponse((candidate) => (
+    candidate.url().endsWith("/api/node-groups") && candidate.request().method() === "PUT" && candidate.ok()
+  ));
+  await dragToLiveTarget(
+    page,
+    "#nodeList .node-group-drag-space",
+    ".node-loose-drop-tail",
+    async () => {
+      await expect(page.locator("#nodeList .node-group")).toHaveClass(/is-group-block-dragging/);
+      expect(await page.locator("#nodeList .node-group .event-group-items-shell").evaluate((shell) => (
+        shell.getBoundingClientRect().height
+      ))).toBeLessThan(2);
+    },
+  );
+  await nodeGroupBlockSave;
+  const droppedNodeGroup = page.locator("#nodeList .node-group");
+  await expect(droppedNodeGroup).not.toHaveClass(/is-group-drop-opening|is-group-pinned-open/);
+  await expect.poll(() => droppedNodeGroup.locator(".event-group-items-shell").evaluate((shell) => (
+    shell.getBoundingClientRect().height
+  ))).toBeLessThan(2);
   const groupedProject = await (await page.request.get(`${editorUrl}/api/project`)).json();
   expect(groupedProject.nodes.filter((node) => ["outcome_success", "outcome_fallback"].includes(node.path)).map((node) => node.group))
     .toEqual(["新群組", "新群組"]);
@@ -2372,6 +2604,40 @@ test("creator-managed Node, Content, and Textbox Profile lists persist drag orde
   await expect(nodeGroupChoice).toBeVisible();
   await nodeGroupChoice.click();
   await expect(nextNodePicker.locator('[data-select-value="outcome_success"]')).toBeVisible();
+
+  await openNodeSidebar(page);
+  const selectableNodeGroup = page.locator("#nodeList .node-group").filter({ has: page.locator('[data-node-path="outcome_success"]') });
+  await selectableNodeGroup.locator(".node-group-header").hover();
+  await expect.poll(() => selectableNodeGroup.locator(".event-group-items-shell").evaluate((shell) => (
+    shell.getBoundingClientRect().height
+  ))).toBeGreaterThan(20);
+  await selectableNodeGroup.locator('[data-node-path="outcome_success"]').click({ force: true });
+  await openNodeSidebar(page);
+  const editingNodeGroup = page.locator("#nodeList .node-group").filter({ has: page.locator('[data-node-path="outcome_success"]') });
+  await expect(editingNodeGroup).toHaveClass(/is-group-editing/);
+  await expect.poll(() => editingNodeGroup.locator(".event-group-items-shell").evaluate((shell) => (
+    shell.getBoundingClientRect().height
+  ))).toBeGreaterThan(20);
+
+  await page.locator('#nodeList [data-node-path="root"]').click({ force: true });
+  await expect(editingNodeGroup).toHaveClass(/is-group-selection-collapsing/);
+  const nodeCollapseHeights = await editingNodeGroup.evaluate(async (group) => {
+    const shell = group.querySelector(".event-group-items-shell");
+    const heights = [];
+    for (let frame = 0; frame < 8; frame += 1) {
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+      heights.push(shell.getBoundingClientRect().height);
+    }
+    return heights;
+  });
+  expect(nodeCollapseHeights[0] - nodeCollapseHeights.at(-1)).toBeGreaterThan(1);
+  expect(nodeCollapseHeights.some((height) => height > 2 && height < nodeCollapseHeights[0] - 1)).toBe(true);
+  await openNodeSidebar(page);
+  await page.mouse.move(1200, 700);
+  await expect(editingNodeGroup).not.toHaveClass(/is-group-editing/);
+  await expect.poll(() => editingNodeGroup.locator(".event-group-items-shell").evaluate((shell) => (
+    shell.getBoundingClientRect().height
+  ))).toBeLessThan(2);
 });
 
 test("Content mounts the offline Ren'Py editor and keeps autosave persistence", async ({ page }) => {

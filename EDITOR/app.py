@@ -171,7 +171,7 @@ PYTHON_EN_DICTIONARY = {
     "Keyboard Trigger 必須是有效的 Ren'Py keysym。": "Keyboard Trigger must be a valid Ren'Py keysym.",
     "Mouse Trigger 不合法：{payload}。": "Mouse Trigger is invalid: {payload}.",
     "Event 必須是 JSON object。": "Event must be a JSON object.",
-    "Priority 必須是 0 到 5 的整數。": "Priority must be an integer between 0 and 5.",
+    "Priority 必須是 0 到 9 的整數。": "Priority must be an integer between 0 and 9.",
     "Weight 必須大於 0。": "Weight must be greater than 0.",
     "Event 群組名稱不可超過 80 個字元。": "Event group names cannot exceed 80 characters.",
     "Event 群組指派必須是非空 object。": "Event group assignments must be a non-empty object.",
@@ -1271,6 +1271,36 @@ def project_graph(node_summaries=None):
     }
 
 
+def scan_memory_tags(node_summaries=None):
+    """Return project-wide Memory tags registered by Event add Effects."""
+    tags_by_bank = {}
+    nodes = scan_nodes(False) if node_summaries is None else node_summaries
+    for node in [global_node_summary(False)] + list(nodes):
+        event_root = authoring_directory(node["path"]) / EVENT_DIR
+        if not event_root.exists():
+            continue
+        for path in sorted(event_root.glob("*.json"), key=lambda value: value.name.casefold()):
+            try:
+                event = read_json(path, {}) or {}
+            except ApiError:
+                continue
+            effects = event.get("Effects") if isinstance(event, dict) else []
+            for effect in effects if isinstance(effects, list) else []:
+                if not isinstance(effect, dict):
+                    continue
+                effect_type = str(effect.get("type") or "").casefold()
+                operation = str(effect.get("op") or "").casefold()
+                tag_id = str(effect.get("id") or "").strip()
+                if effect_type not in ("memory", "tag") or operation != "add" or not tag_id:
+                    continue
+                bank_id = str(effect.get("bank") or "memory").strip() or "memory"
+                tags_by_bank.setdefault(bank_id, set()).add(tag_id)
+    return {
+        bank_id: sorted(tags, key=lambda value: (value.casefold(), value))
+        for bank_id, tags in sorted(tags_by_bank.items(), key=lambda item: (item[0].casefold(), item[0]))
+    }
+
+
 def graph_snapshot(project=None, include_editor_details=False):
     project = scene_project_config() if project is None else project
     nodes = scan_nodes(include_editor_details)
@@ -1455,8 +1485,8 @@ def validate_event(event, global_scope=False, owner_node_id=None):
     is_lifecycle = trigger in LIFECYCLE_TRIGGERS
 
     priority = event.get("Priority", 5)
-    if not isinstance(priority, int) or isinstance(priority, bool) or not 0 <= priority <= 5:
-        raise ApiError(HTTPStatus.BAD_REQUEST, tr("Priority 必須是 0 到 5 的整數。"))
+    if not isinstance(priority, int) or isinstance(priority, bool) or not 0 <= priority <= 9:
+        raise ApiError(HTTPStatus.BAD_REQUEST, tr("Priority 必須是 0 到 9 的整數。"))
     weight = event.get("Weight", 1)
     if not is_lifecycle and (not isinstance(weight, (int, float)) or isinstance(weight, bool) or weight <= 0):
         raise ApiError(HTTPStatus.BAD_REQUEST, tr("Weight 必須大於 0。"))
@@ -2163,6 +2193,7 @@ class EditorHandler(BaseHTTPRequestHandler):
                     **graph_data,
                     "stats": read_json(stats_path(), {}) or {},
                     "memories": read_json(memories_path(), {}) or {},
+                    "memoryTags": scan_memory_tags(graph_data["nodes"]),
                     "images": scan_image_assets(),
                     "audio": scan_audio_assets(),
                     "textboxProfiles": scan_textbox_profiles(),
