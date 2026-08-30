@@ -2113,6 +2113,11 @@ function textboxFeatureLabel(featureId) {
     hover_accent: t("懸停強調條"),
     hover_text_color: t("懸停文字色"),
     item_border: t("Item 邊框"),
+    item_corners: t("Item 圓角"),
+    text_padding: t("文字左右內距"),
+    text_bold: t("粗體文字"),
+    text_italic: t("斜體文字"),
+    text_spacing: t("文字字距"),
     text_shadow: t("文字陰影"),
     text_outline: t("文字描邊"),
     staggered_entrance: t("逐項進場"),
@@ -2266,7 +2271,7 @@ function optionStageElementHtml(element) {
               ? `-${numberValue(textOutline.Size, 1)}px 0 ${safeColor(textOutline.Color, "#000000cc")}, ${numberValue(textOutline.Size, 1)}px 0 ${safeColor(textOutline.Color, "#000000cc")}, 0 -${numberValue(textOutline.Size, 1)}px ${safeColor(textOutline.Color, "#000000cc")}, 0 ${numberValue(textOutline.Size, 1)}px ${safeColor(textOutline.Color, "#000000cc")}`
               : "";
             return `
-            <button class="option-text-item ${hoverClass} ${hoverAccent.Enabled ? "has-hover-accent" : ""} ${hoverTextColor.Enabled ? "has-hover-text-color" : ""} ${itemBorder.Enabled ? "has-item-border" : ""} ${entrance.Enabled ? "has-entrance" : ""} ${item.ID === state.selectedOptionItemId ? "selected" : ""}" type="button" data-option-item-select="${escapeHtml(item.ID)}" style="height:${metrics.itemHeight}px;--option-item-background:${safeColor(itemStyle["Item Background"])};--option-hover-color:${safeColor(hover.Color, "#ffffff18")};--textbox-hover-text-color:${safeColor(hoverTextColor.Color, "#ffffff")};--textbox-item-border-color:${safeColor(itemBorder.Color, "#ffffff33")};--textbox-item-border-width:${numberValue(itemBorder.Width, 1)}px;--textbox-accent-color:${safeColor(hoverAccent.Color, "#5c7265")};--textbox-accent-width:${numberValue(hoverAccent.Width, 6)}px;--textbox-entrance-distance:${numberValue(entrance.Distance, 18)}px;--textbox-entrance-delay:${numberValue(entrance.Delay, 0.04) * index}s;--textbox-entrance-duration:${numberValue(entrance.Duration, 0.22)}s;background:var(--option-item-background);color:${safeColor(itemStyle["Text Color"], "#ffffff")};font-size:${numberValue(itemStyle["Text Size"], 30)}px;text-align:${align === 0 ? "left" : align === 1 ? "right" : "center"};text-shadow:${[outline, shadow].filter(Boolean).join(",") || "none"}">
+            <button class="option-text-item ${hoverClass} ${hoverAccent.Enabled ? "has-hover-accent" : ""} ${hoverTextColor.Enabled ? "has-hover-text-color" : ""} ${itemBorder.Enabled ? "has-item-border" : ""} ${entrance.Enabled ? "has-entrance" : ""} ${item.ID === state.selectedOptionItemId ? "selected" : ""}" type="button" data-option-item-select="${escapeHtml(item.ID)}" style="${SceneTextboxProfiles.itemTypographyCss(element, state.textboxProfiles)};height:${metrics.itemHeight}px;--option-item-background:${safeColor(itemStyle["Item Background"])};--option-hover-color:${safeColor(hover.Color, "#ffffff18")};--textbox-hover-text-color:${safeColor(hoverTextColor.Color, "#ffffff")};--textbox-item-border-color:${safeColor(itemBorder.Color, "#ffffff33")};--textbox-item-border-width:${numberValue(itemBorder.Width, 1)}px;--textbox-accent-color:${safeColor(hoverAccent.Color, "#5c7265")};--textbox-accent-width:${numberValue(hoverAccent.Width, 6)}px;--textbox-entrance-distance:${numberValue(entrance.Distance, 18)}px;--textbox-entrance-delay:${numberValue(entrance.Delay, 0.04) * index}s;--textbox-entrance-duration:${numberValue(entrance.Duration, 0.22)}s;background:var(--option-item-background);color:${safeColor(itemStyle["Text Color"], "#ffffff")};font-size:${numberValue(itemStyle["Text Size"], 30)}px;text-align:${align === 0 ? "left" : align === 1 ? "right" : "center"};text-shadow:${[outline, shadow].filter(Boolean).join(",") || "none"}">
               <span class="option-text-item-accent" aria-hidden="true"></span>${escapeHtml(item.Text || item.Name || item.ID)}${item.Availability === "CONTROLLED" ? '<span class="visually-hidden">（Controlled）</span>' : ""}
             </button>
           `; }).join("") : `<div class="option-empty-row" style="height:${metrics.itemHeight}px">${escapeHtml(t("尚未建立 Item"))}</div>`}
@@ -2608,7 +2613,13 @@ function textboxProfileFeatureEditor(featureId, feature) {
       ${textboxProfileField(t("顏色"), `Features.${featureId}.Color`, feature.Color || "#000000cc")}
       ${textboxProfileField(t("大小"), `Features.${featureId}.Size`, feature.Size ?? 1, { type: "number", min: 0, max: 20, step: 1 })}
     `;
-  } else {
+  } else if (featureId === "item_corners") {
+    settings = textboxProfileField(t("圓角半徑"), `Features.${featureId}.Radius`, feature.Radius ?? 12, { type: "number", min: 0, max: 200, step: 1 });
+  } else if (featureId === "text_padding") {
+    settings = textboxProfileField(t("左右內距"), `Features.${featureId}.X`, feature.X ?? 24, { type: "number", min: 0, max: 200, step: 1 });
+  } else if (featureId === "text_spacing") {
+    settings = textboxProfileField(t("字距"), `Features.${featureId}.Spacing`, feature.Spacing ?? 0, { type: "number", min: -5, max: 30, step: 0.5 });
+  } else if (featureId === "staggered_entrance") {
     settings = `
       ${textboxProfileField(t("移動距離"), `Features.${featureId}.Distance`, feature.Distance ?? 18, { type: "number", min: -200, max: 200, step: 1 })}
       ${textboxProfileField(t("項目延遲"), `Features.${featureId}.Delay`, feature.Delay ?? 0.04, { type: "number", min: 0, max: 1, step: 0.01 })}
@@ -2624,7 +2635,7 @@ function textboxProfileFeatureEditor(featureId, feature) {
           <span class="boolean-display" data-off="False" data-on="True" aria-hidden="true"><i></i></span>
         </label>
       </summary>
-      <div class="textbox-profile-feature-fields">${settings}</div>
+      ${settings ? `<div class="textbox-profile-feature-fields">${settings}</div>` : ""}
     </details>
   `;
 }

@@ -4,6 +4,8 @@ import json
 import sys
 import tempfile
 import unittest
+import xml.etree.ElementTree as ET
+from types import SimpleNamespace
 from collections import UserDict
 from pathlib import Path
 
@@ -56,6 +58,27 @@ def textbox(profile_id="glass"):
 
 
 class TextboxProfileSchemaTest(unittest.TestCase):
+    def test_new_features_match_runtime_defaults_and_validate_boundaries(self):
+        runtime = load_runtime_namespace()
+        normalize = runtime["scene_normalize_textbox_profile"]
+        self.assertEqual(app.TEXTBOX_FEATURE_DEFAULTS, runtime["SCENE_TEXTBOX_FEATURE_DEFAULTS"])
+        for feature_id in ("item_corners", "text_padding", "text_bold", "text_italic", "text_spacing"):
+            self.assertFalse(app.validate_textbox_profile(profile())["Features"][feature_id]["Enabled"])
+            value = profile()
+            value["Features"][feature_id] = {"Enabled": True}
+            self.assertEqual(app.validate_textbox_profile(value)["Features"], normalize(value, "glass")["Features"])
+        for feature_id, field, minimum, maximum in (("item_corners", "Radius", 0, 200), ("text_padding", "X", 0, 200), ("text_spacing", "Spacing", -5, 30)):
+            for number in (minimum, maximum, minimum - 1, maximum + 1, float("nan"), float("inf"), True):
+                with self.subTest(feature=feature_id, number=number):
+                    value = profile()
+                    value["Features"][feature_id] = {"Enabled": True, field: number}
+                    if not isinstance(number, bool) and minimum <= number <= maximum:
+                        self.assertEqual(app.validate_textbox_profile(value)["Features"], normalize(value, "glass")["Features"])
+                    else:
+                        with self.assertRaises(app.ApiError):
+                            app.validate_textbox_profile(value)
+                        self.assertIsNone(normalize(value, "glass"))
+
     def test_profile_and_version_two_options_normalize_to_version_three(self):
         validated_profile = app.validate_textbox_profile(profile())
         options = app.validate_options({"Version": 2, "Elements": [textbox()]})
@@ -133,6 +156,62 @@ class TextboxProfileProjectTest(unittest.TestCase):
 
 
 class TextboxProfileRuntimeTest(unittest.TestCase):
+    def test_rounded_background_uses_independent_fill_and_hollow_border(self):
+        runtime = load_runtime_namespace()
+        runtime["Color"] = lambda value: SimpleNamespace(rgba=tuple(int(value[i:i + 2], 16) / 255 for i in (1, 3, 5, 7)))
+        runtime["im"] = SimpleNamespace(Data=lambda data, filename: data)
+        render = runtime["scene_option_item_background"]
+        ns = {"svg": "http://www.w3.org/2000/svg"}
+        for size in ((120, 60), (3, 3), (1, 5)):
+            svg = ET.fromstring(render("#20304080", {"Enabled": True, "Color": "#ff000040", "Width": 8}, *size, 200))
+            fill, ring = svg.find("svg:rect", ns), svg.find("svg:path", ns)
+            self.assertAlmostEqual(float(fill.get("fill-opacity")), 128 / 255)
+            self.assertAlmostEqual(float(ring.get("fill-opacity")), 64 / 255)
+            self.assertEqual(float(fill.get("rx")), min(size) / 2)
+            self.assertEqual(ring.get("fill-rule"), "evenodd")
+            self.assertEqual(ring.get("d").count("M "), 2 if size == (120, 60) else 1)
+        svg = ET.fromstring(render("#20304080", {"Enabled": False}, 120, 60, 12))
+        self.assertIsNone(svg.find("svg:path", ns))
+
+    def test_typography_respects_overrides_signed_scaling_and_safe_padding(self):
+        runtime = load_runtime_namespace()
+        value = profile()
+        value["Features"].update({
+            "text_padding": {"Enabled": True, "X": 200},
+            "text_bold": {"Enabled": True}, "text_italic": {"Enabled": True},
+            "text_spacing": {"Enabled": True, "Spacing": -2.5},
+        })
+        runtime["scene_catalog"] = {"textbox_profiles": {"glass": value}}
+        runtime["scene_option_scale"] = lambda node_id: (0.5, 0.5)
+        element = textbox()
+        self.assertEqual(runtime["scene_option_text_properties"]("root", element), {"bold": True, "italic": True, "kerning": -1.25})
+        self.assertEqual(runtime["scene_option_text_padding"]("root", element, 40), {"xpadding": 19})
+        element["Appearance"]["Features"] = {key: False for key in value["Features"]}
+        self.assertEqual(runtime["scene_option_text_properties"]("root", element), {})
+        self.assertEqual(runtime["scene_option_text_padding"]("root", element, 40), {})
+
+    def test_item_border_never_tints_the_fill_or_double_paints_corners(self):
+        runtime = load_runtime_namespace()
+        runtime["Solid"] = lambda color, **size: {"color": color, **size}
+        runtime["Composite"] = lambda size, *layers: (size, list(zip(layers[::2], layers[1::2])))
+        render = runtime["scene_option_item_background"]
+        for fill in ("#20304000", "#20304080", "#203040ff",
+                     runtime["scene_option_composite_color"]("#20304080", "#ffffff18")):
+            for border_color in ("#ff000000", "#ff000080", "#ff0000ff"):
+                for width, height in ((20, 12), (3, 3), (1, 5), (5, 1), (1, 1)):
+                    with self.subTest(fill=fill, border=border_color, size=(width, height)):
+                        size, layers = render(fill, {"Enabled": True, "Color": border_color, "Width": 2}, width, height)
+                        self.assertEqual(size, (width, height))
+                        self.assertEqual(layers[0], ((0, 0), {"color": fill, "xsize": width, "ysize": height}))
+                        thickness = max(1, min(2, width // 2, height // 2))
+                        for y in range(height):
+                            for x in range(width):
+                                paints = [solid["color"] for (sx, sy), solid in layers
+                                          if sx <= x < sx + solid["xsize"] and sy <= y < sy + solid["ysize"]]
+                                edge = x < thickness or x >= width - thickness or y < thickness or y >= height - thickness
+                                self.assertEqual(paints, [fill, border_color] if edge else [fill])
+        self.assertEqual(render("#20304080", {"Enabled": False}, 20, 12), {"color": "#20304080"})
+
     def test_runtime_accepts_mapping_objects_that_are_not_the_active_dict_class(self):
         runtime = load_runtime_namespace()
         value = profile()

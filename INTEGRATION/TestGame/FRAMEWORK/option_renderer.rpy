@@ -56,6 +56,10 @@ screen scene_option_textbox(node_id, element):
     $ entrance_distance = scene_option_pixel(node_id, abs(entrance.get("Distance", 18)), "y") * (-1 if entrance.get("Distance", 18) < 0 else 1)
     $ item_width = max(1, rect[2] - padding * 2 - (scrollbar_width + spacing if show_scrollbar else 0))
     $ text_outlines = scene_option_text_outlines(element)
+    $ corners = scene_option_textbox_feature(element, "item_corners")
+    $ item_radius = float(corners.get("Radius", 12)) * min(scene_option_scale(node_id)) if corners.get("Enabled", False) else 0
+    $ text_properties = scene_option_text_properties(node_id, element)
+    $ padding_properties = scene_option_text_padding(node_id, element, item_width)
 
     if items:
         frame:
@@ -86,17 +90,18 @@ screen scene_option_textbox(node_id, element):
                         for item_index, item in enumerate(items):
                             $ item_background = scene_option_item_style(element, item, "Item Background", "#20302a")
                             $ item_hover_background = scene_option_composite_color(item_background, hover_color) if hover_enabled else item_background
-                            $ item_idle_displayable = scene_option_item_background(item_background, item_border, item_width, item_height)
-                            $ item_hover_displayable = scene_option_item_background(item_hover_background, item_border, item_width, item_height)
+                            $ item_idle_displayable = scene_option_item_background(item_background, item_border, item_width, item_height, item_radius)
+                            $ item_hover_displayable = scene_option_item_background(item_hover_background, item_border, item_width, item_height, item_radius)
                             button:
                                 at scene_option_item_entrance(item_index, bool(entrance.get("Enabled", False)), entrance_distance, float(entrance.get("Delay", 0.04)), float(entrance.get("Duration", 0.22)))
                                 id scene_option_widget_id(node_id, "{}__{}".format(element.get("ID", "option_textbox"), item.get("ID", "option_item")))
                                 xfill True
                                 ysize item_height
+                                properties padding_properties
                                 action Return(item.get("Trigger"))
                                 background item_idle_displayable
                                 hover_background item_hover_displayable
-                                hover_foreground (Transform(Solid(hover_accent.get("Color", "#5c7265")), xsize=accent_width, xalign=0.0) if hover_accent.get("Enabled", False) else None)
+                                hover_foreground (scene_option_item_accent(hover_accent.get("Color", "#5c7265"), accent_width, item_width, item_height, item_radius) if hover_accent.get("Enabled", False) else None)
                                 hover_sound element.get("Hover Sound") or None
                                 activate_sound element.get("Click Sound") or None
 
@@ -110,6 +115,7 @@ screen scene_option_textbox(node_id, element):
                                         color scene_option_item_style(element, item, "Text Color", "#ffffff")
                                         hover_color (hover_text_color.get("Color", "#ffffff") if hover_text_color.get("Enabled", False) else scene_option_item_style(element, item, "Text Color", "#ffffff"))
                                         outlines text_outlines
+                                        properties text_properties
 
                 if show_scrollbar:
                     vbar:

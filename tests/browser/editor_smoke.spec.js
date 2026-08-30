@@ -2387,6 +2387,9 @@ test("choice picker mouse selection survives Safari focusout without a related t
 });
 
 test("textbox appearance profiles are reusable, previewed, and persisted", async ({ page }) => {
+  const errors = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  page.on("console", (message) => { if (message.type() === "error") errors.push(message.text()); });
   await page.setViewportSize({ width: 1680, height: 900 });
   await page.goto(editorUrl);
   await expect(page.getByRole("status")).toHaveText(/^(已同步|Synced)$/);
@@ -2419,6 +2422,12 @@ test("textbox appearance profiles are reusable, previewed, and persisted", async
   await page.locator('[data-textbox-profile-path="Name"]').fill("Smoke Glass");
   await page.locator('[data-textbox-profile-path="Style.Background"]').fill("#102030cc");
   await page.locator('[data-textbox-profile-path="Features.hover_accent.Enabled"]').check({ force: true });
+  for (const feature of ["item_corners", "text_padding", "text_bold", "text_italic", "text_spacing", "item_border"]) {
+    await page.locator(`[data-textbox-profile-path="Features.${feature}.Enabled"]`).check({ force: true });
+  }
+  await page.locator('[data-textbox-profile-path="Features.item_corners.Radius"]').fill("20");
+  await page.locator('[data-textbox-profile-path="Features.text_padding.X"]').fill("32");
+  await page.locator('[data-textbox-profile-path="Features.text_spacing.Spacing"]').fill("2.5");
   const profileSave = page.waitForResponse((candidate) => (
     candidate.url().endsWith("/api/textbox-profiles")
     && candidate.request().method() === "PUT"
@@ -2433,6 +2442,14 @@ test("textbox appearance profiles are reusable, previewed, and persisted", async
     await page.locator("[data-textbox-profile-select]").selectOption(created.ID, { force: true });
   });
   await expect(page.locator(".option-text-item.has-hover-accent").first()).toBeVisible();
+  const previewItem = page.locator(".option-text-item").first();
+  await expect(previewItem).toHaveCSS("border-radius", "20px");
+  await expect(previewItem).toHaveCSS("padding-left", "32px");
+  await expect(previewItem).toHaveCSS("padding-right", "32px");
+  await expect(previewItem).toHaveCSS("font-weight", "700");
+  await expect(previewItem).toHaveCSS("font-style", "italic");
+  await expect(previewItem).toHaveCSS("letter-spacing", "2.5px");
+  await page.screenshot({ path: test.info().outputPath("textbox-features.png") });
   await page.locator('[data-option-inspector-tab="effects"]').click();
   await waitForOptionsSave(page, async () => {
     await page.locator('[data-textbox-feature="staggered_entrance"] + .boolean-display').click();
@@ -2467,6 +2484,25 @@ test("textbox appearance profiles are reusable, previewed, and persisted", async
   const profilesResponse = await page.request.get(`${editorUrl}/api/textbox-profiles`);
   const profileData = await profilesResponse.json();
   expect(profileData.profiles.find((profile) => profile.ID === created.ID).Name).toBe("Smoke Glass");
+  await reloadAndWaitForProject(page);
+  await page.locator('#nodeList [data-node-path="options_lab"]').dispatchEvent("click");
+  await page.getByRole("button", { name: "選項", exact: true }).click();
+  if (!await page.locator('.option-builder[data-workspace-mode="canvas"]').count()) {
+    await page.locator(".option-workspace-divider").click();
+  }
+  await expect(page.locator(".option-transition-overlay")).toHaveCount(0);
+  await expect(page.locator('[data-option-inspector-tab="effects"]')).toHaveCount(1);
+  await expect(previewItem).toHaveCSS("border-radius", "20px");
+  await expect(previewItem).toHaveCSS("font-weight", "700");
+  await expect(previewItem).toHaveCSS("font-style", "italic");
+  await expect(previewItem).toHaveCSS("letter-spacing", "2.5px");
+  await expect(previewItem).toHaveCSS("padding-left", "32px");
+  await page.locator('[data-option-inspector-tab="effects"]').click();
+  await waitForOptionsSave(page, async () => {
+    await page.locator('[data-textbox-feature="text_italic"] + .boolean-display').click();
+  });
+  await expect(previewItem).toHaveCSS("font-style", "normal");
+  expect(errors).toEqual([]);
 });
 
 test("dynamic English surfaces render localized strings correctly across all workspaces", async ({ page }) => {
@@ -2563,6 +2599,24 @@ test("shared drag sorting persists Event rules, Options, and Memory order", asyn
   await expect(page.locator("#effectList .effect-row")).toHaveCount(2);
   await expect(page.locator('.weighted-choice-table:has([name="contentRepresentation"]) .weight-row')).toHaveCount(2);
   await expect(page.locator('.weighted-choice-table:has([name="nextRepresentation"]) .weight-row')).toHaveCount(2);
+  const eventCardRhythm = await page.evaluate(() => {
+    const effect = document.querySelector("#effectList > .effect-row");
+    const content = document.querySelector('.weighted-choice-table:has([name="contentRepresentation"]) .content-weight-row');
+    const contentControls = [...content.querySelectorAll('.select-choice-trigger, input[name="contentWeightedValue"]')];
+    return {
+      effectHeight: effect.getBoundingClientRect().height,
+      contentHeight: content.getBoundingClientRect().height,
+      contentControlHeights: contentControls.map((control) => control.getBoundingClientRect().height),
+      effectBackground: getComputedStyle(effect).backgroundColor,
+      contentBackground: getComputedStyle(content).backgroundColor,
+      effectRadius: getComputedStyle(effect).borderRadius,
+      contentRadius: getComputedStyle(content).borderRadius,
+    };
+  });
+  expect(eventCardRhythm.contentHeight).toBe(eventCardRhythm.effectHeight);
+  expect(eventCardRhythm.contentControlHeights).toEqual([38, 38]);
+  expect(eventCardRhythm.contentBackground).toBe(eventCardRhythm.effectBackground);
+  expect(eventCardRhythm.contentRadius).toBe(eventCardRhythm.effectRadius);
   const groupedCondition = page.locator("#conditionList .condition-row").first();
   await expect.poll(() => groupedCondition.evaluate((row) => getComputedStyle(row).borderColor))
     .toBe("rgba(0, 0, 0, 0)");

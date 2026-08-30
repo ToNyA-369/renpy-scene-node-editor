@@ -27,6 +27,11 @@ init -100 python:
         "hover_accent": {"Enabled": False, "Color": "#5c7265", "Width": 6},
         "hover_text_color": {"Enabled": False, "Color": "#ffffff"},
         "item_border": {"Enabled": False, "Color": "#ffffff33", "Width": 1},
+        "item_corners": {"Enabled": False, "Radius": 12},
+        "text_padding": {"Enabled": False, "X": 24},
+        "text_bold": {"Enabled": False},
+        "text_italic": {"Enabled": False},
+        "text_spacing": {"Enabled": False, "Spacing": 0},
         "text_shadow": {"Enabled": False, "Color": "#00000088", "Size": 2, "X": 0, "Y": 2},
         "text_outline": {"Enabled": False, "Color": "#000000cc", "Size": 1},
         "staggered_entrance": {"Enabled": False, "Distance": 18, "Delay": 0.04, "Duration": 0.22},
@@ -51,7 +56,7 @@ init -100 python:
         if isinstance(value, bool):
             raise ValueError("boolean is not a profile number")
         result = float(value)
-        if result < minimum or result > maximum:
+        if not math.isfinite(result) or result < minimum or result > maximum:
             raise ValueError("profile number is out of range")
         return int(result) if integer else result
 
@@ -98,7 +103,13 @@ init -100 python:
                 elif feature_id == "text_outline":
                     feature["Color"] = str(raw.get("Color") or feature["Color"])
                     feature["Size"] = scene_textbox_profile_number(raw.get("Size", feature["Size"]), 0, 20, True)
-                else:
+                elif feature_id == "item_corners":
+                    feature["Radius"] = scene_textbox_profile_number(raw.get("Radius", feature["Radius"]), 0, 200, True)
+                elif feature_id == "text_padding":
+                    feature["X"] = scene_textbox_profile_number(raw.get("X", feature["X"]), 0, 200, True)
+                elif feature_id == "text_spacing":
+                    feature["Spacing"] = scene_textbox_profile_number(raw.get("Spacing", feature["Spacing"]), -5, 30)
+                elif feature_id == "staggered_entrance":
                     feature["Distance"] = scene_textbox_profile_number(raw.get("Distance", feature["Distance"]), -200, 200, True)
                     feature["Delay"] = scene_textbox_profile_number(raw.get("Delay", feature["Delay"]), 0, 1)
                     feature["Duration"] = scene_textbox_profile_number(raw.get("Duration", feature["Duration"]), 0, 3)
@@ -935,17 +946,80 @@ init -100 python:
         return result
 
 
-    def scene_option_item_background(color, border, width, height):
+    def scene_option_text_properties(node_id, element):
+        # Disabled features leave creator/theme typography untouched.
+        properties = {}
+        for feature_id, property_name in (("text_bold", "bold"), ("text_italic", "italic")):
+            if scene_option_textbox_feature(element, feature_id).get("Enabled", False):
+                properties[property_name] = True
+        spacing = scene_option_textbox_feature(element, "text_spacing")
+        if spacing.get("Enabled", False):
+            properties["kerning"] = float(spacing.get("Spacing", 0)) * min(scene_option_scale(node_id))
+        return properties
+
+
+    def scene_option_text_padding(node_id, element, width):
+        padding = scene_option_textbox_feature(element, "text_padding")
+        if not padding.get("Enabled", False):
+            return {}
+        value = int(round(float(padding.get("X", 24)) * scene_option_scale(node_id)[0]))
+        return {"xpadding": max(0, min(value, (width - 1) // 2))}
+
+
+    def scene_option_item_background(color, border, width, height, radius=0):
+        radius = max(0, min(float(radius), width / 2.0, height / 2.0))
+        if radius:
+            # SVG keeps rounded edges antialiased, and im.Data shares Ren'Py's
+            # image cache. Only the stroke paints the border, never the center.
+            def svg_color(value):
+                rgba = Color(value).rgba
+                return "rgb({},{},{})".format(*(int(round(c * 255)) for c in rgba[:3])), rgba[3]
+
+            fill, alpha = svg_color(color)
+            shapes = '<rect width="{}" height="{}" rx="{}" fill="{}" fill-opacity="{}"/>'.format(width, height, radius, fill, alpha)
+            if border.get("Enabled", False):
+                thickness = max(1, min(int(border.get("Width", 1)), width / 2.0, height / 2.0))
+                stroke, stroke_alpha = svg_color(border.get("Color", "#ffffff33"))
+                def outline(x, y, w, h, r):
+                    return "M {0},{1} H {2} A {8},{8} 0 0 1 {3},{4} V {5} A {8},{8} 0 0 1 {2},{6} H {0} A {8},{8} 0 0 1 {7},{5} V {4} A {8},{8} 0 0 1 {0},{1} Z".format(x + r, y, x + w - r, x + w, y + r, y + h - r, y + h, x, r)
+
+                ring = outline(0, 0, width, height, radius)
+                if width > thickness * 2 and height > thickness * 2:
+                    ring += " " + outline(thickness, thickness, width - thickness * 2, height - thickness * 2, max(0, radius - thickness))
+                # An even-odd ring stays inside the outer corners, including
+                # borders thicker than the radius and very small Items.
+                shapes += '<path d="{}" fill="{}" fill-opacity="{}" fill-rule="evenodd"/>'.format(ring, stroke, stroke_alpha)
+            svg = '<svg xmlns="http://www.w3.org/2000/svg" width="{}" height="{}">{}</svg>'.format(width, height, shapes)
+            return im.Data(svg.encode("utf-8"), "scene-item.svg")
         if not border.get("Enabled", False):
             return Solid(color)
         border_width = max(1, min(int(border.get("Width", 1)), width // 2, height // 2))
-        inner_width = max(1, width - border_width * 2)
-        inner_height = max(1, height - border_width * 2)
-        return Composite(
-            (width, height),
-            (0, 0), Solid(border.get("Color", "#ffffff33"), xsize=width, ysize=height),
-            (border_width, border_width), Solid(color, xsize=inner_width, ysize=inner_height),
-        )
+        # Match CSS borders: keep the Item fill underneath, and paint only the
+        # perimeter. A full border-colored backing leaks through translucent fills.
+        border_color = border.get("Color", "#ffffff33")
+        horizontal = min(border_width, height)
+        vertical = min(border_width, width)
+        bottom = max(horizontal, height - horizontal)
+        right = max(vertical, width - vertical)
+        layers = [(0, 0), Solid(color, xsize=width, ysize=height)]
+        strips = [
+            (0, 0, width, horizontal),
+            (0, bottom, width, height - bottom),
+            (0, horizontal, vertical, bottom - horizontal),
+            (right, horizontal, width - right, bottom - horizontal),
+        ]
+        for x, y, strip_width, strip_height in strips:
+            if strip_width > 0 and strip_height > 0:
+                layers.extend([(x, y), Solid(border_color, xsize=strip_width, ysize=strip_height)])
+        return Composite((width, height), *layers)
+
+
+    def scene_option_item_accent(color, accent_width, width, height, radius):
+        accent = Transform(Solid(color), xsize=min(accent_width, width), xalign=0.0)
+        if not radius:
+            return accent
+        return AlphaMask(Composite((width, height), (0, 0), accent),
+                         scene_option_item_background("#ffffff", {}, width, height, radius))
 
 
     def scene_option_composite_color(base, overlay):

@@ -4246,6 +4246,13 @@ body *::-webkit-scrollbar {
   border-color: var(--accent);
 }
 
+/* Content rows share the same 38px control rhythm as Conditions and Effects. */
+.weighted-choice-table .content-weight-row .select-choice-trigger,
+.weighted-choice-table .content-weight-row input[name="contentWeightedValue"] {
+  height: var(--control-height);
+  min-height: var(--control-height);
+}
+
 @media (prefers-reduced-motion: reduce) {
   #conditionList .repeat-row,
   #effectList .repeat-row,
