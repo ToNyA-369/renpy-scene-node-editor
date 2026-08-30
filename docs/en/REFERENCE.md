@@ -153,6 +153,11 @@ Appearance profiles are creator-owned, project-wide data. Each file has this for
     "hover_accent": { "Enabled": true, "Color": "#5c7265", "Width": 6 },
     "hover_text_color": { "Enabled": false, "Color": "#ffffff" },
     "item_border": { "Enabled": false, "Color": "#ffffff33", "Width": 1 },
+    "item_corners": { "Enabled": false, "Radius": 12 },
+    "text_padding": { "Enabled": false, "X": 24 },
+    "text_bold": { "Enabled": false },
+    "text_italic": { "Enabled": false },
+    "text_spacing": { "Enabled": false, "Spacing": 0 },
     "text_shadow": { "Enabled": false, "Color": "#00000088", "Size": 2, "X": 0, "Y": 2 },
     "text_outline": { "Enabled": false, "Color": "#000000cc", "Size": 1 },
     "staggered_entrance": { "Enabled": true, "Distance": 18, "Delay": 0.04, "Duration": 0.22 }
@@ -162,7 +167,21 @@ Appearance profiles are creator-owned, project-wide data. Each file has this for
 
 The optional non-negative `Order` on an appearance profile controls only the profile manager's list order. Runtime ignores it while resolving appearance.
 
-The six features provide a hover-side accent, hover text color, Item border, text shadow, text outline, and staggered item entrance whenever an Options interaction opens. Newly introduced features default to disabled when absent from an older profile. Editor and Runtime consume the same parameters. Profile ID and filename must match, and referenced profiles cannot be deleted. The Installer creates only the empty directory and never overwrites its files.
+The original six features provide a hover-side accent, hover text color, Item border, text shadow, text outline, and staggered item entrance whenever an Options interaction opens. Newly introduced features default to disabled when absent from an older profile. Editor and Runtime consume the same parameters. Profile ID and filename must match, and referenced profiles cannot be deleted. The Installer creates only the empty directory and never overwrites its files.
+
+The Item border paints only the perimeter. Its `Color` alpha does not change the interior background or text opacity, in either idle or hover states. Border pixels composite normally over the underlying background.
+
+Five additional optional features use the same profile and per-Textbox switches:
+
+| Feature | Parameters | Behavior |
+| --- | --- | --- |
+| `item_corners` | `Radius`: integer 0–200, default 12 | Rounds Item fill, border and hover accent; radius is capped at half the Item's size. Click bounds remain rectangular. |
+| `text_padding` | `X`: integer 0–200, default 24 | Insets text equally from both horizontal edges; Runtime clamps it to keep a positive content width. |
+| `text_bold` | `Enabled` only | Bold text. |
+| `text_italic` | `Enabled` only | Italic text. |
+| `text_spacing` | `Spacing`: number −5–30, default 0 | Negative values tighten spacing; positive values loosen it. |
+
+Lengths are expressed in Options canvas pixels and scaled in the game. All five default to disabled; disabled features preserve the previous preview/theme styling. Font appearance depends on the game's font. These options affect presentation only, not Trigger, ordering, or saved-game state.
 
 ### Picture
 

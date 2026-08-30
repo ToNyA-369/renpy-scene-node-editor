@@ -17,6 +17,11 @@
     "hover_accent",
     "hover_text_color",
     "item_border",
+    "item_corners",
+    "text_padding",
+    "text_bold",
+    "text_italic",
+    "text_spacing",
     "text_shadow",
     "text_outline",
     "staggered_entrance",
@@ -26,6 +31,11 @@
     hover_accent: Object.freeze({ Enabled: false, Color: "#5c7265", Width: 6 }),
     hover_text_color: Object.freeze({ Enabled: false, Color: "#ffffff" }),
     item_border: Object.freeze({ Enabled: false, Color: "#ffffff33", Width: 1 }),
+    item_corners: Object.freeze({ Enabled: false, Radius: 12 }),
+    text_padding: Object.freeze({ Enabled: false, X: 24 }),
+    text_bold: Object.freeze({ Enabled: false }),
+    text_italic: Object.freeze({ Enabled: false }),
+    text_spacing: Object.freeze({ Enabled: false, Spacing: 0 }),
     text_shadow: Object.freeze({ Enabled: false, Color: "#00000088", Size: 2, X: 0, Y: 2 }),
     text_outline: Object.freeze({ Enabled: false, Color: "#000000cc", Size: 1 }),
     staggered_entrance: Object.freeze({ Enabled: false, Distance: 18, Delay: 0.04, Duration: 0.22 }),
@@ -64,6 +74,20 @@
     };
   }
 
+  function itemTypographyCss(element, profiles) {
+    const feature = (id) => resolveFeature(element, id, profiles);
+    const corners = feature("item_corners");
+    const padding = feature("text_padding");
+    const spacing = feature("text_spacing");
+    return [
+      corners.Enabled ? `border-radius:${Number(corners.Radius)}px` : "",
+      padding.Enabled ? `padding-inline:${Number(padding.X)}px` : "",
+      feature("text_bold").Enabled ? "font-weight:700" : "",
+      feature("text_italic").Enabled ? "font-style:italic" : "",
+      spacing.Enabled ? `letter-spacing:${Number(spacing.Spacing)}px` : "",
+    ].filter(Boolean).join(";");
+  }
+
   function withProfile(element, profileId, profiles = []) {
     const next = JSON.parse(JSON.stringify(element || {}));
     const id = String(profileId || "").trim();
@@ -85,6 +109,7 @@
     DEFAULT_STYLE,
     FEATURE_DEFAULTS,
     FEATURE_IDS,
+    itemTypographyCss,
     profileMap,
     resolveFeature,
     resolveStyle,

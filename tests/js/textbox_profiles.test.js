@@ -35,6 +35,24 @@ test("new optional effects remain disabled for older profiles", () => {
   assert.equal(profiles.resolveFeature(element, "hover_text_color", [glass]).Enabled, false);
   assert.equal(profiles.resolveFeature(element, "item_border", [glass]).Width, 1);
   assert.equal(profiles.resolveFeature(element, "text_outline", [glass]).Size, 1);
+  assert.equal(profiles.itemTypographyCss(element, [glass]), "");
+  for (const id of ["item_corners", "text_padding", "text_bold", "text_italic", "text_spacing"]) {
+    assert.equal(profiles.resolveFeature(element, id, [glass]).Enabled, false);
+  }
+});
+
+test("item typography previews all five features and honors individual overrides", () => {
+  const profile = { ...glass, Features: {
+    item_corners: { Enabled: true, Radius: 20 },
+    text_padding: { Enabled: true, X: 0 },
+    text_bold: { Enabled: true }, text_italic: { Enabled: true },
+    text_spacing: { Enabled: true, Spacing: -1.5 },
+  } };
+  const element = { Appearance: { Profile: glass.ID } };
+  assert.equal(profiles.itemTypographyCss(element, [profile]), "border-radius:20px;padding-inline:0px;font-weight:700;font-style:italic;letter-spacing:-1.5px");
+  element.Appearance.Features = Object.fromEntries(Object.keys(profile.Features).map((id) => [id, false]));
+  assert.equal(profiles.itemTypographyCss(element, [profile]), "");
+  assert.equal(profiles.itemTypographyCss(element, []), "");
 });
 
 test("missing profiles fall back to inline style and disable profile features", () => {

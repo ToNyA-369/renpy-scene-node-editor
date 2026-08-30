@@ -161,11 +161,13 @@ Options 工作區分成兩種共用同一份草稿的模式。表單採左小右
 
 Options 沒有條件運算式、不可操作狀態或 CUSTOM Screen 來源。所有顯示的選項都可操作；條件、fallback 與節點分流統一由 Events 和 Scene Nodes 負責。`Options.json` Version 2 在 Element 與 TEXTBOX Item 增加 `Availability: ALWAYS | CONTROLLED`；Version 3 新增可選的 TEXTBOX `Appearance`，引用 `DATA/TEXTBOX_PROFILES/<profile_id>.json`。Version 1／2 在下次儲存正規化為 Version 3，未套用設定檔時外觀不變。PICTURE／HITBOX 只控制 Element；TEXTBOX 可控制整列及個別 Item。Item 顯示需要父 Element 與自身都可用，父層停用保留子狀態，空 TEXTBOX 自動隱藏。
 
-Textbox 外觀設定檔是專案共用、創作者擁有的 Version 1 JSON，每檔保存穩定 ID、Name、完整基礎 Style 與六種特性設定：`hover_accent`、`hover_text_color`、`item_border`、`text_shadow`、`text_outline`、`staggered_entrance`。新增特性在舊檔缺值時必須預設停用。TEXTBOX 只保存 Profile ID、Feature enabled override 與稀疏 `Style Overrides`；解析順序是預設 → Profile → Element override → Item `Style Override`。Editor 預覽與 Runtime 必須共用這個優先序。缺失／壞檔回退 Element `Style` 並由 Validation 回報；引用中的 Profile 不可刪除。Installer 只建立 `DATA/TEXTBOX_PROFILES/`，不得覆寫內容。這仍是資料化 Options Renderer，不能藉設定檔加入條件、Event 選擇或任意 Ren'Py 程式碼。
+Textbox 外觀設定檔是專案共用、創作者擁有的 Version 1 JSON，每檔保存穩定 ID、Name、完整基礎 Style 與十一種特性設定：`hover_accent`、`hover_text_color`、`item_border`、`text_shadow`、`text_outline`、`staggered_entrance`、`item_corners`、`text_padding`、`text_bold`、`text_italic`、`text_spacing`。新增特性在舊檔缺值時必須預設停用。TEXTBOX 只保存 Profile ID、Feature enabled override 與稀疏 `Style Overrides`；解析順序是預設 → Profile → Element override → Item `Style Override`。Editor 預覽與 Runtime 必須共用這個優先序。缺失／壞檔回退 Element `Style` 並由 Validation 回報；引用中的 Profile 不可刪除。Installer 只建立 `DATA/TEXTBOX_PROFILES/`，不得覆寫內容。這仍是資料化 Options Renderer，不能藉設定檔加入條件、Event 選擇或任意 Ren'Py 程式碼。
 
 Runtime 以獨立 `scene_enabled_options` 保存受控目標，不污染 Stats／Memories。狀態採 reassignment 以支援 Ren'Py save／rollback，不因 REDO、GOTO、REPLACE、EXIT 自動重設，`scene_reset_state()` 開新遊戲時清空。Option Effect 只能控制 Event 所屬 Options 作用域：實際 Scene Node Event 只能控制同一節點，Global Event 只能控制 `__global__`；所有跨作用域引用都由 Editor、API 與 Runtime 拒絕。Editor 的 Effect 階層選單只顯示目前作用域的 Element／Item Name，JSON 仍保存穩定 Node／Element／Item ID。API 專案檢查及 Element／Item 刪除保護都必須包含 Option Effect。
 
 Options Renderer 會把目前節點與 Global Options 合併後依 Element `Z Order` 穩定升冪建立 Ren'Py `Fixed` 子項；較大的值最後繪製，並在重疊區域優先接收 Pointer。相同 `Z Order` 保留作用域與 Element 陣列順序，較後方者在上。PICTURE 啟用 Alpha Hit Test 時，透明像素仍可讓下層接收互動。
+
+`scene_option_item_background()` 以完整 Item 背景加上四條不重疊的邊緣繪製 `item_border`；啟用圓角時改用 `im.Data` SVG 背景與 even-odd 邊框環，並以圓角遮罩裁切 Hover 強調條。不可使用整塊外框色墊底，否則會透過半透明背景污染中央；idle／hover 共用此規則。`text_padding`、`text_bold`、`text_italic`、`text_spacing` 在停用時不覆寫 Ren'Py 主題屬性，啟用時使用明確的文字／按鈕屬性；零與負字距不可經過最小為 1 的 `scene_option_pixel()`。Editor 預覽屬性由 `SceneTextboxProfiles.itemTypographyCss()` 產生。`test_textbox_profiles.py` 覆蓋透明度、邊框環、小尺寸、參數邊界與縮放；JS／Browser 測試涵蓋五项特性、個別開關與 reload。
 
 ## 6. 編輯器目前狀態
 

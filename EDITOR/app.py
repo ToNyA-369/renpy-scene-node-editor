@@ -83,6 +83,11 @@ TEXTBOX_FEATURE_DEFAULTS = {
     "hover_accent": {"Enabled": False, "Color": "#5c7265", "Width": 6},
     "hover_text_color": {"Enabled": False, "Color": "#ffffff"},
     "item_border": {"Enabled": False, "Color": "#ffffff33", "Width": 1},
+    "item_corners": {"Enabled": False, "Radius": 12},
+    "text_padding": {"Enabled": False, "X": 24},
+    "text_bold": {"Enabled": False},
+    "text_italic": {"Enabled": False},
+    "text_spacing": {"Enabled": False, "Spacing": 0},
     "text_shadow": {"Enabled": False, "Color": "#00000088", "Size": 2, "X": 0, "Y": 2},
     "text_outline": {"Enabled": False, "Color": "#000000cc", "Size": 1},
     "staggered_entrance": {"Enabled": False, "Distance": 18, "Delay": 0.04, "Duration": 0.22},
@@ -538,9 +543,13 @@ def clean_asset_path(value):
 
 def number_setting(value, fallback, field, minimum=None, maximum=None, integer=False):
     try:
+        if isinstance(value, bool):
+            raise ValueError("boolean is not a number")
         result = float(value)
     except (TypeError, ValueError):
         raise ApiError(HTTPStatus.BAD_REQUEST, tr("{field} 必須是數字。", field=field))
+    if not math.isfinite(result):
+        raise ApiError(HTTPStatus.BAD_REQUEST, tr("{field} 必須是有限數字。", field=field))
     if minimum is not None and result < minimum:
         raise ApiError(HTTPStatus.BAD_REQUEST, tr("{field} 不可小於 {minimum}。", field=field, minimum=minimum))
     if maximum is not None and result > maximum:
@@ -590,7 +599,13 @@ def validate_textbox_feature(feature_id, value):
     elif feature_id == "text_outline":
         result["Color"] = str(raw.get("Color") or result["Color"])
         result["Size"] = number_setting(raw.get("Size", result["Size"]), result["Size"], "Text Outline Size", minimum=0, maximum=20, integer=True)
-    else:
+    elif feature_id == "item_corners":
+        result["Radius"] = number_setting(raw.get("Radius", result["Radius"]), result["Radius"], "Item Corner Radius", minimum=0, maximum=200, integer=True)
+    elif feature_id == "text_padding":
+        result["X"] = number_setting(raw.get("X", result["X"]), result["X"], "Text Padding", minimum=0, maximum=200, integer=True)
+    elif feature_id == "text_spacing":
+        result["Spacing"] = number_setting(raw.get("Spacing", result["Spacing"]), result["Spacing"], "Text Spacing", minimum=-5, maximum=30)
+    elif feature_id == "staggered_entrance":
         result["Distance"] = number_setting(raw.get("Distance", result["Distance"]), result["Distance"], "Entrance Distance", minimum=-200, maximum=200, integer=True)
         result["Delay"] = number_setting(raw.get("Delay", result["Delay"]), result["Delay"], "Entrance Delay", minimum=0, maximum=1)
         result["Duration"] = number_setting(raw.get("Duration", result["Duration"]), result["Duration"], "Entrance Duration", minimum=0, maximum=3)

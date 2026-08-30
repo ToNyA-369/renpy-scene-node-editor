@@ -160,6 +160,11 @@ Global Event prepare 同時保存 `owner_node_id = "__global__"` 與 `node_id = 
     "hover_accent": { "Enabled": true, "Color": "#5c7265", "Width": 6 },
     "hover_text_color": { "Enabled": false, "Color": "#ffffff" },
     "item_border": { "Enabled": false, "Color": "#ffffff33", "Width": 1 },
+    "item_corners": { "Enabled": false, "Radius": 12 },
+    "text_padding": { "Enabled": false, "X": 24 },
+    "text_bold": { "Enabled": false },
+    "text_italic": { "Enabled": false },
+    "text_spacing": { "Enabled": false, "Spacing": 0 },
     "text_shadow": { "Enabled": false, "Color": "#00000088", "Size": 2, "X": 0, "Y": 2 },
     "text_outline": { "Enabled": false, "Color": "#000000cc", "Size": 1 },
     "staggered_entrance": { "Enabled": true, "Distance": 18, "Delay": 0.04, "Duration": 0.22 }
@@ -169,7 +174,21 @@ Global Event prepare 同時保存 `owner_node_id = "__global__"` 與 `node_id = 
 
 外觀設定檔的可選 `Order` 是 Editor-only 非負整數，只決定設定檔管理清單順序；Runtime 解析外觀時忽略它。
 
-六個特性分別控制 Hover 側邊強調條、Hover 文字色、Item 邊框、文字陰影、文字描邊，以及每次 Options interaction 開啟時的逐項進場。舊設定檔缺少新增特性時一律視為停用。編輯器與 Runtime 使用相同參數。設定檔 ID 與檔名必須一致；仍被 Text Box 引用時不可刪除。Installer 只會建立空資料夾，不會覆寫這些檔案。
+原有六個特性分別控制 Hover 側邊強調條、Hover 文字色、Item 邊框、文字陰影、文字描邊，以及每次 Options interaction 開啟時的逐項進場。舊設定檔缺少新增特性時一律視為停用。編輯器與 Runtime 使用相同參數。設定檔 ID 與檔名必須一致；仍被 Text Box 引用時不可刪除。Installer 只會建立空資料夾，不會覆寫這些檔案。
+
+Item 邊框只繪製於四周，`Color` 的透明度不會改變 Item 中央的背景或文字透明度；一般與 Hover 狀態皆相同。邊框所在像素會與原本背景正常疊色。
+
+新增五個可選特性，沿用設定檔與個別 Textbox 的開關：
+
+| 特性 | 參數 | 行為 |
+| --- | --- | --- |
+| `item_corners` | `Radius`：整數 0–200，預設 12 | Item 背景、邊框與懸停強調條一起圓角化；半徑不超過 Item 尺寸的一半。點擊範圍仍是矩形。 |
+| `text_padding` | `X`：整數 0–200，預設 24 | 文字左右等距內縮；Runtime 會限制內距，保留正數內容寬度。 |
+| `text_bold` | 僅 `Enabled` | 粗體文字。 |
+| `text_italic` | 僅 `Enabled` | 斜體文字。 |
+| `text_spacing` | `Spacing`：數值 −5–30，預設 0 | 負值縮緊字距，正值增加字距。 |
+
+長度以 Options 畫布像素為單位，在遊戲中跟隨畫布縮放。五項預設都停用；停用時保留原本預覽／主題樣式。字形呈現取決於遊戲字型。這些設定只改外觀，不改 Trigger、排列或存檔狀態。
 
 ### Picture
 
