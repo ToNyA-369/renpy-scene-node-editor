@@ -317,6 +317,34 @@ Memory：
 
 空 Conditions 仍代表無條件候選。條件只允許一層 OR-of-AND，不支援巢狀群組。
 
+### 數值欄位（Event Version 2）
+
+Stat Conditions 與 Effects 的數值支援三種格式：
+
+```json
+12
+{ "type": "stat", "id": "money" }
+{ "type": "calc", "op": "*", "left": { "type": "stat", "id": "price" }, "right": 3 }
+```
+
+每個數值欄位**最多一個**算術運算子：`+`、`-`、`*`、`/`、`%`。左右運算元只能是有限 JSON 數字（不接受字串與布林值）或平面的 Stat 引用，不接受巢狀運算、程式碼、函式與括號。除法保留小數；餘數遵循 Python 語意（結果與除數同號）。中間運算值不會被 Min/Max 限制。
+
+Condition 左側預設仍是既有 `id` 指向的 Stat；要比較固定值或運算結果時，以 `left` 取代 `id`。`value` 是右側數值，兩側各自最多一個運算子；比較運算與 AND/OR 不計入算術限制：
+
+```json
+{ "type": "stat", "left": { "type": "calc", "op": "+", "left": { "type": "stat", "id": "attack" }, "right": 5 }, "op": ">=", "value": { "type": "stat", "id": "defense" }, "clause": "and_1" }
+```
+
+Effect 的目標永遠是 `id` Stat。原有的效果操作與值的運算分開，例如 `money -= price * quantity`：
+
+```json
+{ "type": "stat", "id": "money", "op": "-", "value": { "type": "calc", "op": "*", "left": { "type": "stat", "id": "price" }, "right": { "type": "stat", "id": "quantity" } } }
+```
+
+Conditions 只讀狀態，生命週期仍先取得候選快照。Effects 在 Content 返回後，由上到下逐項計算再寫入，因此後面的 Effect 會讀到前面更新的數值。只有目標 Stat 的最終結果套用 Min/Max。字面上的零除數在儲存時拒絕；動態除數為零、引用不存在的 Stat 或非有限結果，Runtime 會顯示包含 Event 的錯誤。失敗的 Effect 不寫入目標，但已完成的 Effects 與 Once 標記不會自動回復。專案檢查包含兩側及 Effects 的 Stat 引用，也涵蓋 Global Events。
+
+Editor 儲存結構化數值或自訂左值時，會將該 Event 標記為 `Version: 2`。未修改的文件與舊數值格式不需重寫；沒有 Version 代表 1，已是 2 的事件維持 2。不改變存檔狀態格式。**使用前需一併更新專案的 Editor 與 FRAMEWORK；舊 Runtime 無法理解新的數值物件。** 新 Runtime 會拒絕未知 Event 版本。公開 `scene_change_stat()` API 仍接收已算好的數字；數值物件的求值是內部機制，不新增腳本 API。
+
 ## Effects
 
 Stat：
@@ -432,13 +460,23 @@ call scene_runtime_start("node_id")
 
 ```renpy
 $ value = scene_get_stat("money", 0)
+$ final_value = scene_change_stat("money", "+", 10)
+$ node_id = scene_current_node_id()
+$ node_name = scene_current_node_name("Unknown")
 $ scene_memory_has("memory", "has_key")
+$ tags = scene_memory_tags("quests")
 $ scene_memory_add("memory", "has_key")
 $ scene_memory_remove("memory", "has_key")
 $ scene_memory_clear("daily")
 ```
 
-不要從遊戲內容直接呼叫其他 `scene_*` 內部輔助函式。
+公開 API 是原生 Content、Screen Action、HUD 或專案專屬 `.rpy` 系統的橋接能力，不是第二套 Event 系統。能由 Event Effect 表達的 Stat／Memory 改變仍應優先寫在 Effect，讓改變保持可視、可排序並可由 Editor 檢查。顯示用 Screen expression 只應呼叫查詢 API；不要在可能重複求值的文字、ATL 或畫面渲染 expression 中修改狀態。
+
+`scene_change_stat()` 與 Stat Effect 共用 `set`、`+`、`-`、`*`、`/` 運算規則，會拒絕未知 ID、布林／非有限數字、非法 operation 與除以零，結果受 Stat Min／Max 限制並回傳最終值。所有失敗都不留下部分修改。若 Content 與同一 Event 的 Effects 修改同一 Stat，順序是 Content 中的 API 呼叫先發生，Content `return` 後再由 Effects 從上到下套用。
+
+`scene_current_node_id()` 在 Runner 未啟動或第一層 EXIT 後回傳 `None`；`scene_current_node_name(default)` 在相同情況回傳 default，有目前節點時回傳 Name，缺少 Name 則回退穩定 ID。兩者都不提供 Stack 修改能力。`scene_memory_tags()` 會驗證 Bank 並回傳保留插入順序的 tuple 快照，修改該回傳值不會影響 Runtime。
+
+不要從遊戲內容直接呼叫其他 `scene_*` 內部輔助函式，也不要直接修改 `scene_stats`、`scene_memories`、`scene_stack` 或 `scene_catalog`。
 
 ## Ren'Py Screen
 

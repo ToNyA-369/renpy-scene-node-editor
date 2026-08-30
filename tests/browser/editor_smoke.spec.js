@@ -368,6 +368,249 @@ test.afterAll(() => {
   if (projectRoot) fs.rmSync(projectRoot, { recursive: true, force: true });
 });
 
+test("numeric expressions author through shared pickers and persist across reload", async ({ page }) => {
+  const errors = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  page.on("console", (message) => { if (message.type() === "error") errors.push(message.text()); });
+  const seeded = await page.request.post(`${editorUrl}/api/events`, { data: { node: "branch_lab", event: {
+    ID: "arithmetic_browser", Name: "Arithmetic browser", Trigger: "Auto:Enter",
+    Conditions: [{ type: "stat", id: "test_actions", op: ">=", value: 1 }],
+    Effects: [{ type: "stat", id: "test_actions", op: "+", value: 1 }],
+  } } });
+  expect(seeded.ok()).toBe(true);
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.goto(editorUrl);
+  await openNodeSidebar(page);
+  await page.locator('#nodeList [data-node-path="branch_lab"]').click();
+  await page.locator('.tab[data-tab="events"]').click();
+  await page.locator('[data-event-id="arithmetic_browser"]').click();
+
+  const picker = (name) => page.locator(`#eventForm select[name="${name}"]`).locator("xpath=..").getByRole("combobox");
+  async function selectMode(name, label) {
+    await picker(name).click();
+    await waitForEventSave(page, () => page.getByRole("option", { name: label, exact: true }).click());
+    await expect(picker(name)).toBeFocused();
+  }
+  await selectMode("conditionValueSource", "簡單運算");
+  await expect(picker("conditionValueSource")).toHaveValue("ƒx");
+  await expect(picker("conditionValueSource")).toHaveAttribute("title", "簡單運算");
+  await selectMode("conditionValueLeftSource", "Stat");
+  await waitForEventSave(page, () => page.locator('[name="conditionValueRight"]').fill("2"));
+  await selectMode("conditionIdSource", "簡單運算");
+  await waitForEventSave(page, () => page.locator('[name="conditionIdRight"]').fill("3"));
+  await picker("effectValueSource").click();
+  await page.keyboard.press("ArrowDown");
+  await page.keyboard.press("ArrowDown");
+  await waitForEventSave(page, () => page.keyboard.press("Enter"));
+  await expect(page.locator('[name="effectValueSource"]')).toHaveValue("calc");
+  await selectMode("effectValueLeftSource", "Stat");
+  await waitForEventSave(page, () => changeSelect(page, "effectValueOperator", "*"));
+  await waitForEventSave(page, () => page.locator('[name="effectValueRight"]').fill("4"));
+  await expect(page.locator('[name="effectValueLeftSource"] option[value="calc"]')).toHaveCount(0);
+  for (const width of [1440, 1280, 1024, 760]) {
+    await page.setViewportSize({ width, height: 1000 });
+    const geometry = await page.locator(".numeric-stat-row").evaluateAll((rows) => rows.map((row) => {
+      const fields = row.querySelector(".rule-fields");
+      const controls = [...row.querySelectorAll('input:not([hidden]), .row-button')];
+      const centers = controls.map((control) => {
+        const rect = control.getBoundingClientRect();
+        return rect.y + rect.height / 2;
+      });
+      return {
+        centerSpread: Math.max(...centers) - Math.min(...centers),
+        horizontalOverflow: fields.scrollWidth - fields.clientWidth,
+        scrollable: getComputedStyle(fields).overflowX === "auto",
+      };
+    }));
+    expect(geometry.every((row) => row.centerSpread <= 1), JSON.stringify({ width, geometry })).toBe(true);
+    if (width >= 1280) expect(geometry.every((row) => row.horizontalOverflow <= 1), JSON.stringify({ width, geometry })).toBe(true);
+    else expect(geometry.every((row) => row.scrollable)).toBe(true);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  }
+  // The last operand remains editable via keyboard/scrolling in the single-line narrow row.
+  await picker("conditionValueRightSource").click();
+  const constantChoice = page.getByRole("option", { name: "固定值", exact: true });
+  await expect(constantChoice).toBeVisible();
+  expect((await constantChoice.boundingBox())?.height).toBe(38);
+  await page.keyboard.press("Escape");
+  await expect(picker("conditionValueRightSource")).toBeFocused();
+  await page.keyboard.press("Tab");
+  await expect(page.locator('[name="conditionValueRight"]')).toBeFocused();
+  const focusedBounds = await page.locator('[name="conditionValueRight"]').boundingBox();
+  expect(focusedBounds.x).toBeGreaterThanOrEqual(0);
+  expect(focusedBounds.x + focusedBounds.width).toBeLessThanOrEqual(760);
+  await waitForEventSave(page, () => page.locator('[name="conditionValueRight"]').fill("5"));
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await reloadAndWaitForProject(page);
+  await page.locator('.tab[data-tab="events"]').click();
+  await page.locator('[data-event-id="arithmetic_browser"]').click();
+  await expect(page.locator('[name="conditionValueSource"]')).toHaveValue("calc");
+  await expect(page.locator('[name="conditionIdRight"]')).toHaveValue("3");
+  await expect(page.locator('[name="effectValueRight"]')).toHaveValue("4");
+  const detail = await (await page.request.get(`${editorUrl}/api/node?path=branch_lab`)).json();
+  const saved = detail.events.find((entry) => entry.data.ID === "arithmetic_browser").data;
+  expect(saved.Version).toBe(2);
+  expect(saved.Conditions[0].left.right).toBe(3);
+  expect(saved.Conditions[0].value.right).toBe(5);
+  expect(saved.Effects[0].value.op).toBe("*");
+  expect(saved.Effects[0].value.left.type).toBe("stat");
+  expect(saved.Conditions[0].clause).toBe("and_1");
+  expect(errors).toEqual([]);
+  const removed = await page.request.delete(`${editorUrl}/api/events?node=branch_lab&id=arithmetic_browser`);
+  expect(removed.ok()).toBe(true);
+});
+
+test("type badges fit every rule and reversibly cover only their own fields", async ({ page }) => {
+  const errors = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  page.on("console", (message) => { if (message.type() === "error") errors.push(message.text()); });
+  const seeded = await page.request.post(`${editorUrl}/api/events`, { data: { node: "options_lab", event: {
+    ID: "badge_browser", Name: "Badge browser", Trigger: "Auto:Enter",
+    Conditions: [
+      { type: "stat", id: "test_actions", op: ">=", value: 1 },
+      { type: "memory", bank: "test_session", id: "branch_unlocked", op: "has" },
+    ],
+    Effects: [
+      { type: "stat", id: "test_actions", op: "+", value: 1 },
+      { type: "memory", bank: "memory", id: "badge_tag", op: "add" },
+      { type: "option", op: "enable", target: "item", node: "options_lab", element: "data_actions", item: "controlled_bonus" },
+    ],
+  } } });
+  expect(seeded.ok()).toBe(true);
+  await page.setViewportSize({ width: 1440, height: 1100 });
+  await page.goto(editorUrl);
+  await openNodeSidebar(page);
+  await page.locator('#nodeList [data-node-path="options_lab"]').click();
+  await page.locator('.tab[data-tab="events"]').click();
+  await page.locator('[data-event-id="badge_browser"]').click();
+  for (const collection of ["#conditionList", "#effectList"]) {
+    const geometry = await page.locator(`${collection} .rule-fields`).evaluateAll((scopes) => scopes.map((scope) => {
+      const rect = scope.getBoundingClientRect();
+      const badge = scope.querySelector(":scope > .type-badge input").getBoundingClientRect();
+      const blocks = [...scope.children].filter((element) => element.matches(".field, .numeric-field"));
+      const blockRects = blocks.map((element) => element.getBoundingClientRect());
+      return {
+        x: rect.x, width: rect.width, height: rect.height,
+        badgeInset: badge.x - rect.x, badgeTop: badge.y - rect.y,
+        badgeBottom: rect.bottom - badge.bottom,
+        scopeBorder: getComputedStyle(scope).borderTopWidth,
+        blockHeights: blockRects.map((block) => block.height),
+        blockGaps: blockRects.slice(1).map((block, index) => block.left - blockRects[index].right),
+        blockBorders: blocks.map((block) => {
+          const surface = block.matches(".numeric-field")
+            ? block
+            : block.querySelector(":scope > input:not([hidden]), :scope > .select-choice-picker > input");
+          return getComputedStyle(surface).borderTopWidth;
+        }),
+      };
+    }));
+    expect(new Set(geometry.map((item) => item.width)).size).toBe(1);
+    expect(new Set(geometry.map((item) => item.x)).size).toBe(1);
+    for (const item of geometry) {
+      expect(item.height).toBe(38);
+      expect(item.badgeInset).toBe(0);
+      expect(item.badgeTop).toBe(0);
+      expect(item.badgeBottom).toBe(0);
+      expect(item.scopeBorder).toBe("0px");
+      expect(item.blockHeights.every((height) => height === 38), JSON.stringify(item)).toBe(true);
+      expect(item.blockGaps.every((gap) => gap >= 5), JSON.stringify(item)).toBe(true);
+      expect(item.blockBorders.every((border) => border === "1px"), JSON.stringify(item)).toBe(true);
+    }
+  }
+  const row = page.locator('[data-badge-row="condition-0"]');
+  const shell = row.locator(".rule-fields");
+  const type = row.getByRole("combobox", { name: "條件類型", exact: true });
+  const extent = (scope) => scope.evaluate((el) => el.querySelector(":scope > .type-badge-cover").getBoundingClientRect().width);
+  const closed = await extent(shell);
+  const shellBox = await shell.boundingBox();
+  await type.click();
+  await expect.poll(() => extent(shell)).toBeCloseTo(shellBox.width, 0);
+  expect(await shell.boundingBox()).toEqual(shellBox); // Cover never moves its anchor or neighbours.
+  const choices = page.getByRole("listbox", { name: "條件類型", exact: true });
+  expect((await choices.boundingBox()).height).toBe(96);
+  await page.getByRole("option", { name: "Memory", exact: true }).click();
+  await expect(row.locator('[name="conditionType"]')).toHaveValue("memory");
+  // The new DOM resumes contraction instead of instantly losing the expanded cover.
+  expect(await shell.locator(":scope > .type-badge-cover").evaluate((el) => el.getAnimations().length)).toBeGreaterThan(0);
+  await expect.poll(() => extent(shell)).toBe(closed);
+  await expect(type).toBeFocused();
+  await waitForEventSave(page, () => row.locator('[name="conditionId"]').fill("badge_saved"));
+
+  // Return via keyboard, then test nested source scopes and interrupted cancellation.
+  await type.click();
+  await page.keyboard.press("Home");
+  await waitForEventSave(page, () => page.keyboard.press("Enter"));
+  const source = row.getByRole("combobox", { name: "比較右值 數值來源", exact: true });
+  await source.click();
+  await waitForEventSave(page, () => page.getByRole("option", { name: "簡單運算", exact: true }).click());
+  const operand = row.locator('[data-numeric-field="conditionValueLeft"]');
+  const parent = row.locator('[data-numeric-field="conditionValue"]');
+  const operandSource = operand.getByRole("combobox", { name: "左運算元 數值來源", exact: true });
+  await operandSource.click();
+  await expect.poll(() => extent(operand)).toBeCloseTo((await operand.boundingBox()).width - 2, 0);
+  expect(await extent(parent)).toBe(32);
+  await page.keyboard.press("Escape");
+  await operandSource.click();
+  await page.keyboard.press("Escape");
+  await expect.poll(() => extent(operand)).toBe(32);
+  await expect(operandSource).toBeFocused();
+  await expect(page.locator(".type-badge-open")).toHaveCount(0);
+
+  // A click outside cancels, and reduced motion keeps the same final state without travel.
+  await source.click();
+  await page.getByRole("heading", { name: "Conditions", exact: true }).click();
+  await expect.poll(() => extent(parent)).toBe(32);
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await source.click();
+  expect(await parent.locator(":scope > .type-badge-cover").evaluate((el) => el.getAnimations().length)).toBe(0);
+  await page.keyboard.press("Escape");
+  expect(await extent(parent)).toBe(32);
+
+  const effect = page.locator('[data-badge-row="effect-0"]');
+  await effect.getByRole("combobox", { name: "效果類型", exact: true }).click();
+  await waitForEventSave(page, () => page.getByRole("option", { name: "Option", exact: true }).click());
+  await expect(effect.locator('[name="effectOptionTarget"]')).toHaveCount(1);
+  await expect(effect.locator('[name="effectValue"]')).toHaveCount(0);
+  await reloadAndWaitForProject(page);
+  await openNodeSidebar(page);
+  await page.locator('#nodeList [data-node-path="options_lab"]').click();
+  await page.locator('.tab[data-tab="events"]').click();
+  await page.locator('[data-event-id="badge_browser"]').click();
+  await expect(row.locator('[name="conditionValueSource"]')).toHaveValue("calc");
+  await expect(effect.locator('[name="effectType"]')).toHaveValue("option");
+  await expect(page.locator(".type-badge-open")).toHaveCount(0);
+  expect(errors).toEqual([]);
+  expect((await page.request.delete(`${editorUrl}/api/events?node=options_lab&id=badge_browser`)).ok()).toBe(true);
+});
+
+test("choice picker focuses long menus without scrolling the surrounding row", async ({ page }) => {
+  await page.goto(editorUrl);
+  await expect(page.locator("#saveState")).toHaveText("已同步");
+  await page.evaluate(() => {
+    const scroller = document.createElement("div");
+    scroller.id = "inlinePickerScrollFixture";
+    scroller.style.cssText = "position:fixed;inset:100px auto auto 100px;width:220px;height:80px;overflow:auto;z-index:400;";
+    scroller.innerHTML = `<label style="display:block;width:600px"><select aria-label="Long inline picker">${Array.from({ length: 20 }, (_, index) => `<option value="${index}">Entry ${index}</option>`).join("")}</select></label>`;
+    document.body.append(scroller);
+  });
+  const fixture = page.locator("#inlinePickerScrollFixture");
+  const trigger = fixture.getByRole("combobox");
+  await trigger.click({ position: { x: 30, y: 18 } });
+  const menu = fixture.locator(".select-choice-menu");
+  await page.keyboard.press("End");
+  await expect(page.getByRole("option", { name: "Entry 19", exact: true })).toBeFocused();
+  expect(await menu.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+  expect(await fixture.evaluate((element) => element.scrollLeft)).toBe(0);
+  await page.keyboard.press("Home");
+  await expect(page.getByRole("option", { name: "Entry 0", exact: true })).toBeFocused();
+  // Queued scroll notifications with an unchanged anchor must not dismiss a fresh menu.
+  await fixture.evaluate((element) => element.dispatchEvent(new Event("scroll")));
+  await expect(menu).toBeVisible();
+  // A real scroll that moves the anchor still closes it, avoiding a detached floating menu.
+  await fixture.evaluate((element) => { element.scrollLeft = 40; });
+  await expect(menu).not.toBeVisible();
+});
+
 test("critical editor interactions survive reload without browser errors", async ({ page }) => {
   const browserErrors = [];
   page.on("console", (message) => {
@@ -1094,11 +1337,60 @@ test("Node overview keeps the Memory card on the shared section rhythm", async (
   expect(Math.abs(nodeOverviewGaps.memory - nodeOverviewGaps.section)).toBeLessThan(1);
 });
 
+test("Node workspace keeps its frame fixed while its content scrolls", async ({ page }) => {
+  await page.setViewportSize({ width: 1680, height: 720 });
+  await page.goto(editorUrl);
+  await expect(page.locator("#saveState")).toHaveText(/^(已同步|已自動儲存|Synced|Autosaved)$/);
+  await page.locator('[data-tab="node"]').click();
+
+  const panel = page.locator("#nodePanel");
+  const shell = panel.locator(".node-editor-shell");
+  await expect(shell).toBeVisible();
+
+  const before = await panel.evaluate((nodePanel) => {
+    const nodeShell = nodePanel.querySelector(".node-editor-shell");
+    const shellRect = nodeShell.getBoundingClientRect();
+    const markerRect = nodeShell.querySelector(".node-root-row").getBoundingClientRect();
+    return {
+      panelScrollTop: nodePanel.scrollTop,
+      shellTop: shellRect.top,
+      shellBottom: shellRect.bottom,
+      markerTop: markerRect.top,
+      shellClientHeight: nodeShell.clientHeight,
+      shellScrollHeight: nodeShell.scrollHeight,
+    };
+  });
+  expect(before.shellScrollHeight).toBeGreaterThan(before.shellClientHeight);
+
+  await shell.evaluate((nodeShell) => {
+    nodeShell.scrollTop = nodeShell.scrollHeight;
+  });
+
+  const after = await panel.evaluate((nodePanel) => {
+    const nodeShell = nodePanel.querySelector(".node-editor-shell");
+    const shellRect = nodeShell.getBoundingClientRect();
+    const markerRect = nodeShell.querySelector(".node-root-row").getBoundingClientRect();
+    return {
+      panelScrollTop: nodePanel.scrollTop,
+      shellTop: shellRect.top,
+      shellBottom: shellRect.bottom,
+      markerTop: markerRect.top,
+      shellScrollTop: nodeShell.scrollTop,
+    };
+  });
+
+  expect(after.panelScrollTop).toBe(0);
+  expect(after.shellScrollTop).toBeGreaterThan(0);
+  expect(Math.abs(after.shellTop - before.shellTop)).toBeLessThan(1);
+  expect(Math.abs(after.shellBottom - before.shellBottom)).toBeLessThan(1);
+  expect(after.markerTop).toBeLessThan(before.markerTop);
+});
+
 test("Event Memory Tag fields provide project-wide prefix suggestions", async ({ page }) => {
   await page.setViewportSize({ width: 1680, height: 900 });
   await page.goto(editorUrl);
-  await page.locator("#openSidebar").click();
-  await page.locator('#nodeList [data-node-path="options_lab"]').evaluate((button) => button.click());
+  await openNodeSidebar(page);
+  await page.locator('#nodeList [data-node-path="options_lab"]').click();
   await expect(page.locator("#nodePath")).toContainText("options_lab");
   await page.locator('[data-tab="events"]').click();
   await page.locator('[data-event-id="use_key"]').click();
@@ -1849,9 +2141,13 @@ test("keyboard authoring follows Event focus order, navigates every picker, and 
   const conditionOp = page.locator('.condition-row [name="conditionOp"]').first().locator("xpath=..").locator("[data-select-picker-toggle]");
   await expect(conditionType).toBeFocused();
   await page.keyboard.press("Tab");
+  await expect(page.locator('.condition-row [name="conditionIdSource"]').first().locator("xpath=..").locator("[data-select-picker-toggle]")).toBeFocused();
+  await page.keyboard.press("Tab");
   await expect(conditionId).toBeFocused();
   await page.keyboard.press("Tab");
   await expect(conditionOp).toBeFocused();
+  await page.keyboard.press("Tab");
+  await expect(page.locator('.condition-row [name="conditionValueSource"]').first().locator("xpath=..").locator("[data-select-picker-toggle]")).toBeFocused();
   await page.keyboard.press("Tab");
   await expect(page.locator('.condition-row [name="conditionValue"]').first()).toBeFocused();
   await page.keyboard.press("Tab");
@@ -2295,10 +2591,19 @@ test("shared drag sorting persists Event rules, Options, and Memory order", asyn
   await conditionOrSave;
   await expect(page.locator("#conditionList .condition-and-group .condition-row")).toHaveCount(1);
   await expect(page.locator("#conditionList > .condition-row")).toHaveCount(1);
-  await expect.poll(() => page.locator("#conditionList > .condition-logic-block").nth(1).evaluate((block) => {
+  await expect.poll(() => page.locator("#conditionList > .condition-logic-block").nth(1).evaluate((block) => (
+    getComputedStyle(block, "::before").content
+  ))).toBe('"OR"');
+  const orSeparatorGeometry = await page.locator("#conditionList > .condition-logic-block").nth(1).evaluate((block) => {
     const separator = getComputedStyle(block, "::before");
-    return -(Number.parseFloat(separator.top) + Number.parseFloat(separator.height));
-  })).toBeGreaterThanOrEqual(8);
+    const blockRect = block.getBoundingClientRect();
+    return {
+      gap: -(Number.parseFloat(separator.top) + Number.parseFloat(separator.height)),
+      visible: blockRect.top + Number.parseFloat(separator.top) >= document.querySelector("#conditionList").getBoundingClientRect().top,
+    };
+  });
+  expect(orSeparatorGeometry.gap).toBeGreaterThanOrEqual(8);
+  expect(orSeparatorGeometry.visible).toBe(true);
 
   const addOrSave = page.waitForResponse((candidate) => (
     candidate.url().endsWith("/api/events") && candidate.request().method() === "POST" && candidate.ok()

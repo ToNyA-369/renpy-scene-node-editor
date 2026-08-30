@@ -302,6 +302,34 @@ Operators: `has`, `not_has`. For example, `(money >= 10 AND member) OR hour >= 1
 
 An empty Conditions array remains unconditional. Condition logic is a single OR-of-AND layer and does not support nested groups.
 
+### Numeric values (Event Version 2)
+
+Stat Conditions and Effects accept these numeric values:
+
+```json
+12
+{ "type": "stat", "id": "money" }
+{ "type": "calc", "op": "*", "left": { "type": "stat", "id": "price" }, "right": 3 }
+```
+
+Each numeric field permits **at most one** arithmetic operator: `+`, `-`, `*`, `/`, `%`. Both operands must be finite JSON numbers (not strings or booleans) or flat Stat references. Nested calculations, code, functions, and parentheses are not supported. Division preserves fractions; modulo follows Python semantics (the remainder has the divisor's sign). No intermediate value is clamped.
+
+A Condition's left value is normally its existing `id` Stat. Use `left` instead of `id` to compare a constant or calculation. `value` is the right value; each side has its own one-operation limit. Comparison operators and AND/OR clauses do not count as arithmetic:
+
+```json
+{ "type": "stat", "left": { "type": "calc", "op": "+", "left": { "type": "stat", "id": "attack" }, "right": 5 }, "op": ">=", "value": { "type": "stat", "id": "defense" }, "clause": "and_1" }
+```
+
+An Effect always writes its `id` Stat. Its existing operation remains separate from the value calculation; for example, `money -= price * quantity` is:
+
+```json
+{ "type": "stat", "id": "money", "op": "-", "value": { "type": "calc", "op": "*", "left": { "type": "stat", "id": "price" }, "right": { "type": "stat", "id": "quantity" } } }
+```
+
+Conditions only read state, including lifecycle candidate snapshots. Effects evaluate their values immediately before each ordered write after Content returns, so later Effects observe earlier writes. Only the target's final result is clamped to Min/Max. Literal zero divisors are rejected on save; dynamic zero divisors, missing Stat references, and non-finite results raise Runtime errors identifying the Event. A failing Effect does not write its target; earlier Effects and the Once marker are not rolled back automatically. Validation checks Stat references on both sides and in Effects, including Global Events.
+
+The Editor promotes an Event to `Version: 2` when it saves structured numeric values or a custom left value. Untouched files and numeric-only legacy shapes remain compatible; absent Version means 1, existing Version 2 stays 2. No saved-state layout changes are needed. **Update the project's Editor and FRAMEWORK together before using this feature; older Runtimes do not understand these objects.** New Runtime rejects unknown Event versions. The public `scene_change_stat()` API still accepts an already computed number; expression evaluation is internal, not a new scripting API.
+
 ## Effects
 
 Stat:
@@ -415,13 +443,23 @@ Creator-owned Ren'Py may use:
 
 ```renpy
 $ value = scene_get_stat("money", 0)
+$ final_value = scene_change_stat("money", "+", 10)
+$ node_id = scene_current_node_id()
+$ node_name = scene_current_node_name("Unknown")
 $ scene_memory_has("memory", "has_key")
+$ tags = scene_memory_tags("quests")
 $ scene_memory_add("memory", "has_key")
 $ scene_memory_remove("memory", "has_key")
 $ scene_memory_clear("daily")
 ```
 
-Do not call other internal `scene_*` helpers from game content.
+Public APIs are bridges for native Content, Screen Actions, HUDs, and creator-owned `.rpy` systems, not a second Event system. Prefer Event Effects whenever they can express a Stat or Memory change, so mutations stay visible, ordered, and inspectable in the Editor. Display-time Screen expressions should call query APIs only; do not mutate state from text, ATL, or rendering expressions that Ren'Py may evaluate repeatedly.
+
+`scene_change_stat()` shares the Stat Effect operations `set`, `+`, `-`, `*`, and `/`. It rejects unknown IDs, booleans, non-finite numbers, unsupported operations, and division by zero; clamps the result to the Stat Min / Max; and returns the final value. Every failure is atomic. When Content and its Event Effects change the same Stat, the Content API call happens first, then Effects run from top to bottom after Content returns.
+
+`scene_current_node_id()` returns `None` before the Runner starts or after its first-level EXIT. `scene_current_node_name(default)` returns the default in those states, otherwise the creator-facing Name or the stable ID when Name is missing. Neither helper can mutate the Stack. `scene_memory_tags()` validates the bank and returns an insertion-ordered tuple snapshot that cannot mutate Runtime state.
+
+Do not call other internal `scene_*` helpers or directly mutate `scene_stats`, `scene_memories`, `scene_stack`, or `scene_catalog` from game content.
 
 ## Ren'Py Screen
 

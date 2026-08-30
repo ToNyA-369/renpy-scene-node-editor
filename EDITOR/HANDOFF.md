@@ -1,6 +1,6 @@
 # Scene Node Editor 專案交接
 
-最後整理日期：2026-08-11
+最後整理日期：2026-08-30
 
 這份文件提供給新開啟的 Codex 對話。開始修改前，先閱讀本文件及「規格來源」列出的文件，不要重新設計已經定案的遊戲架構。
 
@@ -93,6 +93,8 @@ REPLACE 是 `[父, 目前] → [父, 目標]` 的單一 Stack 操作。它先跑
 ```
 
 創作者可在編輯器「狀態」工作區新增其他記憶庫。每個庫支援檢查、新增、移除指定標籤與清空全部。記憶庫不帶硬編碼的每日／每週生命週期；換日等流程應明確呼叫 `scene_memory_clear(bank_id)`。舊 `type: "tag"` 資料在讀取時映射至預設庫，下次儲存時轉成新格式。
+
+公開 Runtime API 包含 `scene_get_stat()`、`scene_change_stat()`、`scene_current_node_id()`、`scene_current_node_name()`、`scene_memory_has()`、`scene_memory_tags()`、`scene_memory_add()`、`scene_memory_remove()` 與 `scene_memory_clear()`。`scene_change_stat()` 與 Event Stat Effect 共用同一個 `set`／`+`／`-`／`*`／`/` 核心、Min／Max 限制、reassignment 與原子錯誤契約；Content 中的呼叫先於該 Event 返回後的 Effects。`scene_memory_tags()` 只回傳有序 tuple 快照，Node 查詢只回傳 ID／Name，不暴露可變 Catalog 或 Stack。修改 API 是原生 Content、Screen Action 與專屬系統的補充橋接；能由 Editor 表達時仍優先使用 Event Effects，Screen render expression 只允許查詢。其他 `scene_*`、Runtime 集合、Event 選擇、Stack 操作、Catalog reload／reset 與 Option 控制仍是內部介面。
 
 ### 3.5 演出責任
 
@@ -199,6 +201,11 @@ Options Renderer 會把目前節點與 Global Options 合併後依 Element `Z Or
 - 前端已開始漸進式模組化：API Client、Editor Settings、Event Trigger／End up 契約、Event 規則與權重表單、Event／Stats 排序流區塊模型、共用 Pointer 即時插入與停留群組控制器、無群組清單排序控制器、共用階層下拉選單、Content 程式碼提示轉換、Node 總覽、Project Validation 及關聯圖純資料模型都有獨立模組與 Node 測試；`app.js` 保留狀態組裝與跨模組協調。
 - Content 的 Monaco／Shiki 瀏覽器資產由 `tools/build_editor_assets.mjs` 依鎖定 npm 版本與 `tools/editor_assets/renpy-language/` 的官方 grammar／snippets 產生至 `EDITOR/static/vendor/`。安裝包只帶生成資產，不需要 Node 或網路；`python3 tools/verify.py` 會檢查生成物沒有過期。進階編輯器透過隱藏 textarea 的既有 `input`／autosave 契約接線，載入失敗必須回退到可用 textarea，不可改變 Content API 或 `.rpy` 格式。第三方聲明位於 `EDITOR/THIRD_PARTY_NOTICES.md`。
 - Condition／Effect 類型、操作與預設資料形狀集中於 `state_rule_contract.js`；跨層測試會直接比較前端 registry、Editor API registry 與 Runtime 分支，新增操作不得只修改表單。
+- Event Version 2 數值欄位支援有限數字、Stat 引用及單層 `calc`（`+ - * / %`）；`ui/numeric_field.js` 負責來源切換／運算元表單／序列化，`css/workspaces/event_numeric.css` 載於 editor.css 後，沿用共用 picker。Condition `left` 取代 `id`，Effect 目標仍是 `id`；每個數值欄位最多一個運算子。Editor 儲存新格式才標記 Version 2；舊格式不批次重寫，Editor 與 FRAMEWORK 必須一起更新。
+- `validate_numeric_value` 與 Runtime `scene_numeric_value` 必須共同維護；禁止 eval／巢狀運算。Conditions 維持只讀／生命週期快照，Effects 維持 Content 後依序求值與最終寫入 clamp，沒有新增存檔狀態或 public API。動態零除數／未知引用會報錯，前面成功的 Effects 不自動回復。驗證入口：`test_runtime_numeric_expressions.py`、`test_event_api_round_trip.py`、JS event_editor 測試及 browser `numeric expressions` 路徑。
+- 數值規則的所有控制項保持同一水平中心線，來源與值合成單一框，來源以 `123`／`Stat`／`ƒx` 小標記呈現。choice picker 的 option 可用 `data-picker-label` 提供關閉時的短標籤，選單本身與 tooltip／輔助描述仍顯示完整名稱，不改變選項值。雙側運算共用單行 flex 配置；窄視窗只橫向捲動該列，不能退回堆疊，popover 與 Tab／Esc 不可被捲動框截斷。
+- Conditions／Effects 的 Stat、Memory、Option 共用 `event_numeric.css` 的單行 rule-fields 排列與 38px 高度，不再由 editor.css 的舊 ID 選擇器指定欄位高度。rule-fields 本身沒有可見外框；類型、資源、運算子與數值像 Content 權重列一樣，各自使用有間距的 surface／邊框／圓角區塊。數值來源標籤與其值仍組成一個複合區塊，計算式則將兩個運算元與算術運算子分成相鄰區塊。窄版水平捲動限於 rule-fields，外層 row 必須保持 overflow visible，避免裁掉 AND／OR 分支之間位於列外的 OR 標籤與拖移輪廓。類型及數值來源都是貼合框線的小標籤；Memory 同樣按「記憶庫 → 判斷／操作 → Tag」閱讀。`ui/type_badge.js` 只管理視覺遮片：由左向右覆蓋自己控制的完整範圍，展開時遮住區塊間距且不移動 picker anchor；取消時沿原路收回，型別更換同步重繪後以 form ID／data-badge-row／select name 接續當前遮片寬度，不能延遲資料更新或用計時器重播切換。選單仍由 choice_picker 統一處理；reduced-motion 停用位移。Browser `type badges` 覆蓋跨類型尺寸、獨立區塊間距、選取後收回、巢狀範圍、快速取消、鍵盤及 reload。
+- choice picker 聚焦選項時只捲動選單本身；全頁 scroll handler 由該模組比對開啟時的 anchor 幾何，只有欄位實際移動才關閉，避免 focus／scrollIntoView 延後送達的 scroll 事件關掉剛開啟的選單。Event Tab 欄位移動必須沿兩軸捲至 nearest，讓窄版單行欄位可見。
 - CSS 的唯一基礎 token 位於 `css/tokens.css`，瀏覽器預設位於 `css/base.css`，共用表單欄位與按鈕 primitive 位於 `css/components.css`；歷史規則保留於 `styles.css`，已抽出的工作區規則位於 `css/workspaces/`，目前 Editor shell、工作區組合與跨工作區回應式規則位於 `css/editor.css`。載入順序固定為 tokens → base → vendor → styles → components → workspace → editor；搬移時不得同時改變視覺，且 `styles.css` 不可再以 top-level `:root` 覆寫正式主題。
 - 節點刪除引用檢查與 `.scene-node-trash/` 可復原區。
 - 專案引用檢查。
@@ -323,6 +330,9 @@ EDITOR/static/js/core/state_rule_contract.js
 EDITOR/static/js/ui/choice_picker.js
   所有原生 select 的共用階層選單、任意目錄深度、鍵盤操作與定位。
 
+EDITOR/static/js/ui/type_badge.js
+  選擇器可選的標籤覆蓋動態；由 choice_picker 明確注入，僅影響 data-type-badge 標記的欄位，不持有草稿或儲存狀態。
+
 EDITOR/static/js/ui/prefix_picker.js
   Event Memory Tag 自由輸入欄位的共用前綴建議：沿用 choice picker 尺寸與選項樣式，保留滑鼠、方向鍵、Home／End、Enter、Esc 與 Tab 行為；只篩選候選，不限制新 Tag。
 
@@ -411,6 +421,9 @@ tests/test_memory_schema.py
 
 tests/test_runtime_memory.py
   Runtime Memory API、舊存檔 Tag 合併與舊 Event 相容測試。
+
+tests/test_runtime_public_api.py
+  公開 Runtime Stat 修改、目前 Node 查詢、Memory 快照、錯誤原子性，以及 Event Effect 共用運算契約。
 
 tests/test_option_availability.py
   Options Availability 遷移、Option Effect schema／引用／刪除保護，以及 Runtime Element／Item 組合、冪等操作與錯誤訊息測試。

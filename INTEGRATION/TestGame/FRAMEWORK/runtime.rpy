@@ -1,5 +1,6 @@
 init -100 python:
     import json
+    import math
     from collections.abc import Mapping
 
     SCENE_PROJECT_FILE = "DATA/SceneProject.json"
@@ -175,6 +176,10 @@ init -100 python:
             else:
                 options[node_id] = {"Version": 3, "Canvas": {}, "Elements": []}
 
+        for event in global_events + [item for pool in events.values() for item in pool]:
+            if type(event.get("Version", 1)) is not int or event.get("Version", 1) not in (1, 2):
+                raise Exception("Unsupported Event Version: {} ({})".format(event.get("Version"), event.get("ID")))
+
         return {
             "project": project,
             "stats": stats,
@@ -220,6 +225,93 @@ init -100 python:
         return scene_stats.get(stat_id, default)
 
 
+    def scene_stat_number(stat_id, value, role):
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise Exception(
+                "Stat {} {} must be a finite number: {!r}".format(stat_id, role, value)
+            )
+        if isinstance(value, float) and not math.isfinite(value):
+            raise Exception(
+                "Stat {} {} must be a finite number: {!r}".format(stat_id, role, value)
+            )
+        return value
+
+
+    def scene_change_stat(stat_id, operation, value):
+        global scene_stats
+
+        stat_id = str(stat_id or "").strip()
+        if stat_id not in scene_catalog["stats"]:
+            raise Exception("Unknown Stat ID: {}".format(stat_id))
+
+        operation = str(operation or "")
+        value = scene_stat_number(stat_id, value, "operand")
+        settings = scene_catalog["stats"][stat_id]
+        current = scene_stat_number(
+            stat_id,
+            scene_stats.get(stat_id, settings.get("Init", 0)),
+            "current value",
+        )
+
+        if operation == "set":
+            result = value
+        elif operation == "+":
+            result = current + value
+        elif operation == "-":
+            result = current - value
+        elif operation == "*":
+            result = current * value
+        elif operation == "/":
+            if value == 0:
+                raise Exception("Stat cannot divide by zero: {}".format(stat_id))
+            result = current / value
+        else:
+            raise Exception("Unknown Stat operation: {}".format(operation))
+
+        result = scene_stat_number(stat_id, result, "result")
+        minimum = scene_stat_number(stat_id, settings.get("Min", result), "minimum")
+        maximum = scene_stat_number(stat_id, settings.get("Max", result), "maximum")
+        result = max(minimum, min(maximum, result))
+        updated = dict(scene_stats)
+        updated[stat_id] = result
+        scene_stats = updated
+        return result
+
+
+    def scene_numeric_value(value, allow_calculation=True):
+        """Internal, bounded expression evaluation. Never executes creator code."""
+        if isinstance(value, Mapping):
+            if value.get("type") == "stat" and set(value) == {"type", "id"}:
+                stat_id = value["id"]
+                if not isinstance(stat_id, str) or stat_id not in scene_catalog["stats"]:
+                    raise Exception("Unknown expression Stat ID: {!r}".format(stat_id))
+                if stat_id not in scene_stats:
+                    raise Exception("Missing expression Stat value: {}".format(stat_id))
+                return scene_stat_number(stat_id, scene_stats[stat_id], "expression value")
+            if (allow_calculation and value.get("type") == "calc"
+                    and set(value) == {"type", "op", "left", "right"}):
+                left = scene_numeric_value(value["left"], False)
+                right = scene_numeric_value(value["right"], False)
+                operation = value["op"]
+                if operation in ("/", "%") and right == 0:
+                    raise Exception("Numeric expression divisor cannot be zero: {!r}".format(value))
+                if operation == "+":
+                    result = left + right
+                elif operation == "-":
+                    result = left - right
+                elif operation == "*":
+                    result = left * right
+                elif operation == "/":
+                    result = left / right
+                elif operation == "%":
+                    result = left % right
+                else:
+                    raise Exception("Unknown numeric expression operation: {!r}".format(operation))
+                return scene_stat_number("expression", result, "result")
+            raise Exception("Only one numeric operation is allowed: {!r}".format(value))
+        return scene_stat_number("expression", value, "operand")
+
+
     def scene_ensure_memory_state():
         global scene_memories
         global scene_memory_legacy_migrated
@@ -263,6 +355,12 @@ init -100 python:
         bank_id = scene_memory_bank(bank_id)
         tag_id = scene_memory_tag(tag_id)
         return tag_id in scene_memories.get(bank_id, [])
+
+
+    def scene_memory_tags(bank_id):
+        scene_ensure_memory_state()
+        bank_id = scene_memory_bank(bank_id)
+        return tuple(scene_memories.get(bank_id, []))
 
 
     def scene_memory_add(bank_id, tag_id):
@@ -314,11 +412,15 @@ init -100 python:
         if condition_type != "stat":
             return False
 
-        stat_id = condition.get("id")
-        if stat_id not in scene_stats:
-            return False
-        left = scene_stats[stat_id]
-        right = condition.get("value")
+        # Keep the missing-ID behavior of legacy numeric-only Conditions.
+        if "left" not in condition and not isinstance(condition.get("value"), Mapping):
+            stat_id = condition.get("id")
+            if stat_id not in scene_stats:
+                return False
+            left = scene_stats[stat_id]
+        else:
+            left = scene_numeric_value(condition.get("left", {"type": "stat", "id": condition.get("id")}))
+        right = scene_numeric_value(condition.get("value"))
 
         try:
             if operation == ">":
@@ -375,7 +477,10 @@ init -100 python:
             scene_event_once_memory(event, owner_node_id),
         ):
             return False
-        return scene_conditions_match(event.get("Conditions", []))
+        try:
+            return scene_conditions_match(event.get("Conditions", []))
+        except Exception as error:
+            raise Exception("Event {} Conditions: {}".format(event.get("ID"), error))
 
 
     def scene_weighted_pair(pairs):
@@ -505,36 +610,11 @@ init -100 python:
 
 
     def scene_apply_stat_effect(effect):
-        global scene_stats
-
-        stat_id = effect.get("id")
-        if stat_id not in scene_catalog["stats"]:
-            raise Exception("Unknown Stat ID: {}".format(stat_id))
-
-        operation = effect.get("op")
-        value = effect.get("value", 0)
-        current = scene_stats.get(stat_id, scene_catalog["stats"][stat_id].get("Init", 0))
-
-        if operation == "set":
-            result = value
-        elif operation == "+":
-            result = current + value
-        elif operation == "-":
-            result = current - value
-        elif operation == "*":
-            result = current * value
-        elif operation == "/":
-            if value == 0:
-                raise Exception("Stat effect cannot divide by zero: {}".format(stat_id))
-            result = current / value
-        else:
-            raise Exception("Unknown Stat operation: {}".format(operation))
-
-        settings = scene_catalog["stats"][stat_id]
-        result = max(settings.get("Min", result), min(settings.get("Max", result), result))
-        updated = dict(scene_stats)
-        updated[stat_id] = result
-        scene_stats = updated
+        return scene_change_stat(
+            effect.get("id"),
+            effect.get("op"),
+            scene_numeric_value(effect.get("value", 0)),
+        )
 
 
     def scene_option_key(node_id, element_id, item_id=None):
@@ -652,8 +732,11 @@ init -100 python:
                 scene_event_once_memory(event, prepared.get("owner_node_id")),
             )
         owner_node_id = prepared.get("owner_node_id") or prepared["node_id"]
-        for effect in event.get("Effects", []):
-            scene_apply_effect(owner_node_id, effect)
+        for index, effect in enumerate(event.get("Effects", [])):
+            try:
+                scene_apply_effect(owner_node_id, effect)
+            except Exception as error:
+                raise Exception("Event {} Effect #{}: {}".format(event.get("ID"), index + 1, error))
 
 
     def scene_get_node(node_id):
@@ -665,6 +748,14 @@ init -100 python:
 
     def scene_current_node_id():
         return scene_stack[-1] if scene_stack else None
+
+
+    def scene_current_node_name(default=""):
+        node_id = scene_current_node_id()
+        if not node_id:
+            return str(default or "")
+        node = scene_get_node(node_id)
+        return str(node.get("Name") or "").strip() or node_id
 
 
     def scene_current_node():

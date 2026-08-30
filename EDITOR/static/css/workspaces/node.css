@@ -1,14 +1,23 @@
 /* Node overview workspace */
 
+#nodePanel {
+  overflow: hidden;
+}
+
 .panel-page.node-panel-page {
   width: 100%;
+  height: 100%;
+  min-height: 0;
   max-width: none;
   margin: 0;
-  padding: 0 0 64px;
+  padding: 0;
 }
 
 .node-editor-shell {
+  height: 100%;
+  min-height: 0;
   padding: 30px;
+  overflow: auto;
   background: var(--surface);
   border: 1px solid var(--line-strong);
   border-radius: var(--panel-radius);
@@ -306,7 +315,7 @@
 
 @media (max-width: 760px) {
   .panel-page.node-panel-page {
-    padding: 0 0 42px;
+    padding: 0;
   }
 
   .node-editor-shell {

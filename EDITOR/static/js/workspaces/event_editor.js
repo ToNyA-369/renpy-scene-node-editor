@@ -185,6 +185,7 @@
     namedOptionTags,
     nodeChoices,
     numberValue,
+    numericField,
     optionEffectChoices,
     optionEffectOptionTags,
     optionTags,
@@ -223,21 +224,29 @@
       return typeof SceneI18n !== "undefined" ? SceneI18n.t(key, params) : key;
     }
 
+    function ruleTypeBadge(kind, types, type) {
+      const label = tr(kind === "condition" ? "條件類型" : "效果類型");
+      const names = { stat: "Stat", memory: "Memory", option: "Option" };
+      return `<span class="type-badge-cover" aria-hidden="true"></span><label class="field rule-type type-badge"><span class="visually-hidden">${label}</span><select name="${kind}Type" data-type-badge aria-label="${label}">${types.map((value) => `<option value="${value}"${type === value ? " selected" : ""}>${names[value]}</option>`).join("")}</select></label>`;
+    }
+
     function conditionRowHtml(condition, index, { loose = false } = {}) {
         const type = normalizeRuleType(condition.type);
         const isMemory = type === "memory";
         return `
-          <div class="repeat-row condition-row group-drag-item${loose ? " condition-logic-block" : ""}" data-event-nav-item data-index="${index}" data-condition-id="${index}" data-condition-clause="${escapeHtml(condition.clause || "")}" data-condition-type="${escapeHtml(type)}" aria-grabbed="false">
-            <label class="field"><span class="visually-hidden">${tr("條件類型")}</span><select name="conditionType" aria-label="${tr("條件類型")}">${optionTags(CONDITION_TYPES, type)}</select></label>
+          <div class="repeat-row condition-row group-drag-item${loose ? " condition-logic-block" : ""}${isMemory ? "" : " numeric-stat-row"}" data-event-nav-item data-badge-row="condition-${index}" data-index="${index}" data-condition-id="${index}" data-condition-clause="${escapeHtml(condition.clause || "")}" data-condition-type="${escapeHtml(type)}" aria-grabbed="false">
+            <div class="rule-fields type-badge-scope">
+            ${ruleTypeBadge("condition", CONDITION_TYPES, type)}
             ${isMemory ? `
               <label class="field"><span class="visually-hidden">${tr("記憶庫")}</span><select name="conditionBank" aria-label="${tr("記憶庫")}">${namedOptionTags(memoryChoices(), condition.bank || "memory")}</select></label>
+              <label class="field rule-operator"><span class="visually-hidden">${tr("判斷")}</span><select name="conditionOp" aria-label="${tr("判斷")}">${optionTags(conditionOperators(type), condition.op)}</select></label>
               <label class="field"><span class="visually-hidden">${tr("記憶標籤")}</span><input name="conditionId" data-memory-tag-input aria-label="${tr("記憶標籤")}" value="${escapeHtml(condition.id || "")}" placeholder="${tr("標籤")}"></label>
-              <label class="field"><span class="visually-hidden">${tr("判斷")}</span><select name="conditionOp" aria-label="${tr("判斷")}">${optionTags(conditionOperators(type), condition.op)}</select></label>
             ` : `
-              <label class="field"><span class="visually-hidden">Stat</span><select name="conditionId" aria-label="Stat">${namedOptionTags(statChoices(), condition.id)}</select></label>
-              <label class="field"><span class="visually-hidden">${tr("判斷")}</span><select name="conditionOp" aria-label="${tr("判斷")}">${optionTags(conditionOperators(type), condition.op)}</select></label>
-              <label class="field"><span class="visually-hidden">${tr("值")}</span><input name="conditionValue" aria-label="${tr("值")}" type="number" step="any" value="${escapeHtml(condition.value ?? 0)}"></label>
+              ${numericField.render(condition.left ?? { type: "stat", id: condition.id }, "conditionId", tr("比較左值"))}
+              <label class="field rule-operator"><span class="visually-hidden">${tr("判斷")}</span><select name="conditionOp" aria-label="${tr("判斷")}">${optionTags(conditionOperators(type), condition.op)}</select></label>
+              ${numericField.render(condition.value ?? 0, "conditionValue", tr("比較右值"))}
             `}
+            </div>
             <button class="row-button" type="button" data-remove-condition="${index}" title="${tr("移除條件")}" aria-label="${tr("移除條件")}">×</button>
           </div>
         `;
@@ -265,26 +274,30 @@
         const opItems = effectOperators(type);
         if (isOption) {
           return `
-            <div class="repeat-row effect-row option-effect-row list-reorder-item" data-event-nav-item data-index="${index}" data-reorder-id="${index}" data-effect-type="${escapeHtml(type)}" aria-grabbed="false">
-              <label class="field option-effect-type-field"><span class="visually-hidden">${tr("效果類型")}</span><select name="effectType" aria-label="${tr("效果類型")}">${optionTags(effectTypeChoices(), type)}</select></label>
+            <div class="repeat-row effect-row option-effect-row list-reorder-item" data-event-nav-item data-badge-row="effect-${index}" data-index="${index}" data-reorder-id="${index}" data-effect-type="${escapeHtml(type)}" aria-grabbed="false">
+              <div class="rule-fields type-badge-scope">
+              ${ruleTypeBadge("effect", effectTypeChoices(), type)}
               <label class="field option-effect-target-field"><span class="visually-hidden">${tr("Option 目標")}</span><select name="effectOptionTarget" aria-label="${tr("Option 目標")}">${optionEffectOptionTags(effect)}</select></label>
-              <label class="field option-effect-operation-field"><span class="visually-hidden">${tr("操作")}</span><select name="effectOp" aria-label="${tr("操作")}">${optionTags(opItems, effect.op)}</select></label>
+              <label class="field rule-operator option-effect-operation-field"><span class="visually-hidden">${tr("操作")}</span><select name="effectOp" aria-label="${tr("操作")}">${optionTags(opItems, effect.op)}</select></label>
+              </div>
               <button class="row-button" type="button" data-remove-effect="${index}" title="${tr("移除 Effect")}" aria-label="${tr("移除 Effect")}">×</button>
             </div>
           `;
         }
         const valueField = isStat
-          ? `<label class="field"><span class="visually-hidden">${tr("值")}</span><input name="effectValue" aria-label="${tr("值")}" type="number" step="any" value="${escapeHtml(effect.value ?? 0)}"></label>`
+          ? numericField.render(effect.value ?? 0, "effectValue", tr("值"))
           : `<label class="field"><span class="visually-hidden">${tr("記憶標籤")}</span><input name="effectId" data-memory-tag-input aria-label="${tr("記憶標籤")}" value="${escapeHtml(effect.id || "")}" placeholder="${effect.op === "clear" ? tr("清空整個記憶庫") : tr("標籤")}" ${effectUsesId(type, effect.op) ? "" : "disabled"}></label>`;
         const resourceField = isStat
           ? `<select name="effectId" aria-label="Stat">${namedOptionTags(statChoices(), effect.id)}</select>`
           : `<select name="effectBank" aria-label="${tr("記憶庫")}">${namedOptionTags(memoryChoices(), effect.bank || "memory")}</select>`;
         return `
-          <div class="repeat-row effect-row list-reorder-item" data-event-nav-item data-index="${index}" data-reorder-id="${index}" data-effect-type="${escapeHtml(type)}" aria-grabbed="false">
-            <label class="field"><span class="visually-hidden">${tr("效果類型")}</span><select name="effectType" aria-label="${tr("效果類型")}">${optionTags(effectTypeChoices(), type)}</select></label>
+          <div class="repeat-row effect-row list-reorder-item${isStat ? " numeric-stat-row" : ""}" data-event-nav-item data-badge-row="effect-${index}" data-index="${index}" data-reorder-id="${index}" data-effect-type="${escapeHtml(type)}" aria-grabbed="false">
+            <div class="rule-fields type-badge-scope">
+            ${ruleTypeBadge("effect", effectTypeChoices(), type)}
             <label class="field"><span class="visually-hidden">${isStat ? "Stat" : tr("記憶庫")}</span>${resourceField}</label>
-            <label class="field"><span class="visually-hidden">${tr("操作")}</span><select name="effectOp" aria-label="${tr("操作")}">${optionTags(opItems, effect.op)}</select></label>
+            <label class="field rule-operator"><span class="visually-hidden">${tr("操作")}</span><select name="effectOp" aria-label="${tr("操作")}">${optionTags(opItems, effect.op)}</select></label>
             ${valueField}
+            </div>
             <button class="row-button" type="button" data-remove-effect="${index}" title="${tr("移除 Effect")}" aria-label="${tr("移除 Effect")}">×</button>
           </div>
         `;
@@ -344,11 +357,19 @@
         const type = row.querySelector('[name="conditionType"]').value;
         const result = {
           type,
-          id: row.querySelector('[name="conditionId"]').value.trim(),
           op: row.querySelector('[name="conditionOp"]').value,
         };
-        if (type === "stat") result.value = numberValue(row.querySelector('[name="conditionValue"]').value);
-        if (type === "memory") result.bank = row.querySelector('[name="conditionBank"]').value;
+        if (type === "stat") {
+          const left = row.querySelector('[name="conditionIdSource"]')
+            ? numericField.read(row, "conditionId") : { type: "stat", id: row.querySelector('[name="conditionId"]').value.trim() };
+          if (left?.type === "stat") result.id = left.id;
+          else result.left = left;
+          result.value = numericField.read(row, "conditionValue");
+        }
+        if (type === "memory") {
+          result.id = row.querySelector('[name="conditionId"]').value.trim();
+          result.bank = row.querySelector('[name="conditionBank"]').value;
+        }
         result.clause = String(row.dataset?.conditionClause || "").trim() || null;
         return result;
       });
@@ -357,7 +378,7 @@
         const result = { type, op: row.querySelector('[name="effectOp"]').value };
         if (type === "stat") {
           result.id = row.querySelector('[name="effectId"]').value.trim();
-          result.value = numberValue(row.querySelector('[name="effectValue"]').value);
+          result.value = numericField.read(row, "effectValue");
         } else if (type === "memory") {
           result.bank = row.querySelector('[name="effectBank"]').value;
           if (result.op !== "clear") result.id = row.querySelector('[name="effectId"]').value.trim();

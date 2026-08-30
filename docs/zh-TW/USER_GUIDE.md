@@ -63,8 +63,8 @@ Event 是目前節點對 Trigger 的反應。主要欄位：
 - `Weight`：On Node／玩家輸入中，同 Trigger、同 Priority且 Conditions 都通過時的相對機率。
 - `Once`：全遊戲只成功觸發一次。
 - `Conditions`：Event 是否能成為候選。
-- `Effects`：Event 執行時先套用的 Stat、Memory 或 Option Availability 改變。
-- `Content`：接著呼叫的 Ren'Py label，可使用權重。
+- `Effects`：Content 返回後依序套用的 Stat、Memory 或 Option Availability 改變。
+- `Content`：Effects 之前呼叫的 Ren'Py label，可使用權重。
 - `End up`：Content 返回後執行 REDO、GOTO、REPLACE 或 EXIT。GOTO／REPLACE 都可使用單一或權重 Next Node；選單會以「群組 → 節點」呈現已群組節點，未群組節點維持第一層，保存值仍是穩定 Node ID。
 
 UI 中的 `Option` 技術格式仍是 `Action:<id>`。Event 選擇器會列出目前作用域 Options 已註冊的 Triggers；在 Global Node 編輯的 Option Trigger 會在所有實際節點的互動畫面可用。
@@ -76,6 +76,14 @@ Event Pool 使用單層群組整理大量 Events，但只保留一個展滿側�
 Event 編輯表單內的 Conditions、Effects、Content 權重項目與 Next Node 權重項目都以卡片呈現，可由卡片外框或欄位間留白直接拖移；輸入欄位與刪除按鈕維持原操作。Conditions 的群組框代表 AND，群組與獨立條件之間代表 OR。舊 Conditions 會先顯示在同一個 AND 群組，且只有這個群組時按新增會繼續加入其中；拖出任一條件建立 OR 分支後，後續新增條件會成為獨立 OR。將條件拖入群組會加入 AND，兩個獨立條件互相停留則建立新的 AND 群組。只允許這一層 OR-of-AND，單成員 AND 群組會保留。Effects 仍依保存後的陣列順序，在 Content 返回後依序執行；權重項目的排序只管理 Editor 顯示，不改變機率。
 
 Picture 與 Preview Background 只列出 `game/images/`；Options 的 Hover Sound／Click Sound 只列出 `game/audio/`。資源可用子資料夾整理，Editor 會保留其階層供選擇，但選定欄位只顯示檔名。遊戲場景、BGM、SE 與轉場請在 Content 使用 Ren'Py 原生語法。
+
+### 在條件與效果中使用運算
+
+事件表單的數值欄位可直接選擇**固定值／Stat／簡單運算**。Stat、Memory 與 Option 規則保持在同一水平列，但類型、資源、運算子與數值會像 Content 項目一樣，各自呈現為有間距的圓角區塊。最前方的小標籤可切換整條規則的類型，`123`、`Stat` 或 `ƒx` 標籤則貼合在它所切換的數值區塊內。點擊標籤時，底色向右覆蓋它控制的完整範圍（包含區塊間距）並開啟共用選單；選定或取消後收回，再露出分開的欄位。選擇運算才會在同一行展開左右運算元與一個運算子，窄視窗可橫向捲動，不改成上下堆疊。運算元各自可填數字或依名稱選擇 Stat，選單沿用滑鼠、方向鍵、Tab 與 Esc 操作；系統開啟減少動態效果時不播放延展動畫。例如條件可設定 `金錢 >= 單價 × 數量`，效果則可從金錢扣除 `單價 × 數量`。比較的兩側都可使用運算，但 Effect 的目標仍固定是 Stat。
+
+每個欄位最多一個 `+`、`-`、`×`、`÷`、`%`，AND/OR 及 Effect 自己的操作不計入。切回較簡單的來源時，左運算元若符合類型便保留，否則從 0 或第一個 Stat 開始。動態除數為零會報錯，可先在同一 AND 群組的前方加入非零條件。Effects 仍在 Content 後由上到下執行，每次都讀取更新後的值。更複雜的公式仍交給原生 Ren'Py Content，並使用 `scene_change_stat()` 寫入。
+
+舊事件的意義不變。使用新數值格式時，Editor 會自動將該 Event 升為 Version 2；使用前請一併更新專案的 Editor 與 FRAMEWORK，不需手動編輯 JSON。
 
 ### Fallback
 
@@ -157,9 +165,13 @@ Content label 應返回 Runner。不要在一般 Content 中自行複製 Event E
 
 Stats 是有 `Init`、`Min`、`Max` 的數值，並以只供管理使用的 `Group` 整理；未指定群組會歸入預設的 `Normal`。Stats 只保留一個新增 Stat 按鈕，新 Stat 預設不顯示群組。Name／Min／Init／Max 欄名只在整個 Stats 區最上方顯示一次，所有未群組列與群組內列共用相同欄寬；群組框會在列的左右保留一致內距。Stat 整列的外框與欄位間留白都是拖移面，輸入框與刪除按鈕則保持原本操作；不再顯示或保留額外把手，拖移期間也不會選取掃過的文字。群組名稱旁沒有圖示的空白可拖移整個 Stat 群組。拖移時插入位置會即時騰空並推開周圍 Stat 或群組，並共用 Event 的逐幀重排、插入遲滯與邊緣自動捲動，因此長清單不需中途放開。排序流末端永遠保留自然留白，所以即使畫面中只有群組，也能把 Stat 直接拖到群組之外。進入另一群組即可插入；在另一個 Stat 上停留到群組框展開後放開，才會建立群組。群組只剩一個 Stat 時自動解散。群組名稱可直接編輯，順序保存於只供 Editor 使用的 `Order`；成功拖移不顯示額外通知。Event 的 Stat Conditions／Effects 使用「Group → Stat」兩層選單，選定後仍只顯示 Stat 名稱。`Group` 與 `Order` 不改變 Stat ID、Runtime 存取或存檔鍵。Conditions 可比較數值，Effects 可 `set`、`+`、`-`、`*`、`/`。
 
+原生 `.rpy` 可用 `scene_get_stat()` 讀取，必要時以 `scene_change_stat(stat_id, operation, value)` 進行受 Min／Max 限制的修改；也可用 `scene_current_node_id()`／`scene_current_node_name()` 取得目前位置。這些修改 API 只作 Editor 尚未資料化的專屬系統橋接。一般遊戲規則仍優先使用 Event Effect，而且 Content 中的修改會先發生，該 Event 的 Effects 會在 Content 返回後繼續從上到下套用。Screen 顯示 expression 只讀取，不要在可能重複求值的顯示內容中修改 State。
+
 ### Memory Banks
 
 Memory Banks 保存標籤。Conditions 使用 `has`／`not_has`，Effects 使用 `add`／`remove`／`clear`。
+
+原生程式除既有的 `scene_memory_has/add/remove/clear()` 外，也可用 `scene_memory_tags(bank_id)` 取得保留插入順序的唯讀 tuple 快照。能由 Event Effect 表達的 add／remove／clear 仍優先使用 Effect。
 
 Memory Bank 列可從欄位間留白拖移排序。拖移時整列會抑制意外的文字選取，放手後立即恢復欄位原生選取。Editor 會以 `Memories.json` 的物件鍵插入順序保存與還原顯示位置；這不改變 Bank ID、Runtime API 或存檔內容，也不會建立群組。
 

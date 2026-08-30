@@ -520,6 +520,7 @@ function contentLabelFile(label) {
 const selectChoicePicker = SceneChoicePicker.createChoicePicker({
   escapeHtml,
   generateId,
+  typeBadge: SceneTypeBadge,
 });
 
 function closeSelectPickers(except = null) {
@@ -564,6 +565,10 @@ function contentPickerHtml(label, index) {
   `;
 }
 
+const numericField = SceneNumericField.create({
+  escapeHtml, namedOptionTags, statChoices,
+  operators: SceneStateRuleContract.NUMERIC_OPERATORS, tr: t,
+});
 const eventEditor = SceneEventEditor.createEventEditor({
   contentPickerHtml,
   effectTypeChoices: eventEffectTypeChoices,
@@ -572,6 +577,7 @@ const eventEditor = SceneEventEditor.createEventEditor({
   namedOptionTags,
   nodeChoices,
   numberValue,
+  numericField,
   optionEffectChoices,
   optionEffectOptionTags,
   optionTags,
@@ -1493,6 +1499,7 @@ function readEventForm() {
     Effects: effects,
     Content: readChoice(form, "content"),
   };
+  if (state.eventDraft?.Version === 2) result.Version = 2;
   if (lifecycle) return result;
   const endUp = form.elements.EndUp?.value || state.eventDraft?.["End up"] || "REDO";
   result.Weight = numberValue(form.elements.Weight?.value ?? state.eventDraft?.Weight, 1);
@@ -1738,6 +1745,16 @@ function bindEventPanel() {
       scheduleEventAutosave({ useDraft: true });
       renderEventsPanel({ preserveView: true });
       return;
+    } else if (event.target.matches("[data-numeric-source]")) {
+      const row = event.target.closest("[data-event-nav-item]");
+      const rowIndex = row.dataset.index;
+      const rowClass = row.classList.contains("condition-row") ? "condition-row" : "effect-row";
+      const name = event.target.name;
+      numericField.changeSource(event.target);
+      state.eventDraft = readEventForm();
+      renderEventsPanel({ preserveView: true });
+      const select = document.querySelector(`#eventForm .${rowClass}[data-index="${rowIndex}"] [name="${name}"]`);
+      (select?.closest(".select-choice-picker")?.querySelector(".select-choice-trigger") || select)?.focus({ preventScroll: true });
     } else if (event.target.name === "conditionType") {
       const row = event.target.closest(".condition-row");
       const index = Number(row.dataset.index);
@@ -1777,6 +1794,7 @@ function bindEventPanel() {
     scheduleEventAutosave();
   });
   form.addEventListener("input", (event) => {
+    if (event.target.matches("[data-numeric-source]")) return;
     if (["Trigger", "conditionType", "effectType", "EndUp"].includes(event.target.name)) return;
     scheduleEventAutosave();
   });
@@ -5137,10 +5155,7 @@ function bindGlobalEvents() {
     closeSelectPickers();
     syncTabFocusIndicator({ immediate: true });
   });
-  window.addEventListener("scroll", (event) => {
-    if (event.target instanceof Element && event.target.closest(".select-choice-menu, .select-choice-submenu")) return;
-    closeSelectPickers();
-  }, true);
+  window.addEventListener("scroll", selectChoicePicker.handleScroll, true);
   document.querySelectorAll("[data-close-dialog]").forEach((button) => button.addEventListener("click", () => {
     document.querySelector(`#${button.dataset.closeDialog}`)?.close();
   }));

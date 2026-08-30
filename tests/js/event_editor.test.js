@@ -6,6 +6,7 @@ const test = require("node:test");
 const SceneEventEditor = require("../../EDITOR/static/js/workspaces/event_editor.js");
 const SceneGroupDrag = require("../../EDITOR/static/js/ui/group_drag.js");
 const stateRuleContract = require("../../EDITOR/static/js/core/state_rule_contract.js");
+const SceneNumericField = require("../../EDITOR/static/js/ui/numeric_field.js");
 
 function escapeHtml(value) {
   return String(value ?? "")
@@ -36,6 +37,7 @@ function createEditor({ stats = [{ id: "money", name: "Money" }], effectTypes } 
     namedOptionTags,
     nodeChoices: () => [{ id: "root", name: "Root" }, { id: "branch", name: "Branch" }],
     numberValue: (value, fallback = 0) => Number.isFinite(Number(value)) ? Number(value) : fallback,
+    numericField: SceneNumericField.create({ escapeHtml, namedOptionTags, statChoices: () => stats, operators: stateRuleContract.NUMERIC_OPERATORS, tr: (key) => key }),
     optionEffectChoices: () => optionTargets,
     optionEffectOptionTags: (effect) => `<option value='${JSON.stringify({ target: effect.target, node: effect.node, element: effect.element, item: effect.item })}'>Buy</option>`,
     optionTags,
@@ -49,11 +51,43 @@ function fakeRow(values, clause = "") {
     dataset: { conditionClause: clause },
     querySelector(selector) {
       const name = selector.match(/name="([^"]+)"/)?.[1];
-      if (!Object.hasOwn(values, name)) throw new Error(`Unexpected field: ${name}`);
+      if (!Object.hasOwn(values, name)) {
+        if (name.endsWith("Source")) return null;
+        throw new Error(`Unexpected field: ${name}`);
+      }
       return { value: String(values[name]) };
     },
   };
 }
+
+test("numeric Condition and Effect fields serialize one operation without changing effect order", () => {
+  const editor = createEditor();
+  const condition = fakeRow({ conditionType: "stat", conditionOp: ">=",
+    conditionIdSource: "calc", conditionIdOperator: "+", conditionIdLeftSource: "stat", conditionIdLeft: "money", conditionIdRight: "2",
+    conditionValueSource: "stat", conditionValue: "price" }, "and_1");
+  const effect = fakeRow({ effectType: "stat", effectOp: "-", effectId: "money",
+    effectValueSource: "calc", effectValueOperator: "*", effectValueLeftSource: "stat", effectValueLeft: "price", effectValueRight: "3" });
+  const read = editor.readRules({ querySelectorAll: (selector) => selector === ".condition-row" ? [condition] : [effect] });
+  assert.deepEqual(read.conditions[0], { type: "stat", op: ">=", clause: "and_1",
+    left: { type: "calc", op: "+", left: { type: "stat", id: "money" }, right: 2 }, value: { type: "stat", id: "price" } });
+  assert.deepEqual(read.effects[0], { type: "stat", id: "money", op: "-",
+    value: { type: "calc", op: "*", left: { type: "stat", id: "price" }, right: 3 } });
+});
+
+test("numeric source switching stays flat and rendering preserves missing Stat IDs", () => {
+  const field = SceneNumericField.create({ escapeHtml, namedOptionTags, statChoices: () => [], operators: stateRuleContract.NUMERIC_OPERATORS, tr: (key) => key });
+  const value = { type: "calc", op: "*", left: { type: "stat", id: "missing" }, right: 3 };
+  assert.deepEqual(SceneNumericField.switchSource(value, "stat"), value.left);
+  assert.deepEqual(SceneNumericField.switchSource(value, "number"), 0);
+  assert.deepEqual(SceneNumericField.switchSource(value, "calc"), { type: "calc", op: "+", left: value.left, right: 0 });
+  const html = field.render(value, "value", "Value");
+  assert.equal((html.match(/<option value="calc"/g) || []).length, 1);
+  assert.match(html, /value="missing" selected/);
+  assert.match(html, /找不到 Stat/);
+  assert.match(html, /data-picker-label="ƒx"[^>]*>簡單運算/);
+  assert.match(html, /data-picker-label="123"[^>]*>固定值/);
+  assert.equal(field.read(fakeRow({ value: "" }), "value"), "");
+});
 
 test("weighted Event choices preserve string and map representations", () => {
   const editor = createEditor();
@@ -261,7 +295,7 @@ test("Event Effect choices honor a caller-provided restricted type list", () => 
     { type: "stat", id: "money", op: "+", value: 1 },
   ]);
 
-  assert.match(effectHtml, /<option selected>stat<\/option>/);
-  assert.match(effectHtml, /<option>memory<\/option>/);
-  assert.doesNotMatch(effectHtml, /<option>option<\/option>/);
+  assert.match(effectHtml, /<option value="stat" selected>Stat<\/option>/);
+  assert.match(effectHtml, /<option value="memory">Memory<\/option>/);
+  assert.doesNotMatch(effectHtml, /<option value="option">/);
 });

@@ -69,10 +69,14 @@
     }
     return [
       { label: "scene_get_stat", detail: "Scene Node public API", insertText: "scene_get_stat(${1:stat_id}, ${2:0})", type: "function" },
+      { label: "scene_change_stat", detail: "Scene Node bridge API · prefer Event Effects", insertText: "scene_change_stat(${1:stat_id}, \"${2:+}\", ${3:value})", type: "function" },
+      { label: "scene_current_node_id", detail: "Scene Node public API", insertText: "scene_current_node_id()", type: "function" },
+      { label: "scene_current_node_name", detail: "Scene Node public API", insertText: "scene_current_node_name(${1:\"\"})", type: "function" },
       { label: "scene_memory_has", detail: "Scene Node public API", insertText: "scene_memory_has(${1:bank_id}, ${2:tag_id})", type: "function" },
-      { label: "scene_memory_add", detail: "Scene Node public API", insertText: "scene_memory_add(${1:bank_id}, ${2:tag_id})", type: "function" },
-      { label: "scene_memory_remove", detail: "Scene Node public API", insertText: "scene_memory_remove(${1:bank_id}, ${2:tag_id})", type: "function" },
-      { label: "scene_memory_clear", detail: "Scene Node public API", insertText: "scene_memory_clear(${1:bank_id})", type: "function" },
+      { label: "scene_memory_tags", detail: "Scene Node public API", insertText: "scene_memory_tags(${1:bank_id})", type: "function" },
+      { label: "scene_memory_add", detail: "Scene Node bridge API · prefer Event Effects", insertText: "scene_memory_add(${1:bank_id}, ${2:tag_id})", type: "function" },
+      { label: "scene_memory_remove", detail: "Scene Node bridge API · prefer Event Effects", insertText: "scene_memory_remove(${1:bank_id}, ${2:tag_id})", type: "function" },
+      { label: "scene_memory_clear", detail: "Scene Node bridge API · prefer Event Effects", insertText: "scene_memory_clear(${1:bank_id})", type: "function" },
     ];
   }
 

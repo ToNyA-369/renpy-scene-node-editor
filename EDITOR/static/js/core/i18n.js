@@ -10,6 +10,15 @@
   let currentLocale = DEFAULT_LOCALE;
 
   const EN_DICTIONARY = Object.freeze({
+    "固定值": "Constant",
+    "簡單運算": "Calculation",
+    "數值來源": "value source",
+    "左運算元": "Left operand",
+    "右運算元": "Right operand",
+    "算術運算子": "Arithmetic operator",
+    "比較左值": "Comparison left value",
+    "比較右值": "Comparison right value",
+    "找不到 Stat": "Missing Stat",
     // Navigation, Header & General UI
     "搜尋節點": "Search nodes",
     "新增節點": "Add Node",

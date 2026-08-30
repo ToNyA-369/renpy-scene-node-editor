@@ -8,6 +8,7 @@
   const CONDITION_TYPES = Object.freeze(["stat", "memory"]);
   const EFFECT_TYPES = Object.freeze(["stat", "memory", "option"]);
   const RULE_TYPES = CONDITION_TYPES;
+  const NUMERIC_OPERATORS = Object.freeze(["+", "-", "*", "/", "%"]);
   const CONDITION_OPERATORS = Object.freeze({
     stat: Object.freeze([">", ">=", "<", "<=", "==", "!="]),
     memory: Object.freeze(["has", "not_has"]),
@@ -75,6 +76,7 @@
     EFFECT_OPERATORS,
     EFFECT_TYPES,
     RULE_TYPES,
+    NUMERIC_OPERATORS,
     conditionOperators,
     defaultCondition,
     defaultEffect,

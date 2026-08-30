@@ -15,6 +15,52 @@ import project_bootstrap  # noqa: E402
 
 
 class EventApiRoundTripTest(unittest.TestCase):
+    def test_numeric_expressions_round_trip_and_upgrade_only_used_events(self):
+        calc = {"type": "calc", "op": "*", "left": {"type": "stat", "id": "price"}, "right": 3}
+        event = {
+            "ID": "arithmetic", "Trigger": "Auto:Enter", "Conditions": [
+                {"type": "stat", "left": calc, "op": "<=", "value": {"type": "stat", "id": "money"}},
+            ], "Effects": [{"type": "stat", "id": "money", "op": "-", "value": calc}],
+        }
+        saved = app.save_event({"node": "root", "event": event})
+        self.assertEqual(saved["Version"], 2)
+        self.assertEqual(saved["Conditions"][0]["left"], calc)
+        self.assertEqual(saved["Conditions"][0]["clause"], "and_1")
+        self.assertEqual(saved, self.saved_event("root", "arithmetic"))
+        self.assertEqual(app.validate_event(saved), saved)
+        self.assertNotIn("Version", app.validate_event({"ID": "old", "Trigger": "Auto:Enter"}))
+        self.assertEqual(app.validate_event({"ID": "old", "Trigger": "Auto:Enter", "Version": 2})["Version"], 2)
+
+    def test_numeric_validation_rejects_code_nesting_nonfinite_and_zero_divisors(self):
+        leaf = {"type": "stat", "id": "money"}
+        calc = {"type": "calc", "op": "+", "left": leaf, "right": 1}
+        invalid = [True, None, "money + 1", float("nan"), float("inf"),
+                   {**leaf, "code": "x"}, {**calc, "left": calc}, {**calc, "right": calc},
+                   {**calc, "op": "**"}, {**calc, "op": "/", "right": 0},
+                   {**calc, "op": "%", "right": 0}, {"type": "stat", "id": ""}]
+        for value in invalid:
+            with self.subTest(value=value), self.assertRaises(app.ApiError):
+                app.validate_condition({"type": "stat", "id": "money", "value": value})
+            with self.subTest(effect=value), self.assertRaises(app.ApiError):
+                app.validate_effect({"type": "stat", "id": "money", "value": value})
+        for version in [True, 0, 3, "2"]:
+            with self.subTest(version=version), self.assertRaises(app.ApiError):
+                app.validate_event({"Version": version, "Trigger": "Auto:Enter"})
+        with self.assertRaises(app.ApiError):
+            app.validate_effect({"type": "stat", "left": calc, "id": "money", "value": 1})
+
+    def test_numeric_references_are_checked_on_both_sides_in_local_and_global_events(self):
+        for node in ("root", app.GLOBAL_NODE_PATH):
+            app.save_event({"node": node, "event": {
+                "ID": "references", "Trigger": "Auto:Enter", "Conditions": [
+                    {"type": "stat", "left": {"type": "calc", "op": "+", "left": {"type": "stat", "id": "left_ref"}, "right": 1}, "op": "==", "value": {"type": "stat", "id": "right_ref"}},
+                ], "Effects": [{"type": "stat", "id": "target_ref", "op": "set", "value": {"type": "stat", "id": "effect_ref"}}],
+            }})
+        issues = app.validate_project()
+        for ref in ("left_ref", "right_ref", "target_ref", "effect_ref"):
+            matching = [issue for issue in issues if ref in issue["message"]]
+            self.assertEqual(len(matching), 2, (ref, issues))
+
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory(prefix="scene-event-api-round-trip-")
         self.project_root = Path(self.temporary.name)
