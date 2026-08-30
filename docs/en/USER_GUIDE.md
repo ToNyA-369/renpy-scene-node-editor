@@ -63,8 +63,8 @@ An Event is the current node's reaction to a Trigger:
 - `Weight`: relative chance among matching On Node or player-input Events at the same Priority.
 - `Once`: allows one successful selection for the entire game.
 - `Conditions`: decide whether the Event is a candidate.
-- `Effects`: Stat, Memory, or Option Availability changes applied when the Event runs.
-- `Content`: a Ren'Py label called after Effects, optionally weighted.
+- `Effects`: ordered Stat, Memory, or Option Availability changes applied after Content returns.
+- `Content`: a Ren'Py label called before Effects, optionally weighted.
 - `End up`: REDO, GOTO, REPLACE, or EXIT after Content returns. GOTO and REPLACE accept one or weighted Next Node. Grouped Nodes appear as “Group → Node” in the picker, ungrouped Nodes stay at the first level, and the saved value remains the stable Node ID.
 
 The UI calls the source `Option`; the technical format remains `Action:<id>`. The Event picker lists Triggers registered by the current authoring scope's Options. A Trigger authored on the Global Node is available during every real-node interaction.
@@ -76,6 +76,14 @@ The Event Pool uses one level of groups but keeps one full-width Add Event butto
 Conditions, Effects, weighted Content entries, and weighted Next Node entries are presented as cards. Drag a card's perimeter or inter-field whitespace while inputs and remove buttons remain interactive. A Condition frame means AND; groups and independent Conditions are OR alternatives. Legacy Conditions first appear in one AND group, and Add Condition continues appending there while it is the only branch. After a Condition is pulled out to create an OR branch, later additions start as independent OR Conditions. Dragging into a group joins its AND clause, while dwelling one independent Condition over another creates a new AND group. Logic is limited to this single OR-of-AND layer, and one-member AND groups remain intact. Effects still execute in saved array order after Content returns. Weight-entry order affects Editor presentation only, not probability.
 
 Picture and Preview Background images are listed only from `game/images/`; Options Hover Sound and Click Sound are listed only from `game/audio/`. You may organize assets in subdirectories: the Editor preserves that hierarchy in the picker but shows only the filename after selection. Write game scenes, BGM, SE, transitions, and fades in Content with native Ren'Py syntax.
+
+### Calculations in Conditions and Effects
+
+Numeric fields offer **Constant / Stat / Calculation** directly in the Event form. Every Stat, Memory, and Option rule stays on one horizontal line, while its type, resource, operator, and value appear as separate rounded controls like Content entries. The leading badge changes the rule type; compact `123`, `Stat`, or `ƒx` badges remain attached to the numeric control whose source they change. Clicking a badge expands its background across all fields it controls—including the spaces between them—and opens the shared menu; selecting or cancelling retracts it to reveal the separate controls again. Calculation places two operands and one operator side by side; each operand can be a number or a Stat selected by name. Narrow rows scroll horizontally rather than stacking fields. Menus retain pointer, arrow-key, Tab, and Escape support; reduced-motion preferences disable the expansion animation. For example, compare `money >= price × quantity`, or subtract `price × quantity` from `money` in an Effect. Both comparison sides can calculate; an Effect's target remains a Stat.
+
+Each field permits only one `+`, `-`, `×`, `÷`, or `%` operation. AND/OR and the Effect's own operation are separate. Switching to a simpler source keeps the left operand when its type fits; otherwise it starts at 0 or the first Stat. Division by a dynamic zero reports an error, so guard a potentially zero Stat with an earlier AND Condition. Effects still run top-to-bottom after Content, reading updated values each time. Complex formulas remain native Ren'Py Content responsibilities, using `scene_change_stat()` for writes.
+
+Old Events retain their behavior. Using the new numeric format upgrades that Event to Version 2: update both Editor and FRAMEWORK in the project before using it; no manual JSON editing is required.
 
 ### Fallback Events
 
@@ -157,9 +165,13 @@ A Content label should return to the Runner. Do not duplicate Event Effects or d
 
 Stats are numbers with `Init`, `Min`, and `Max`, organized by an authoring-only `Group`. A missing Group belongs to the visually ungrouped `Normal` flow. Stats keep one Add Stat button, and new Stats start visually ungrouped. Name / Min / Init / Max headers appear once at the top, and every loose or grouped row shares the same column widths. Drag from the blank space beside a Stat name: the insertion gap follows the pointer and pushes nearby Stats or group blocks aside. Dragging shares the Event flow's frame-coalesced layout, midpoint hysteresis, and progressive edge auto-scroll for long lists. Crossing a group boundary moves out or inserts into that group without a dedicated target. Dwell over another Stat until the group frame expands, then release to create a group. A group dissolves automatically when one Stat remains. Group names are edited directly and order is stored in Editor-only `Order` metadata. Event Stat Conditions / Effects use a two-level “Group → Stat” picker and show only the Stat name after selection. `Group` and `Order` do not change Stat IDs, Runtime access, or save keys. Conditions compare values; Effects support `set`, `+`, `-`, `*`, and `/`.
 
+Creator-owned `.rpy` can read with `scene_get_stat()` and, when necessary, make a Min / Max-clamped change through `scene_change_stat(stat_id, operation, value)`. It can also query the current location through `scene_current_node_id()` and `scene_current_node_name()`. Mutation APIs are bridges for systems the Editor does not model. Prefer Event Effects for ordinary game rules: a Content mutation happens first, then that Event's Effects continue from top to bottom after Content returns. Screen display expressions should read only and must not mutate State from content that Ren'Py may evaluate repeatedly.
+
 ### Memory Banks
 
 Memory Banks store tags. Conditions use `has` / `not_has`; Effects use `add` / `remove` / `clear`.
+
+In addition to `scene_memory_has/add/remove/clear()`, creator code may use `scene_memory_tags(bank_id)` to receive an insertion-ordered, read-only tuple snapshot. Prefer Event Effects for add / remove / clear whenever the Event model can express the change.
 
 Memory Bank rows can be reordered from inter-field whitespace. Dragging suppresses incidental text selection across the entire row and restores normal field selection immediately on release. The editor saves and restores their presentation order through object-key insertion order in `Memories.json`; this does not change Bank IDs, Runtime APIs, or saved-game contents, and it never creates groups.
 

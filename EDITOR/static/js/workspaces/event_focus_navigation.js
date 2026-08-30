@@ -147,6 +147,7 @@
       const step = navigationStep(index, fields.length, event.shiftKey ? -1 : 1);
       if (step.type === "field") {
         fields[step.index].focus({ preventScroll: true });
+        fields[step.index].scrollIntoView?.({ block: "nearest", inline: "nearest" });
       } else if (step.type === "section") {
         focusSection(section);
       } else {

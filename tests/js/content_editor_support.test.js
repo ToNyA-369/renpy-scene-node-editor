@@ -31,5 +31,17 @@ test("project completions keep stable references and remove duplicates", () => {
   assert.equal(images[0].insertText, "images bg room");
 
   const general = support.projectSuggestions("general", {});
-  assert.ok(general.some((item) => item.label === "scene_get_stat"));
+  assert.deepEqual(general.map((item) => item.label), [
+    "scene_get_stat",
+    "scene_change_stat",
+    "scene_current_node_id",
+    "scene_current_node_name",
+    "scene_memory_has",
+    "scene_memory_tags",
+    "scene_memory_add",
+    "scene_memory_remove",
+    "scene_memory_clear",
+  ]);
+  assert.ok(general.find((item) => item.label === "scene_change_stat").detail.includes("prefer Event Effects"));
+  assert.ok(!general.some((item) => item.label === "scene_apply_stat_effect"));
 });

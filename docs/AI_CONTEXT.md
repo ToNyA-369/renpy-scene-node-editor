@@ -4,6 +4,8 @@ This file is a compact contract for AI assistants working inside a Ren'Py game t
 
 ## Purpose
 
+Stat Conditions/Effects support Event Version 2 numeric values: a finite number, `{"type":"stat","id":"stable_id"}`, or `{"type":"calc","op":"+|-|*|/|%","left":<number-or-stat>,"right":<number-or-stat>}` (choose one actual operator). Never nest calculations or use code strings. A Condition uses `left` instead of `id` for a computed left side; Effects always write their `id` Stat. Compare-only evaluation is read-only; ordered Effects evaluate fresh values after Content returns and clamp only final writes. Dynamic zero divisors/missing Stats are errors, not zero defaults. Legacy constant-only Events need no rewrite. Update Editor and FRAMEWORK together; old Runtime cannot read Version 2 expressions. This is an Editor data feature, not a new public scripting API.
+
 Scene Node Editor manages structured interaction flow. It does not replace Ren'Py's screen language, narrative scripting, assets, or game-specific systems.
 
 ```text
@@ -57,7 +59,7 @@ Content files under `game/GLOBALNODE/CONTENT/` and `game/SCENENODE/**/CONTENT/` 
 5. On Node and player-input Events own Conditions, Priority, Weight, Once, Effects, Content, and End up. Conditions use one OR-of-AND layer: a shared non-empty `clause` is AND, while different clauses and explicit `null` Conditions are OR branches; legacy Conditions with no `clause` remain all-AND. On Enter / On Exit lifecycle Events use the same Condition logic but omit Weight, End up, and Next Node.
 6. The fixed `__global__` Global Node is an authoring scope, not a Stack Node. Its Options render together with every current real Node and may use `Action:` Triggers; it still cannot be Root or Next Node. Its Events merge with the current real Node, and End up operates on that real Stack-top context.
 7. Event Content stores a Ren'Py label name, not an `.rpy` filename.
-8. Event Effects cover Stats, Memories, and idempotent Option `enable` / `disable` operations. Content runs first; after its label returns, the Runtime records Once and applies Effects before resolving End up. Backgrounds, audio, transitions, and other presentation use native Ren'Py in Content, which must normally `return` to the Runner.
+8. Event Effects cover Stats, Memories, and idempotent Option `enable` / `disable` operations. Content runs first; after its label returns, the Runtime records Once and applies Effects before resolving End up. A native `scene_change_stat()` call in Content therefore happens before that Event's ordered Effects. Backgrounds, audio, transitions, and other presentation use native Ren'Py in Content, which must normally `return` to the Runner.
 9. On Enter / On Exit evaluate Conditions as a snapshot and run every local and Global match ordered by Priority then Event ID. On Node merges local and Global Events before minimum-Priority / Weight selection.
 10. `REDO` repeats the current Node, `GOTO` pushes a destination Node, `REPLACE` atomically swaps the Stack top, and `EXIT` pops back to the parent. REPLACE requires an actual parent in the current Stack: `[parent, current] -> [parent, target]`. It runs current On Exit and target On Enter without resuming any parent lifecycle, On Node, or Options. EXIT at the first Stack level ends the Runner. GOTO does not exit the parent, and returning from a child does not re-enter the parent.
 11. Node has no Background or Screen field. Backgrounds, audio, transitions, Screens, and HUDs are creator-owned presentation controlled from Content with native Ren'Py.
@@ -79,13 +81,17 @@ Public creator-facing helpers:
 
 ```renpy
 scene_get_stat(stat_id, default=0)
+scene_change_stat(stat_id, operation, value)
+scene_current_node_id()
+scene_current_node_name(default="")
 scene_memory_has(bank_id, tag_id)
+scene_memory_tags(bank_id)
 scene_memory_add(bank_id, tag_id)
 scene_memory_remove(bank_id, tag_id)
 scene_memory_clear(bank_id)
 ```
 
-Do not rely on other internal `scene_*` functions from creator code.
+Mutation helpers are bridges for Content, Screen Actions, or creator-owned systems that the Editor does not model. Prefer Event Effects whenever they can express the change, and never mutate State from a Screen rendering expression that Ren'Py may evaluate repeatedly. Do not rely on other internal `scene_*` functions or mutate Runtime collections directly from creator code.
 
 ## Screens and GUI
 

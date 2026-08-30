@@ -39,8 +39,9 @@
     return depth;
   }
 
-  function createChoicePicker({ escapeHtml, generateId, beforeOpen = () => {} }) {
+  function createChoicePicker({ escapeHtml, generateId, beforeOpen = () => {}, typeBadge = null }) {
     const submenuCloseTimers = new WeakMap();
+    const anchorRects = new WeakMap();
     let pointerActivePicker = null;
 
     const clearPointerActivePicker = () => {
@@ -128,6 +129,21 @@
       return height;
     }
 
+    function focusWithinMenu(item) {
+      if (!item) return;
+      // A popover is still a DOM descendant of the form's scroll containers.
+      // Focus must scroll only its menu, never the form or an inline rule row.
+      item.focus({ preventScroll: true });
+      const surface = item.closest(".select-choice-submenu-scroll, .select-choice-menu");
+      if (!surface) return;
+      const itemRect = item.getBoundingClientRect();
+      const surfaceRect = surface.getBoundingClientRect();
+      const top = surfaceRect.top + surface.clientTop;
+      const bottom = top + surface.clientHeight;
+      if (itemRect.top < top) surface.scrollTop -= top - itemRect.top;
+      else if (itemRect.bottom > bottom) surface.scrollTop += itemRect.bottom - bottom;
+    }
+
     function focusRelativeMenuItem(active, key, folderSelector, choiceSelector) {
       const menu = active.closest(".select-choice-menu, .select-choice-submenu");
       const items = directMenuItems(menu, folderSelector, choiceSelector);
@@ -136,7 +152,7 @@
       const next = key === "Home" ? 0
         : key === "End" ? items.length - 1
           : (current + (key === "ArrowDown" ? 1 : -1) + items.length) % items.length;
-      items[next]?.focus();
+      focusWithinMenu(items[next]);
       return true;
     }
 
@@ -145,6 +161,7 @@
         if (picker === except) return;
         hideMenuSurface(picker.querySelector(":scope > .select-choice-menu"));
         picker.classList.remove("open");
+        typeBadge?.setOpen(picker.querySelector("select"), false);
         picker.querySelectorAll(".is-picker-active").forEach((active) => active.classList.remove("is-picker-active"));
         picker.querySelector("[data-select-picker-toggle]")?.setAttribute("aria-expanded", "false");
         picker.querySelectorAll(".select-choice-branch").forEach((branch) => {
@@ -259,7 +276,7 @@
       if (!item) return null;
       picker.querySelectorAll(".is-picker-active").forEach((active) => active.classList.remove("is-picker-active"));
       item.classList.add("is-picker-active");
-      item.focus();
+      focusWithinMenu(item);
       return item;
     }
 
@@ -282,12 +299,22 @@
       if (!picker) return;
       const trigger = picker.querySelector("[data-select-picker-toggle]");
       const selectedLabel = selectedOptionLabel(select);
-      if (trigger instanceof HTMLInputElement) trigger.value = selectedLabel;
+      // An opt-in short label affects only the closed control, never menu text or values.
+      const compactLabel = select.selectedOptions?.[0]?.dataset.pickerLabel;
+      if (trigger instanceof HTMLInputElement) trigger.value = compactLabel || selectedLabel;
       else {
         const label = trigger?.querySelector("strong");
         if (label) label.textContent = selectedLabel;
       }
-      if (trigger) trigger.disabled = select.disabled;
+      if (trigger) {
+        trigger.disabled = select.disabled;
+        trigger.title = selectedLabel;
+        if (compactLabel) {
+          trigger.setAttribute("aria-description", selectedLabel);
+        } else {
+          trigger.removeAttribute("aria-description");
+        }
+      }
       populateMenu(select, picker);
     }
 
@@ -296,6 +323,7 @@
       const menu = picker.querySelector(".select-choice-menu");
       if (!trigger || !menu) return;
       const rect = trigger.getBoundingClientRect();
+      anchorRects.set(picker, { x: rect.x, y: rect.y, width: rect.width, height: rect.height });
       const edge = 12;
       const width = Math.min(SELECT_MENU_WIDTH, window.innerWidth - edge * 2);
       const model = buildOptionHierarchy([...picker.querySelectorAll(".select-choice-option")].map((option) => ({
@@ -335,6 +363,20 @@
       const height = fitMenuSurface(menu);
       if (rect.bottom + 7 + height > window.innerHeight - edge && rect.top > height + edge) {
         menu.style.top = `${rect.top - height - 7}px`;
+      }
+    }
+
+    function handleScroll(event) {
+      if (event.target instanceof Element && event.target.closest(".select-choice-menu, .select-choice-submenu")) return;
+      // Focus/scrollIntoView may queue scroll events before a picker opens.
+      // Dismiss only when the anchor actually moved after it was positioned.
+      for (const picker of document.querySelectorAll(".select-choice-picker.open")) {
+        const previous = anchorRects.get(picker);
+        const current = picker.querySelector("[data-select-picker-toggle]")?.getBoundingClientRect();
+        if (!previous || !current || ["x", "y", "width", "height"].some((key) => Math.abs(previous[key] - current[key]) > 0.5)) {
+          close();
+          return;
+        }
       }
     }
 
@@ -386,6 +428,7 @@
         }
         const choice = event.target.closest("[data-select-value]");
         if (choice && !choice.disabled) {
+          const badgeSnapshot = typeBadge?.capture(select);
           const changed = select.value !== choice.dataset.selectValue;
           select.value = choice.dataset.selectValue;
           sync(select);
@@ -394,6 +437,7 @@
           if (changed) {
             select.dispatchEvent(new Event("input", { bubbles: true }));
             select.dispatchEvent(new Event("change", { bubbles: true }));
+            typeBadge?.restore(badgeSnapshot);
           }
           event.preventDefault();
           return;
@@ -403,6 +447,7 @@
         beforeOpen();
         close(opening ? picker : null);
         picker.classList.toggle("open", opening);
+        typeBadge?.setOpen(select, opening);
         trigger.setAttribute("aria-expanded", String(opening));
         if (opening) {
           populateMenu(select, picker);
@@ -510,6 +555,7 @@
 
     return {
       close,
+      handleScroll,
       enhance,
       enhanceAll,
       hierarchy: {

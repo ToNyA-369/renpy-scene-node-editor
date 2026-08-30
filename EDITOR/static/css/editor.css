@@ -1710,13 +1710,6 @@ textarea:hover {
   padding-block: 10px;
 }
 
-#conditionList input,
-#conditionList select,
-#effectList input,
-#effectList select {
-  height: 42px;
-}
-
 .weighted-choice-table {
   display: grid;
   gap: 7px;

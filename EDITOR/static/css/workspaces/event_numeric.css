@@ -1,0 +1,164 @@
+/* Every rule shares one horizontal shell, regardless of its state type. */
+.repeat-row.condition-row,
+.repeat-row.effect-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: nowrap;
+  gap: 8px;
+  max-width: 100%;
+  overflow: visible;
+}
+
+.rule-fields {
+  --badge-width: 62px;
+  display: flex;
+  flex: 1 1 440px;
+  align-items: center;
+  gap: 6px;
+  height: var(--control-height);
+  padding: 0;
+  background: transparent;
+  border: 0;
+  border-radius: var(--control-radius);
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
+  scrollbar-color: var(--line) transparent;
+  overscroll-behavior-x: contain;
+}
+
+.rule-fields > .field { flex: 1 0 110px; }
+.rule-fields > .rule-type { flex: 0 0 var(--badge-width); }
+.rule-fields > .rule-operator { flex: 0 0 52px; }
+[data-condition-type="memory"] .rule-operator,
+[data-effect-type="memory"] .rule-operator,
+[data-effect-type="option"] .rule-operator { flex-basis: 86px; }
+.repeat-row.condition-row > .row-button,
+.repeat-row.effect-row > .row-button {
+  flex: 0 0 26px;
+  width: 26px;
+  min-width: 26px;
+  margin-left: 0;
+}
+
+.rule-fields .field,
+.rule-fields .select-choice-picker { min-width: 0; }
+.rule-fields .field { gap: 0; }
+.rule-fields > .field,
+.rule-fields .numeric-field,
+.rule-fields .numeric-calculation,
+.rule-fields .numeric-field > .field,
+.rule-fields .numeric-operator,
+.rule-fields .select-choice-picker { height: 100%; }
+.rule-fields input,
+.rule-fields select {
+  height: 100%;
+  min-height: 0;
+  padding: 0 7px;
+  border-color: transparent;
+  border-radius: calc(var(--control-radius) - 2px);
+  background: transparent;
+  font-variant-numeric: tabular-nums;
+}
+.rule-fields > .field:not(.rule-type) > input:not(.select-choice-native),
+.rule-fields > .field:not(.rule-type) > .select-choice-picker > input.select-choice-trigger {
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--control-radius);
+}
+.rule-fields input.select-choice-trigger {
+  height: 100%;
+  min-height: 0;
+  padding-right: 20px;
+}
+.rule-fields .select-choice-picker::after { right: 7px; }
+.rule-fields input:hover { background: var(--surface-soft); }
+.rule-fields input:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+/* Each source controls only its own value/operands, inside the rule's shell. */
+.numeric-field {
+  --badge-width: 32px;
+  display: flex;
+  flex: 1 0 132px;
+  align-items: center;
+  min-width: 0;
+  gap: 0;
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--control-radius);
+}
+.numeric-field[data-numeric-mode="calc"] {
+  flex: 2 0 238px;
+  gap: 6px;
+  background: transparent;
+  border-color: transparent;
+}
+.numeric-field > .numeric-source { flex: 0 0 var(--badge-width); }
+.numeric-field .numeric-value { flex: 1 1 0; }
+.numeric-calculation {
+  display: flex;
+  flex: 1 1 0;
+  align-items: center;
+  min-width: 0;
+  gap: 6px;
+}
+.numeric-calculation > .numeric-field { flex: 1 1 0; }
+.numeric-calculation > .numeric-field[data-numeric-mode="stat"] { flex-grow: 1.6; }
+.numeric-calculation > .numeric-operator { flex: 0 0 32px; }
+.numeric-calculation > .numeric-operator input.select-choice-trigger {
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--control-radius);
+}
+.numeric-operator input.select-choice-trigger { padding-left: 4px; padding-right: 13px; text-align: center; }
+.numeric-operator .select-choice-picker::after { right: 2px; }
+
+/* An opaque curtain expands within the existing frame, never resizing fields.
+   Separate paint from hit testing so cancellation and rapid switching stay live. */
+.type-badge-scope { position: relative; isolation: isolate; }
+.type-badge-cover {
+  position: absolute;
+  z-index: 2;
+  inset: 0 auto 0 0;
+  width: var(--badge-width);
+  border-radius: inherit;
+  background: color-mix(in srgb, var(--ink) 7%, var(--surface));
+  border: 0 solid transparent;
+  pointer-events: none;
+  transition: width var(--motion-medium) var(--ease-settle);
+}
+.type-badge-open > .type-badge-cover { width: 100%; }
+.rule-fields > .type-badge-cover,
+.numeric-field[data-numeric-mode="calc"] > .type-badge-cover {
+  border-width: 1px;
+  border-color: var(--line-strong);
+}
+.type-badge-scope > .type-badge { position: relative; z-index: 3; }
+.rule-fields .type-badge input.select-choice-trigger {
+  padding: 0 3px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0;
+  text-align: center;
+  border-radius: inherit;
+}
+.rule-fields .rule-type input.select-choice-trigger { font-size: 12px; }
+.type-badge .select-choice-picker::after { display: none; }
+.type-badge > .select-choice-picker { border-radius: inherit; }
+.rule-type { border-radius: var(--control-radius); }
+.numeric-source { border-radius: calc(var(--control-radius) - 2px); }
+.type-badge .select-choice-picker.open > .select-choice-menu {
+  animation-delay: var(--motion-fast);
+  animation-fill-mode: backwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .type-badge-cover { transition: none; }
+  .type-badge .select-choice-picker.open > .select-choice-menu { animation: none; }
+}

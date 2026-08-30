@@ -49,6 +49,7 @@ Installer 會把精簡契約與中英文創作者文件放在：
 請閱讀 AI_CONTEXT，然後只修改我指定的 CONTENT .rpy。
 保留既有 label ID，在 label 內加入對話、轉場與 ATL，最後 return。
 不要重複 Event 已經負責的 Stat／Memory Effects，也不要自行 GOTO Scene Node。
+只有 Editor 無法表達的專屬系統才使用 scene_change_stat；提醒我它會先於該 Event 的 Effects 執行。
 ```
 
 ## 實作專屬系統
@@ -57,6 +58,7 @@ Installer 會把精簡契約與中英文創作者文件放在：
 我需要一個 Editor 尚未資料化的背包系統。
 先提出 creator-owned .rpy 的模組邊界，以及如何透過 Content 或公開 API 與 Scene Node 流程連接。
 不要把背包程式寫進 option_renderer.rpy，不要新增 Schema 欄位，除非我先確認設計。
+優先以 Event Effects 管理一般 Stat／Memory 改變；Screen 顯示 expression 只能呼叫查詢 API。
 ```
 
 ## 建立全局規則

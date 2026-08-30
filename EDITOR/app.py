@@ -4,6 +4,7 @@
 import argparse
 import datetime
 import json
+import math
 import mimetypes
 import os
 import re
@@ -68,6 +69,7 @@ EFFECT_OPERATORS = {
     "memory": ("add", "remove", "clear"),
     "option": ("enable", "disable"),
 }
+NUMERIC_OPERATORS = ("+", "-", "*", "/", "%")
 OPTION_AVAILABILITY_VALUES = ("ALWAYS", "CONTROLLED")
 OPTION_EFFECT_TARGETS = ("element", "item")
 TEXTBOX_STYLE_DEFAULTS = {
@@ -87,6 +89,11 @@ TEXTBOX_FEATURE_DEFAULTS = {
 }
 
 PYTHON_EN_DICTIONARY = {
+    "{field} 必須是有限數字。": "{field} must be a finite number.",
+    "{field} 的除數不可為零。": "{field} divisor must not be zero.",
+    "{field} 只允許數字、Stat 或一層算術運算。": "{field} only accepts a number, Stat, or one arithmetic operation.",
+    "Effect 的目標必須是 Stat ID。": "An Effect target must be a Stat ID.",
+    "不支援的 Event Version。": "Unsupported Event Version.",
     "Editor 設定必須是 object。": "Editor settings must be an object.",
     "快捷鍵設定必須是 object。": "Shortcut settings must be an object.",
     "語言設定不合法，僅支援 zh-Hant 與 en。": "Invalid language setting, only zh-Hant and en are supported.",
@@ -741,6 +748,45 @@ def delete_textbox_profile(profile_id):
     return {"deleted": True, "id": profile_id}
 
 
+def validate_numeric_value(value, field="Value", allow_calculation=True):
+    """A number, a stable Stat reference, or exactly one binary operation."""
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        if isinstance(value, float) and not math.isfinite(value):
+            raise ApiError(HTTPStatus.BAD_REQUEST, tr("{field} 必須是有限數字。", field=field))
+        return value
+    if isinstance(value, dict):
+        if value.get("type") == "stat" and set(value) == {"type", "id"}:
+            stat_id = value["id"]
+            if isinstance(stat_id, str) and stat_id and clean_file_name(stat_id, "") == stat_id:
+                return {"type": "stat", "id": stat_id}
+        if (allow_calculation and value.get("type") == "calc"
+                and set(value) == {"type", "op", "left", "right"}
+                and value.get("op") in NUMERIC_OPERATORS):
+            left = validate_numeric_value(value["left"], field + ".left", False)
+            right = validate_numeric_value(value["right"], field + ".right", False)
+            if value["op"] in ("/", "%") and right == 0:
+                raise ApiError(HTTPStatus.BAD_REQUEST, tr("{field} 的除數不可為零。", field=field))
+            return {"type": "calc", "op": value["op"], "left": left, "right": right}
+    raise ApiError(HTTPStatus.BAD_REQUEST, tr("{field} 只允許數字、Stat 或一層算術運算。", field=field))
+
+
+def numeric_stat_ids(value):
+    if not isinstance(value, dict):
+        return []
+    if value.get("type") == "stat":
+        return [value.get("id")]
+    if value.get("type") == "calc":
+        return numeric_stat_ids(value.get("left")) + numeric_stat_ids(value.get("right"))
+    return []
+
+
+def rule_stat_ids(rule):
+    if rule.get("type") != "stat":
+        return []
+    left = numeric_stat_ids(rule["left"]) if "left" in rule else [rule.get("id")]
+    return list(dict.fromkeys(left + numeric_stat_ids(rule.get("value"))))
+
+
 def validate_condition(condition, field="Condition"):
     result = dict(condition)
     condition_type = str(result.get("type") or "stat").lower()
@@ -749,16 +795,23 @@ def validate_condition(condition, field="Condition"):
     result["type"] = condition_type
 
     if condition_type == "stat":
-        result["id"] = clean_file_name(result.get("id"), "")
+        if "left" in result:
+            result["left"] = validate_numeric_value(result["left"], field + ".left")
+            result.pop("id", None)
+            if isinstance(result["left"], dict) and result["left"].get("type") == "stat":
+                result["id"] = result.pop("left")["id"]
+        else:
+            result["id"] = clean_file_name(result.get("id"), "")
         operation = str(result.get("op") or ">=")
         if operation not in CONDITION_OPERATORS["stat"]:
             raise ApiError(HTTPStatus.BAD_REQUEST, tr("{field} 的 Stat 判斷不合法。", field=field))
         result["op"] = operation
-        result["value"] = number_setting(result.get("value", 0), 0, tr("{field} 的值", field=field))
+        result["value"] = validate_numeric_value(result.get("value", 0), field + ".value")
         result.pop("bank", None)
         return result
 
     if condition_type == "memory":
+        result.pop("left", None)
         result["bank"] = clean_file_name(result.get("bank") or DEFAULT_MEMORY_ID, "")
         tag_id = str(result.get("id") or "").strip()
         if not tag_id:
@@ -796,12 +849,16 @@ def validate_effect(effect, field="Effect"):
     result["type"] = effect_type
 
     if effect_type == "stat":
+        if "left" in result:
+            raise ApiError(HTTPStatus.BAD_REQUEST, tr("Effect 的目標必須是 Stat ID。"))
         result["id"] = clean_file_name(result.get("id"), "")
         operation = str(result.get("op") or "+")
         if operation not in EFFECT_OPERATORS["stat"]:
             raise ApiError(HTTPStatus.BAD_REQUEST, tr("{field} 的 Stat 操作不合法。", field=field))
         result["op"] = operation
-        result["value"] = number_setting(result.get("value", 0), 0, tr("{field} 的值", field=field))
+        result["value"] = validate_numeric_value(result.get("value", 0), field + ".value")
+        if operation == "/" and result["value"] == 0:
+            raise ApiError(HTTPStatus.BAD_REQUEST, tr("{field} 的除數不可為零。", field=field))
         result.pop("bank", None)
         return result
 
@@ -1478,6 +1535,8 @@ def validate_editor_order(value, field="Order"):
 def validate_event(event, global_scope=False, owner_node_id=None):
     if not isinstance(event, dict):
         raise ApiError(HTTPStatus.BAD_REQUEST, tr("Event 必須是 JSON object。"))
+    if type(event.get("Version", 1)) is not int or event.get("Version", 1) not in (1, 2):
+        raise ApiError(HTTPStatus.BAD_REQUEST, tr("不支援的 Event Version。"))
     if global_scope and owner_node_id is None:
         owner_node_id = GLOBAL_NODE_ID
     event_id = clean_file_name(event.get("ID") or generate_id("event"), ".json")
@@ -1533,6 +1592,11 @@ def validate_event(event, global_scope=False, owner_node_id=None):
         "Effects": validated_effects,
         "Content": content,
     }
+    if event.get("Version") == 2 or any(
+        "left" in rule or isinstance(rule.get("value"), dict)
+        for rule in validated_conditions + validated_effects
+    ):
+        result["Version"] = 2
     if "Order" in event:
         result["Order"] = validate_editor_order(event.get("Order"), "Event Order")
     if is_lifecycle:
@@ -1693,13 +1757,15 @@ def validate_project():
                 issues.append({"level": "warning", "location": event_location, "message": tr("檔名與 Event ID 不一致。")})
 
             for condition in event["Conditions"]:
-                if condition.get("type") == "stat" and condition.get("id") not in stats:
-                    issues.append({"level": "warning", "location": event_location, "message": tr("找不到 Stat：{id}。", id=condition.get('id', ''))})
+                for stat_id in rule_stat_ids(condition):
+                    if stat_id not in stats:
+                        issues.append({"level": "warning", "location": event_location, "message": tr("找不到 Stat：{id}。", id=stat_id)})
                 if condition.get("type") == "memory" and condition.get("bank") not in memories:
                     issues.append({"level": "warning", "location": event_location, "message": tr("找不到記憶庫：{bank}。", bank=condition.get('bank', ''))})
             for effect in event["Effects"]:
-                if effect.get("type") == "stat" and effect.get("id") not in stats:
-                    issues.append({"level": "warning", "location": event_location, "message": tr("找不到 Stat：{id}。", id=effect.get('id', ''))})
+                for stat_id in rule_stat_ids(effect):
+                    if stat_id not in stats:
+                        issues.append({"level": "warning", "location": event_location, "message": tr("找不到 Stat：{id}。", id=stat_id)})
                 if effect.get("type") == "memory" and effect.get("bank") not in memories:
                     issues.append({"level": "warning", "location": event_location, "message": tr("找不到記憶庫：{bank}。", bank=effect.get('bank', ''))})
                 if effect.get("type") == "option":

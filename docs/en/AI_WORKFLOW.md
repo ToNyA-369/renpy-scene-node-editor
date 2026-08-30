@@ -49,6 +49,7 @@ Use show screen room_hud in the specified On Enter Content and hide screen room_
 Read AI_CONTEXT, then edit only the specified CONTENT .rpy.
 Preserve the existing label ID. Add dialogue, transitions, and ATL inside the label, then return.
 Do not duplicate Stat / Memory Effects already owned by the Event and do not GOTO a Scene Node directly.
+Use scene_change_stat only for a creator-owned system the Editor cannot express, and remind me that it runs before that Event's Effects.
 ```
 
 ## Implement a custom system
@@ -57,6 +58,7 @@ Do not duplicate Stat / Memory Effects already owned by the Event and do not GOT
 I need an inventory system that is not represented by the Editor.
 First propose a creator-owned .rpy module boundary and how it connects through Content or public APIs.
 Do not put inventory code in option_renderer.rpy or add Schema fields without my approval.
+Prefer Event Effects for ordinary Stat / Memory changes, and call query APIs only from Screen rendering expressions.
 ```
 
 ## Create a global rule
