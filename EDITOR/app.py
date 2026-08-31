@@ -1214,13 +1214,15 @@ def node_summary(directory, include_editor_details=True):
         parse_error = exc.message
     relative = directory.relative_to(PROJECT_ROOT / NODE_DIR).as_posix()
     events = list((directory / EVENT_DIR).glob("*.json")) if (directory / EVENT_DIR).exists() else []
+    group_path = group_path_for_document(data, validate_node_group)
     result = {
         "path": relative,
         "id": data.get("ID", directory.name),
         "name": data.get("Name", data.get("ID", directory.name)),
         "eventCount": len(events),
         "order": data.get("Order"),
-        "group": validate_node_group(data.get("Group")),
+        "group": group_path[-1] if group_path else DEFAULT_EVENT_GROUP,
+        "groupPath": group_path,
         "parseError": parse_error,
     }
     if not include_editor_details:
@@ -1541,6 +1543,44 @@ def validate_event_group(value):
     return group
 
 
+def validate_group_path(value, field):
+    """Validate authoring-only nested group metadata without interpreting names."""
+    if not isinstance(value, list) or len(value) > 3:
+        raise ApiError(HTTPStatus.BAD_REQUEST, tr("{field} 必須是最多三層的群組名稱陣列。", field=field))
+    result = []
+    for component in value:
+        if not isinstance(component, str):
+            raise ApiError(HTTPStatus.BAD_REQUEST, tr("{field} 的每一層都必須是群組名稱。", field=field))
+        name = component.strip()
+        if not name or len(name) > 80 or name.casefold() == DEFAULT_EVENT_GROUP.casefold():
+            raise ApiError(HTTPStatus.BAD_REQUEST, tr("{field} 的群組名稱不合法。", field=field))
+        result.append(name)
+    return result
+
+
+def group_path_for_document(document, validate_group):
+    """Read explicit paths authoritatively, with the old Group field as a fallback."""
+    if "Group Path" in document:
+        return validate_group_path(document.get("Group Path"), "Group Path")
+    group = validate_group(document.get("Group"))
+    return [] if group == DEFAULT_EVENT_GROUP else [group]
+
+
+def apply_group_assignment(document, value, validate_group):
+    """Strings retain legacy serialization; arrays opt into Group Path serialization."""
+    updated = dict(document)
+    if isinstance(value, list):
+        path = validate_group_path(value, "Group Path")
+        updated["Group Path"] = path
+        updated["Group"] = path[-1] if path else DEFAULT_EVENT_GROUP
+    else:
+        if not isinstance(value, str):
+            raise ApiError(HTTPStatus.BAD_REQUEST, tr("群組指派必須是舊式名稱字串或 Group Path 陣列。"))
+        updated.pop("Group Path", None)
+        updated["Group"] = validate_group(value)
+    return updated
+
+
 def validate_editor_order(value, field="Order"):
     if not isinstance(value, int) or isinstance(value, bool) or value < 0:
         raise ApiError(HTTPStatus.BAD_REQUEST, tr("{field} 必須是非負整數。", field=field))
@@ -1596,10 +1636,11 @@ def validate_event(event, global_scope=False, owner_node_id=None):
                 tr("Option Effect 只能控制同一個 Options 作用域內的 Option。"),
             )
 
+    group_path = group_path_for_document(event, validate_event_group)
     result = {
         "ID": event_id,
         "Name": str(event.get("Name") or event_id),
-        "Group": validate_event_group(event.get("Group")),
+        "Group": group_path[-1] if group_path else DEFAULT_EVENT_GROUP,
         "Trigger": trigger,
         "Priority": priority,
         "Once": bool(event.get("Once", False)),
@@ -1607,6 +1648,8 @@ def validate_event(event, global_scope=False, owner_node_id=None):
         "Effects": validated_effects,
         "Content": content,
     }
+    if "Group Path" in event:
+        result["Group Path"] = group_path
     if event.get("Version") == 2 or any(
         "left" in rule or isinstance(rule.get("value"), dict)
         for rule in validated_conditions + validated_effects
@@ -1873,7 +1916,11 @@ def save_node(payload):
     }
     if "Order" in previous:
         updated["Order"] = validate_editor_order(previous.get("Order"), "Scene Node Order")
-    if "Group" in previous:
+    if "Group Path" in previous:
+        group_path = group_path_for_document(previous, validate_node_group)
+        updated["Group Path"] = group_path
+        updated["Group"] = group_path[-1] if group_path else DEFAULT_EVENT_GROUP
+    elif "Group" in previous:
         updated["Group"] = validate_node_group(previous.get("Group"))
     if isinstance(previous.get("Content Order"), list):
         updated["Content Order"] = previous["Content Order"]
@@ -1931,30 +1978,13 @@ def save_node_groups(payload):
         path = node_path(relative) / "Node.json"
         data = read_json(path, {}) or {}
         if raw_path in assignments:
-            data["Group"] = validate_node_group(assignments[raw_path])
+            data = apply_group_assignment(data, assignments[raw_path], validate_node_group)
         if relative in order_indexes:
             data["Order"] = order_indexes[relative]
         updates.append((path, data))
+    # All assignments and order members have been resolved and validated above.
     write_event_updates(updates)
     return {"nodes": scan_nodes()}
-
-
-def dissolve_singleton_node_groups():
-    grouped = {}
-    for node in scan_nodes(False):
-        group = validate_node_group(node.get("group"))
-        if group != DEFAULT_EVENT_GROUP:
-            grouped.setdefault(group, []).append(node)
-    updates = []
-    for entries in grouped.values():
-        if len(entries) != 1:
-            continue
-        path = node_path(entries[0]["path"]) / "Node.json"
-        data = read_json(path, {}) or {}
-        data["Group"] = DEFAULT_EVENT_GROUP
-        updates.append((path, data))
-    write_event_updates(updates)
-    return scan_nodes()
 
 
 def save_content_order(payload):
@@ -1992,14 +2022,30 @@ def save_event(payload):
     if not (directory / "Node.json").exists():
         raise ApiError(HTTPStatus.NOT_FOUND, tr("找不到指定的 Global Node。") if global_scope else tr("找不到指定的 Scene Node。"))
     node = read_json(directory / "Node.json", {}) or {}
+    raw_event = payload.get("event")
+    if not isinstance(raw_event, dict):
+        raise ApiError(HTTPStatus.BAD_REQUEST, tr("Event 必須是 JSON object。"))
+    event_root = directory / EVENT_DIR
+    original = payload.get("originalId")
+    existing_path = None
+    if original:
+        existing_path = event_root / f"{clean_file_name(original, '.json')}.json"
+    else:
+        event_id = raw_event.get("ID")
+        if event_id:
+            existing_path = event_root / f"{clean_file_name(event_id, '.json')}.json"
+    # Form saves normally edit Event fields, not group membership. Keep an explicit
+    # path when an older frontend payload does not carry it yet.
+    if "Group Path" not in raw_event and existing_path and existing_path.exists():
+        previous = read_json(existing_path, {}) or {}
+        if "Group Path" in previous:
+            raw_event = {**raw_event, "Group Path": previous["Group Path"]}
     event = validate_event(
-        payload.get("event"),
+        raw_event,
         global_scope=global_scope,
         owner_node_id=GLOBAL_NODE_ID if global_scope else node.get("ID"),
     )
-    event_root = directory / EVENT_DIR
     event_root.mkdir(exist_ok=True)
-    original = payload.get("originalId")
     old_path_to_remove = None
     if original:
         original_name = clean_file_name(original, ".json")
@@ -2068,7 +2114,7 @@ def rename_event_group(payload):
             raw_event = read_json(path, {}) or {}
             updated = dict(raw_event)
             if raw_event_id in assignments:
-                updated["Group"] = validate_event_group(assignments[raw_event_id])
+                updated = apply_group_assignment(updated, assignments[raw_event_id], validate_event_group)
             if event_id in order_indexes:
                 updated["Order"] = order_indexes[event_id]
             validated = validate_event(
@@ -2094,10 +2140,16 @@ def rename_event_group(payload):
     if event_root.exists():
         for path in sorted(event_root.glob("*.json"), key=lambda value: value.name.casefold()):
             raw_event = read_json(path, {}) or {}
-            if validate_event_group(raw_event.get("Group")) != source:
+            group_path = group_path_for_document(raw_event, validate_event_group)
+            if (group_path[-1] if group_path else DEFAULT_EVENT_GROUP) != source:
                 continue
+            if "Group Path" in raw_event:
+                updated_path = [*group_path[:-1], target]
+                raw_event = {**raw_event, "Group Path": updated_path, "Group": target}
+            else:
+                raw_event = {**raw_event, "Group": target}
             validated = validate_event(
-                {**raw_event, "Group": target},
+                raw_event,
                 global_scope=global_scope,
                 owner_node_id=owner_node_id,
             )
@@ -2105,27 +2157,6 @@ def rename_event_group(payload):
 
     write_event_updates(updates)
     return {"source": source, "target": target, "events": [event for _, event in updates]}
-
-
-def dissolve_singleton_event_groups(directory):
-    event_root = directory / EVENT_DIR
-    grouped = {}
-    if not event_root.exists():
-        return []
-    for path in sorted(event_root.glob("*.json"), key=lambda value: value.name.casefold()):
-        event = read_json(path, {}) or {}
-        group = validate_event_group(event.get("Group"))
-        if group != DEFAULT_EVENT_GROUP:
-            grouped.setdefault(group, []).append((path, event))
-    updates = []
-    for entries in grouped.values():
-        if len(entries) != 1:
-            continue
-        path, event = entries[0]
-        event = {**event, "Group": DEFAULT_EVENT_GROUP}
-        write_json(path, event)
-        updates.append(event)
-    return updates
 
 
 def save_content_file(root, payload):
@@ -2231,7 +2262,7 @@ def delete_node(relative):
         transaction.capture_tree(directory)
         transaction.capture_tree(target)
     shutil.move(str(directory), str(target))
-    return {"deleted": True, "backup": str(target), "nodes": dissolve_singleton_node_groups()}
+    return {"deleted": True, "backup": str(target), "nodes": scan_nodes()}
 
 
 class EditorHandler(BaseHTTPRequestHandler):
@@ -2490,8 +2521,6 @@ class EditorHandler(BaseHTTPRequestHandler):
                     node["Content Order"] = [entry for entry in order if entry != name]
                     write_json(node_file, node)
                 response = {"deleted": True}
-                if parsed.path == "/api/events":
-                    response["events"] = dissolve_singleton_event_groups(directory.parent)
             self.send_json(response)
         except ApiError as exc:
             self.send_error_json(exc)
