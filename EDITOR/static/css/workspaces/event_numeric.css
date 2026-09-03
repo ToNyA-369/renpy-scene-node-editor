@@ -34,7 +34,8 @@
 [data-effect-type="memory"] .rule-operator,
 [data-effect-type="option"] .rule-operator { flex-basis: 86px; }
 .repeat-row.condition-row > .row-button,
-.repeat-row.effect-row > .row-button {
+.repeat-row.effect-row > .row-button,
+.repeat-row.weight-row > .row-button {
   flex: 0 0 26px;
   width: 26px;
   min-width: 26px;

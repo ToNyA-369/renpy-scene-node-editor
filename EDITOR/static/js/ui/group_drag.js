@@ -1,10 +1,10 @@
 "use strict";
 
 (function exposeGroupDrag(root, factory) {
-  const api = factory();
+  const api = factory(typeof module === "object" && module.exports ? require("../core/group_tree.js") : root.SceneGroupTree);
   if (typeof module === "object" && module.exports) module.exports = api;
   if (root) root.SceneGroupDrag = api;
-})(typeof globalThis !== "undefined" ? globalThis : this, () => {
+})(typeof globalThis !== "undefined" ? globalThis : this, (groupTree) => {
   const DEFAULT_DWELL_MS = 500;
 
   function insertionPosition(pointerY, rect, previousPosition = null, hysteresisRatio = 0.16) {
@@ -32,7 +32,7 @@
   }
 
   function editingGroupName(root, groupSelector) {
-    return root?.querySelector(`${groupSelector}.is-group-editing`)?.dataset.groupDrop || null;
+    return [...(root?.querySelectorAll(`${groupSelector}.is-group-editing`) || [])].map((group) => group.dataset.groupDrop);
   }
 
   function animateEditingGroupExit(root, {
@@ -40,6 +40,13 @@
     previousGroup,
     currentGroup = null,
   }) {
+    if (Array.isArray(previousGroup)) {
+      const current = Array.isArray(currentGroup) ? currentGroup : [currentGroup];
+      previousGroup.filter((name) => !current.includes(name)).forEach((name) => {
+        animateEditingGroupExit(root, { groupSelector, previousGroup: name });
+      });
+      return previousGroup.length > 0;
+    }
     if (!root || !previousGroup || previousGroup === currentGroup) return false;
     const group = [...root.querySelectorAll(groupSelector)]
       .find((candidate) => candidate.dataset.groupDrop === previousGroup);
@@ -223,9 +230,12 @@
     ungroupedSelector,
     handleSelector = null,
     groupHandleSelector = null,
+    collapseGroupPreview = true,
     listSelector = null,
+    nested = false,
     defaultGroup = "Normal",
     dwellMs = DEFAULT_DWELL_MS,
+    hoverHandoffMs = 180,
     getItemId = (element) => element.dataset.groupItemId,
     getItemGroup = (element) => element.dataset.groupItemGroup,
     getGroupName = (element) => element.dataset.groupDrop,
@@ -251,10 +261,39 @@
     let scrollContainer = null;
     let previousOverflowAnchor = null;
     let previousDocumentUserSelect = null;
+    let hoverHandoffTimer = null;
+    const hoverHeldGroups = new Set();
 
     const closest = (target, selector) => {
       const element = target?.closest?.(selector);
       return element && (element === root || root.contains(element)) ? element : null;
+    };
+    const clearHoverHandoff = () => {
+      if (hoverHandoffTimer) window.clearTimeout(hoverHandoffTimer);
+      hoverHandoffTimer = null;
+      hoverHeldGroups.forEach((group) => group.classList.remove("is-group-hover-held"));
+      hoverHeldGroups.clear();
+    };
+    const holdHoveredGroup = (group) => {
+      if (!nested || !group || root.classList.contains("is-group-dragging")) return;
+      if (hoverHandoffTimer) window.clearTimeout(hoverHandoffTimer);
+      hoverHandoffTimer = null;
+      hoverHeldGroups.add(group);
+      group.classList.add("is-group-hover-held");
+    };
+    const handleGroupPointerOver = (event) => {
+      if (!nested) return;
+      const group = closest(event.target, groupSelector);
+      const previous = closest(event.relatedTarget, groupSelector);
+      if (group && group !== previous) holdHoveredGroup(group);
+    };
+    const handleGroupPointerOut = (event) => {
+      if (!nested) return;
+      const group = closest(event.target, groupSelector);
+      const next = closest(event.relatedTarget, groupSelector);
+      if (!group || group === next || next) return;
+      if (hoverHandoffTimer) window.clearTimeout(hoverHandoffTimer);
+      hoverHandoffTimer = window.setTimeout(clearHoverHandoff, hoverHandoffMs);
     };
     const groupList = (group) => {
       if (!group) return null;
@@ -293,6 +332,17 @@
         const x = oldRect.left - nextRect.left;
         const y = oldRect.top - nextRect.top;
         if (Math.abs(x) < 0.5 && Math.abs(y) < 0.5) return;
+        if (nested) {
+          // A descendant travels with its animated ancestor; a second FLIP
+          // would double its displacement and make nested rows jump.
+          let parent = element.parentElement;
+          while (parent && parent !== root) {
+            const oldParent = before.get(parent);
+            const now = oldParent ? parent.getBoundingClientRect() : null;
+            if (now && (Math.abs(oldParent.top - now.top) >= 0.5 || Math.abs(oldParent.left - now.left) >= 0.5)) return;
+            parent = parent.parentElement;
+          }
+        }
         reflowAnimations.get(element)?.cancel();
         const animation = element.animate([
           { transform: `translate3d(${x}px, ${y}px, 0)` },
@@ -355,7 +405,7 @@
     };
 
     const candidateStillContainsPointer = (item = candidate, group = candidateGroup) => (
-      pointInside(item) || pointInside(group)
+      nested && item ? pointInside(item) : pointInside(item) || pointInside(group)
     );
 
     const beginCandidate = (item, group) => {
@@ -373,11 +423,13 @@
           return;
         }
         if (item && dropReady?.targetId === getItemId(item)) dropReady.mode = "group";
-        if (!item && group && dropReady?.targetGroup === normalizeGroup(getGroupName(group), defaultGroup)) {
+        if (!nested && !item && group && dropReady?.targetGroup === normalizeGroup(getGroupName(group), defaultGroup)) {
           dropReady.mode = "group";
         }
         item?.classList.add("is-group-ready");
-        group?.classList.add("is-group-preview-open");
+        // Nesting an item previews that new child group, not its existing parent.
+        if (!nested || !item) group?.classList.add("is-group-preview-open");
+        if (nested) scheduleLayoutFrame({ clientX: press.currentX, clientY: press.currentY });
       }, dwellMs);
     };
 
@@ -391,6 +443,9 @@
       clone.removeAttribute("id");
       clone.classList.remove("is-group-candidate", "is-group-ready", "is-group-dragging-item");
       if (groupBlock) clone.classList.add("is-group-preview-open");
+      // Nested group padding is inherited from ancestor selectors that no
+      // longer match once the preview is attached to document.body.
+      if (groupBlock) clone.style.padding = window.getComputedStyle(item).padding;
       clone.setAttribute("aria-hidden", "true");
       clone.querySelectorAll("[id]").forEach((element) => element.removeAttribute("id"));
       clone.querySelectorAll("input, button, select, textarea, [tabindex]").forEach((element) => {
@@ -399,7 +454,7 @@
       });
       wrapper.appendChild(clone);
       document.body.appendChild(wrapper);
-      if (groupBlock) {
+      if (groupBlock && collapseGroupPreview) {
         const collapse = () => {
           clone.classList.remove("is-group-preview-open");
           clone.classList.add("is-group-block-dragging");
@@ -427,17 +482,17 @@
     };
 
     const placementInList = (list, y) => {
-      const items = directChildren(list, itemSelector);
+      const items = directChildren(list, nested ? `${itemSelector}, ${groupSelector}` : itemSelector);
       if (!items.length) return { beforeNode: null, targetId: null, position: "after" };
       const beforeItem = items.find((item) => {
         const rect = item.getBoundingClientRect();
         return y < rect.top + rect.height / 2;
       });
       if (beforeItem) {
-        return { beforeNode: beforeItem, targetId: getItemId(beforeItem), position: "before" };
+        return { beforeNode: beforeItem, targetId: orderAnchorForBlock(beforeItem, "before"), position: "before" };
       }
       const last = items[items.length - 1];
-      return { beforeNode: last.nextSibling, targetId: getItemId(last), position: "after" };
+      return { beforeNode: last.nextSibling, targetId: orderAnchorForBlock(last, "after"), position: "after" };
     };
 
     const placementInLooseFlow = (y) => {
@@ -462,9 +517,49 @@
       };
     };
 
+    const resolveNestedPlacement = (event, hit) => {
+      const rect = root.getBoundingClientRect();
+      if (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top - 12 || event.clientY > rect.bottom + 12) return null;
+      let group = closest(hit, groupSelector);
+      let item = closest(hit, itemSelector);
+      if (source.contains(hit)) return null;
+      if (item === source) item = null;
+      let hoverGroup = group;
+      if (group) {
+        const box = group.getBoundingClientRect();
+        const edge = !item && (event.clientY < box.top + 8 || event.clientY > box.bottom - 8);
+        const waiting = press.kind === "group" && !item && !group.classList.contains("is-group-preview-open");
+        if (!edge && waiting && validNestedDestination(groupTree.fromKey(getGroupName(group)))) {
+          return { hold: true, hoverGroup: group };
+        }
+        if (edge || waiting) {
+          const parent = closest(group.parentElement, groupSelector);
+          const container = groupList(parent || root);
+          const destination = parent ? groupTree.fromKey(getGroupName(parent)) : [];
+          if (!validNestedDestination(destination)) return null;
+          return { container, ...placementInList(container, event.clientY), targetGroup: groupTree.key(destination), candidate: null, group: parent, hoverGroup: edge ? null : hoverGroup };
+        }
+      }
+      const destination = group ? groupTree.fromKey(getGroupName(group)) : [];
+      if (!validNestedDestination(destination)) return null;
+      const container = groupList(group || root);
+      const canNest = destination.length + press.subtreeDepth + 1 <= groupTree.MAX_DEPTH;
+      if (item) {
+        const position = insertionPosition(event.clientY, item.getBoundingClientRect(), dropReady?.targetId === getItemId(item) ? dropReady.position : null);
+        return { container, beforeNode: position === "before" ? item : item.nextSibling, targetId: getItemId(item), targetGroup: groupTree.key(destination), position, candidate: canNest ? item : null, group, hoverGroup: group };
+      }
+      return { container, ...placementInList(container, event.clientY), targetGroup: groupTree.key(destination), candidate: null, group, hoverGroup };
+    };
+
+    const validNestedDestination = (destination) => (
+      destination.length + press.subtreeDepth <= groupTree.MAX_DEPTH
+      && !(press.kind === "group" && groupTree.within(destination, press.sourcePath))
+    );
+
     const resolvePlacement = (event) => {
       const hit = document.elementFromPoint(event.clientX, event.clientY);
       if (!hit) return null;
+      if (nested) return resolveNestedPlacement(event, hit);
       if (press?.kind === "group") {
         const rootRect = root.getBoundingClientRect();
         if (
@@ -525,12 +620,17 @@
     };
 
     const startDrag = (event) => {
+      clearHoverHandoff();
       source = press.source;
       window.getSelection?.()?.removeAllRanges();
       previousDocumentUserSelect = document.documentElement.style.userSelect;
       document.documentElement.style.userSelect = "none";
       const rect = source.getBoundingClientRect();
-      const groupItems = press.kind === "group" ? groupList(source) : null;
+      // The inner list may have bleed padding and negative margins for hover
+      // outlines. Subtract its layout shell, not that larger painted box.
+      const groupItems = press.kind === "group"
+        ? source.querySelector(":scope > .event-group-items-shell") || groupList(source)
+        : null;
       const collapsedHeight = groupItems
         ? Math.max(38, rect.height - groupItems.getBoundingClientRect().height)
         : rect.height;
@@ -574,6 +674,11 @@
         originalNextSibling: item.nextSibling,
         dragging: false,
       };
+      if (nested) {
+        press.sourcePath = groupTree.fromKey(kind === "group" ? getGroupName(item) : getItemGroup(item));
+        const depths = [press.sourcePath.length, ...[...item.querySelectorAll(groupSelector)].map((entry) => groupTree.fromKey(getGroupName(entry)).length)];
+        press.subtreeDepth = kind === "group" ? Math.max(...depths) - press.sourcePath.length + 1 : 0;
+      }
     };
 
     const processPlacement = (point) => {
@@ -585,22 +690,28 @@
         dropReady = null;
         return;
       }
+      if (placement.hold) {
+        clearDropTarget();
+        dropReady = null;
+        beginCandidate(null, placement.hoverGroup);
+        return;
+      }
       insertSource(placement.container, placement.beforeNode);
       clearDropTarget();
-      placement.group?.classList.add("is-group-drop-ready");
+      if (!nested || !placement.candidate) placement.group?.classList.add("is-group-drop-ready");
       dropReady = {
-        mode: press.kind === "group"
-          ? "group-reorder"
-          : placement.candidate?.classList.contains("is-group-ready") ? "group" : "reorder",
+        mode: placement.candidate?.classList.contains("is-group-ready") ? "group"
+          : press.kind === "group" ? "group-reorder" : "reorder",
         targetId: placement.targetId,
         targetGroup: placement.targetGroup,
         position: placement.position,
       };
-      if (press.kind === "group") {
+      if (press.kind === "group" && !nested) {
         clearCandidate();
       } else {
         const hoveredItem = pointInside(placement.candidate) ? placement.candidate : null;
-        const hoveredGroup = pointInside(placement.group) ? placement.group : null;
+        const groupTarget = nested ? placement.hoverGroup : placement.group;
+        const hoveredGroup = pointInside(groupTarget) ? groupTarget : null;
         if (hoveredItem || hoveredGroup) beginCandidate(hoveredItem, hoveredGroup);
         else clearCandidate();
       }
@@ -721,6 +832,8 @@
     };
 
     root.addEventListener("pointerdown", handlePointerDown);
+    root.addEventListener("pointerover", handleGroupPointerOver);
+    root.addEventListener("pointerout", handleGroupPointerOut);
     root.addEventListener("click", suppressDraggedClick, true);
     window.addEventListener("pointermove", handlePointerMove);
     window.addEventListener("pointerup", handlePointerUp);
@@ -731,6 +844,9 @@
       destroy() {
         if (press) finish(null, true);
         root.removeEventListener("pointerdown", handlePointerDown);
+        root.removeEventListener("pointerover", handleGroupPointerOver);
+        root.removeEventListener("pointerout", handleGroupPointerOut);
+        clearHoverHandoff();
         root.removeEventListener("click", suppressDraggedClick, true);
         window.removeEventListener("pointermove", handlePointerMove);
         window.removeEventListener("pointerup", handlePointerUp);

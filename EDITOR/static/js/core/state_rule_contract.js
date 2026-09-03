@@ -11,7 +11,7 @@
   const NUMERIC_OPERATORS = Object.freeze(["+", "-", "*", "/", "%"]);
   const CONDITION_OPERATORS = Object.freeze({
     stat: Object.freeze([">", ">=", "<", "<=", "==", "!="]),
-    memory: Object.freeze(["has", "not_has"]),
+    memory: Object.freeze(["has", "not_has", "empty", "not_empty"]),
   });
   const EFFECT_OPERATORS = Object.freeze({
     stat: Object.freeze(["set", "+", "-", "*", "/"]),
@@ -70,6 +70,11 @@
     return normalized === "stat" || (normalized === "memory" && operation !== "clear");
   }
 
+  function conditionUsesId(type, operation) {
+    const normalized = normalizeRuleType(type);
+    return normalized === "stat" || (normalized === "memory" && ["has", "not_has"].includes(operation));
+  }
+
   return {
     CONDITION_OPERATORS,
     CONDITION_TYPES,
@@ -78,6 +83,7 @@
     RULE_TYPES,
     NUMERIC_OPERATORS,
     conditionOperators,
+    conditionUsesId,
     defaultCondition,
     defaultEffect,
     effectOperators,

@@ -90,6 +90,18 @@ class RuntimeMemoryTest(unittest.TestCase):
         }))
         self.assertTrue(runtime["scene_memory_has"]("memory", "舊資料標籤"))
 
+    def test_memory_conditions_can_match_an_empty_or_nonempty_bank(self):
+        runtime, _renpy = load_runtime_namespace()
+        empty = {"type": "memory", "bank": "daily", "op": "empty"}
+        not_empty = {"type": "memory", "bank": "daily", "op": "not_empty"}
+
+        self.assertTrue(runtime["scene_condition_matches"](empty))
+        self.assertFalse(runtime["scene_condition_matches"](not_empty))
+
+        runtime["scene_memory_add"]("daily", "visited")
+        self.assertFalse(runtime["scene_condition_matches"](empty))
+        self.assertTrue(runtime["scene_condition_matches"](not_empty))
+
 
 if __name__ == "__main__":
     unittest.main()

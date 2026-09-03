@@ -10,7 +10,7 @@ test("state rule contract publishes every Condition and Effect operation", () =>
   assert.deepEqual(contract.CONDITION_TYPES, ["stat", "memory"]);
   assert.deepEqual(contract.EFFECT_TYPES, ["stat", "memory", "option"]);
   assert.deepEqual(contract.conditionOperators("stat"), [">", ">=", "<", "<=", "==", "!="]);
-  assert.deepEqual(contract.conditionOperators("memory"), ["has", "not_has"]);
+  assert.deepEqual(contract.conditionOperators("memory"), ["has", "not_has", "empty", "not_empty"]);
   assert.deepEqual(contract.effectOperators("stat"), ["set", "+", "-", "*", "/"]);
   assert.deepEqual(contract.effectOperators("memory"), ["add", "remove", "clear"]);
   assert.deepEqual(contract.effectOperators("option"), ["enable", "disable"]);
@@ -18,7 +18,7 @@ test("state rule contract publishes every Condition and Effect operation", () =>
 
 test("legacy tag rules normalize to the Memory editor contract", () => {
   assert.equal(contract.normalizeRuleType("tag"), "memory");
-  assert.deepEqual(contract.conditionOperators("tag"), ["has", "not_has"]);
+  assert.deepEqual(contract.conditionOperators("tag"), ["has", "not_has", "empty", "not_empty"]);
   assert.deepEqual(contract.effectOperators("tag"), ["add", "remove", "clear"]);
 });
 
@@ -55,4 +55,12 @@ test("Memory clear is the only Effect form that omits an ID", () => {
   assert.equal(contract.effectUsesId("memory", "add"), true);
   assert.equal(contract.effectUsesId("memory", "remove"), true);
   assert.equal(contract.effectUsesId("memory", "clear"), false);
+});
+
+test("whole-bank Memory Conditions omit a tag ID", () => {
+  assert.equal(contract.conditionUsesId("stat", ">="), true);
+  assert.equal(contract.conditionUsesId("memory", "has"), true);
+  assert.equal(contract.conditionUsesId("memory", "not_has"), true);
+  assert.equal(contract.conditionUsesId("memory", "empty"), false);
+  assert.equal(contract.conditionUsesId("memory", "not_empty"), false);
 });

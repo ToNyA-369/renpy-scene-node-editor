@@ -62,7 +62,7 @@ AUTO_TRIGGER_PHASES = {"Enter", "Node", "Exit"}
 LIFECYCLE_TRIGGERS = {"Auto:Enter", "Auto:Exit"}
 CONDITION_OPERATORS = {
     "stat": (">", ">=", "<", "<=", "==", "!="),
-    "memory": ("has", "not_has"),
+    "memory": ("has", "not_has", "empty", "not_empty"),
 }
 EFFECT_OPERATORS = {
     "stat": ("set", "+", "-", "*", "/"),
@@ -186,6 +186,10 @@ PYTHON_EN_DICTIONARY = {
     "Priority 必須是 0 到 9 的整數。": "Priority must be an integer between 0 and 9.",
     "Weight 必須大於 0。": "Weight must be greater than 0.",
     "Event 群組名稱不可超過 80 個字元。": "Event group names cannot exceed 80 characters.",
+    "{field} 必須是最多三層的群組名稱陣列。": "{field} must be an array of group names with at most three levels.",
+    "{field} 的每一層都必須是群組名稱。": "Each level in {field} must be a group name.",
+    "{field} 的群組名稱不合法。": "{field} contains an invalid group name.",
+    "群組指派必須是舊式名稱字串或 Group Path 陣列。": "Group assignments must be legacy name strings or Group Path arrays.",
     "Event 群組指派必須是非空 object。": "Event group assignments must be a non-empty object.",
     "找不到 Event：{id}。": "Event not found: {id}.",
     "{field} 必須是非負整數。": "{field} must be a non-negative integer.",
@@ -194,6 +198,10 @@ PYTHON_EN_DICTIONARY = {
     "Conditions 必須是 object 陣列。": "Conditions must be an array of objects.",
     "Condition clause 必須是 null 或不超過 80 個字元的字串。": "Condition clause must be null or a string of at most 80 characters.",
     "Effects 必須是 object 陣列。": "Effects must be an array of objects.",
+    "{field} 的 Random choices 必須是非空 object 陣列。": "{field} Random choices must be a non-empty array of objects.",
+    "{field} 的 Random choice 必須包含 Effect object。": "{field} Random choice must include an Effect object.",
+    "{field} 的 Random 權重必須是大於 0 的有限數字。": "{field} Random weight must be a finite number greater than 0.",
+    "{field} 不允許巢狀 Random Effect。": "{field} cannot contain a nested Random Effect.",
     "Option Effect 只能控制同一個 Options 作用域內的 Option。": "Option Effect can only control Options in the same Options scope.",
     "End up 必須是 REDO、GOTO、REPLACE 或 EXIT。": "End up must be REDO, GOTO, REPLACE, or EXIT.",
     "{end_up} Event 必須設定 Next Node。": "{end_up} Event must set Next Node.",
@@ -828,14 +836,17 @@ def validate_condition(condition, field="Condition"):
     if condition_type == "memory":
         result.pop("left", None)
         result["bank"] = clean_file_name(result.get("bank") or DEFAULT_MEMORY_ID, "")
-        tag_id = str(result.get("id") or "").strip()
-        if not tag_id:
-            raise ApiError(HTTPStatus.BAD_REQUEST, tr("{field} 的記憶標籤不可為空。", field=field))
-        result["id"] = tag_id
         operation = str(result.get("op") or "has")
         if operation not in CONDITION_OPERATORS["memory"]:
             raise ApiError(HTTPStatus.BAD_REQUEST, tr("{field} 的記憶判斷不合法。", field=field))
         result["op"] = operation
+        if operation in ("has", "not_has"):
+            tag_id = str(result.get("id") or "").strip()
+            if not tag_id:
+                raise ApiError(HTTPStatus.BAD_REQUEST, tr("{field} 的記憶標籤不可為空。", field=field))
+            result["id"] = tag_id
+        else:
+            result.pop("id", None)
         result.pop("value", None)
         result.pop("scope", None)
         return result
@@ -856,12 +867,33 @@ def validate_condition_clause(value):
     return clause
 
 
-def validate_effect(effect, field="Effect"):
+def validate_effect(effect, field="Effect", allow_random=True):
     result = dict(effect)
     effect_type = str(result.get("type") or "stat").lower()
     if effect_type == "tag":
         effect_type = "memory"
     result["type"] = effect_type
+
+    if effect_type == "random":
+        if not allow_random:
+            raise ApiError(HTTPStatus.BAD_REQUEST, tr("{field} 不允許巢狀 Random Effect。", field=field))
+        choices = result.get("choices")
+        if not isinstance(choices, list) or not choices or not all(isinstance(choice, dict) for choice in choices):
+            raise ApiError(HTTPStatus.BAD_REQUEST, tr("{field} 的 Random choices 必須是非空 object 陣列。", field=field))
+        normalized_choices = []
+        for index, choice in enumerate(choices):
+            choice_field = "{} Random choice #{}".format(field, index + 1)
+            weight = choice.get("weight", 1)
+            if not is_positive_finite_random_weight(weight):
+                raise ApiError(HTTPStatus.BAD_REQUEST, tr("{field} 的 Random 權重必須是大於 0 的有限數字。", field=choice_field))
+            child = choice.get("effect")
+            if not isinstance(child, dict):
+                raise ApiError(HTTPStatus.BAD_REQUEST, tr("{field} 的 Random choice 必須包含 Effect object。", field=choice_field))
+            normalized_choices.append({
+                "weight": weight,
+                "effect": validate_effect(child, choice_field, False),
+            })
+        return {"type": "random", "choices": normalized_choices}
 
     if effect_type == "stat":
         if "left" in result:
@@ -913,6 +945,38 @@ def validate_effect(effect, field="Effect"):
         return result
 
     raise ApiError(HTTPStatus.BAD_REQUEST, tr("{field} 的類型不合法：{effect_type}。", field=field, effect_type=effect_type))
+
+
+def is_positive_finite_random_weight(value):
+    if not isinstance(value, (int, float)) or isinstance(value, bool):
+        return False
+    try:
+        return math.isfinite(value) and value > 0
+    except OverflowError:
+        return False
+
+
+def iter_effect_leaves(effects):
+    """Yield every possible leaf Effect, including children of Random groups."""
+    for effect, _path in iter_effect_entries(effects):
+        yield effect
+
+
+def iter_effect_entries(effects, prefix=()):
+    """Keep top-level reference indexes stable; child paths locate random choices."""
+    if not isinstance(effects, list):
+        return
+    for index, effect in enumerate(effects):
+        if not isinstance(effect, dict):
+            continue
+        path = prefix + (index,)
+        if str(effect.get("type") or "").lower() == "random":
+            choices = effect.get("choices")
+            if isinstance(choices, list):
+                children = [choice.get("effect") if isinstance(choice, dict) else None for choice in choices]
+                yield from iter_effect_entries(children, path)
+            continue
+        yield effect, path
 
 
 def validate_option_style_override(value):
@@ -1141,7 +1205,7 @@ def option_effect_references(node_id, element_id=None, item_id=None):
         except ApiError:
             continue
         for entry in detail["events"]:
-            for index, effect in enumerate(entry.get("data", {}).get("Effects", [])):
+            for effect, effect_path in iter_effect_entries(entry.get("data", {}).get("Effects", [])):
                 if str(effect.get("type") or "").lower() != "option":
                     continue
                 if effect.get("node") != node_id:
@@ -1158,7 +1222,8 @@ def option_effect_references(node_id, element_id=None, item_id=None):
                     "eventId": entry.get("data", {}).get("ID", entry["file"]),
                     "eventName": entry.get("data", {}).get("Name")
                     or entry.get("data", {}).get("ID", entry["file"]),
-                    "effectIndex": index,
+                    "effectIndex": effect_path[0],
+                    **({"effectPath": list(effect_path)} if len(effect_path) > 1 else {}),
                 })
     return references
 
@@ -1359,7 +1424,7 @@ def scan_memory_tags(node_summaries=None):
             except ApiError:
                 continue
             effects = event.get("Effects") if isinstance(event, dict) else []
-            for effect in effects if isinstance(effects, list) else []:
+            for effect in iter_effect_leaves(effects):
                 if not isinstance(effect, dict):
                     continue
                 effect_type = str(effect.get("type") or "").casefold()
@@ -1552,7 +1617,7 @@ def validate_group_path(value, field):
         if not isinstance(component, str):
             raise ApiError(HTTPStatus.BAD_REQUEST, tr("{field} 的每一層都必須是群組名稱。", field=field))
         name = component.strip()
-        if not name or len(name) > 80 or name.casefold() == DEFAULT_EVENT_GROUP.casefold():
+        if not name or len(name) > 80 or name == DEFAULT_EVENT_GROUP:
             raise ApiError(HTTPStatus.BAD_REQUEST, tr("{field} 的群組名稱不合法。", field=field))
         result.append(name)
     return result
@@ -1590,7 +1655,7 @@ def validate_editor_order(value, field="Order"):
 def validate_event(event, global_scope=False, owner_node_id=None):
     if not isinstance(event, dict):
         raise ApiError(HTTPStatus.BAD_REQUEST, tr("Event 必須是 JSON object。"))
-    if type(event.get("Version", 1)) is not int or event.get("Version", 1) not in (1, 2):
+    if type(event.get("Version", 1)) is not int or event.get("Version", 1) not in (1, 2, 3):
         raise ApiError(HTTPStatus.BAD_REQUEST, tr("不支援的 Event Version。"))
     if global_scope and owner_node_id is None:
         owner_node_id = GLOBAL_NODE_ID
@@ -1624,8 +1689,12 @@ def validate_event(event, global_scope=False, owner_node_id=None):
             else validate_condition_clause(item.get("clause"))
         )
         validated_conditions.append(validated)
-    validated_effects = [validate_effect(item, "Event Effect") for item in effects]
-    for effect in validated_effects:
+    validated_effects = [
+        validate_effect(item, "Event Effect #{}".format(index + 1))
+        for index, item in enumerate(effects)
+    ]
+    leaf_effects = list(iter_effect_leaves(validated_effects))
+    for effect in leaf_effects:
         if (
             effect.get("type") == "option"
             and owner_node_id
@@ -1650,9 +1719,11 @@ def validate_event(event, global_scope=False, owner_node_id=None):
     }
     if "Group Path" in event:
         result["Group Path"] = group_path
-    if event.get("Version") == 2 or any(
+    if event.get("Version") == 3 or any(effect.get("type") == "random" for effect in validated_effects):
+        result["Version"] = 3
+    elif event.get("Version") == 2 or any(
         "left" in rule or isinstance(rule.get("value"), dict)
-        for rule in validated_conditions + validated_effects
+        for rule in validated_conditions + leaf_effects
     ):
         result["Version"] = 2
     if "Order" in event:
@@ -1820,7 +1891,7 @@ def validate_project():
                         issues.append({"level": "warning", "location": event_location, "message": tr("找不到 Stat：{id}。", id=stat_id)})
                 if condition.get("type") == "memory" and condition.get("bank") not in memories:
                     issues.append({"level": "warning", "location": event_location, "message": tr("找不到記憶庫：{bank}。", bank=condition.get('bank', ''))})
-            for effect in event["Effects"]:
+            for effect in iter_effect_leaves(event["Effects"]):
                 for stat_id in rule_stat_ids(effect):
                     if stat_id not in stats:
                         issues.append({"level": "warning", "location": event_location, "message": tr("找不到 Stat：{id}。", id=stat_id)})
@@ -2144,7 +2215,7 @@ def rename_event_group(payload):
             if (group_path[-1] if group_path else DEFAULT_EVENT_GROUP) != source:
                 continue
             if "Group Path" in raw_event:
-                updated_path = [*group_path[:-1], target]
+                updated_path = [] if target == DEFAULT_EVENT_GROUP else [*group_path[:-1], target]
                 raw_event = {**raw_event, "Group Path": updated_path, "Group": target}
             else:
                 raw_event = {**raw_event, "Group": target}
@@ -2225,7 +2296,7 @@ def node_references(relative):
                     "eventId": event.get("ID", entry["file"]),
                     "eventName": event.get("Name", event.get("ID", entry["file"])),
                 })
-            for index, effect in enumerate(event.get("Effects", [])):
+            for effect, effect_path in iter_effect_entries(event.get("Effects", [])):
                 if str(effect.get("type") or "").lower() != "option":
                     continue
                 if effect.get("node") != target_id:
@@ -2235,7 +2306,8 @@ def node_references(relative):
                     "nodeName": summary.get("name") or summary["id"],
                     "eventId": event.get("ID", entry["file"]),
                     "eventName": event.get("Name", event.get("ID", entry["file"])),
-                    "effectIndex": index,
+                    "effectIndex": effect_path[0],
+                    **({"effectPath": list(effect_path)} if len(effect_path) > 1 else {}),
                     "referenceType": "option-effect",
                 })
     return {"nodeId": target_id, "references": references}

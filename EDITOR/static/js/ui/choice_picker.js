@@ -76,8 +76,9 @@
 
     function closeSubmenuTree(branch) {
       if (!branch) return;
-      [branch, ...branch.querySelectorAll(".select-choice-branch")].forEach((item) => {
+      [branch, ...branch.querySelectorAll(".select-choice-branch")].reverse().forEach((item) => {
         clearSubmenuClose(item);
+        hideMenuSurface(item.querySelector(":scope > .select-choice-submenu"));
         item.classList.remove("submenu-open");
         item.querySelector(":scope > [aria-haspopup='menu']")?.setAttribute("aria-expanded", "false");
       });
@@ -97,6 +98,7 @@
       branch.classList.add("submenu-open");
       branch.querySelector(":scope > [aria-haspopup='menu']")?.setAttribute("aria-expanded", "true");
       position(branch);
+      showMenuSurface(branch.querySelector(":scope > .select-choice-submenu"));
     }
 
     function scheduleSubmenuClose(branch) {
@@ -119,13 +121,36 @@
       if (!surface) return 0;
       const edge = 12;
       const limit = Math.min(LAYOUT.menuMaxHeight, Math.max(1, window.innerHeight - edge * 2));
+      surface.style.removeProperty("block-size");
+      surface.style.removeProperty("max-block-size");
       surface.style.height = "auto";
       surface.style.minHeight = "0";
       surface.style.maxHeight = `${limit}px`;
       const style = getComputedStyle(surface);
+      const pixels = (value) => Number.parseFloat(value || "0") || 0;
+      const children = [...surface.children].filter((child) => getComputedStyle(child).display !== "none");
+      const gap = pixels(style.rowGap || style.gap);
+      const padding = pixels(style.paddingTop) + pixels(style.paddingBottom);
       const borders = Number.parseFloat(style.borderTopWidth || "0") + Number.parseFloat(style.borderBottomWidth || "0");
-      const height = Math.min(limit, Math.ceil(surface.scrollHeight + borders));
-      surface.style.height = `${height}px`;
+      // Do not derive the natural size from scrollHeight. Safari stretches a
+      // grid inside a fixed top-layer popover to the parent's available height
+      // before this measurement, so a two-row menu can incorrectly report the
+      // full 320px. Direct rows retain their canonical size and let every
+      // hierarchy level use the same content-driven height rule.
+      const rows = children.reduce((total, child) => {
+        const measured = child.getBoundingClientRect().height;
+        const fallback = child.matches(".select-choice-option, .select-choice-branch") ? LAYOUT.itemHeight : 0;
+        return total + Math.max(measured, fallback);
+      }, 0);
+      const naturalHeight = padding + borders + rows + Math.max(0, children.length - 1) * gap;
+      const height = Math.min(limit, Math.ceil(naturalHeight));
+      // WebKit's top-layer popover sizing can override the logical size of a
+      // grid even after an ordinary inline height is assigned. Lock both the
+      // physical and logical axes so the measured row sum remains authoritative.
+      surface.style.setProperty("height", `${height}px`, "important");
+      surface.style.setProperty("block-size", `${height}px`, "important");
+      surface.style.setProperty("max-height", `${height}px`, "important");
+      surface.style.setProperty("max-block-size", `${height}px`, "important");
       return height;
     }
 
@@ -212,6 +237,12 @@
           folder.innerHTML = `<span>${escapeHtml(name)}</span><i aria-hidden="true">›</i>`;
           const submenu = document.createElement("div");
           submenu.className = "select-choice-submenu";
+          // Safari can composite a fixed descendant of a top-layer popover
+          // behind (or clipped by) its parent even while keyboard focus keeps
+          // moving through it. Give every hierarchy surface its own top-layer
+          // entry while retaining the DOM ancestry used by pointer/keyboard
+          // navigation.
+          submenu.setAttribute("popover", "manual");
           submenu.setAttribute("role", "menu");
           submenu.setAttribute("aria-label", name);
           const submenuScroll = document.createElement("div");
@@ -222,8 +253,13 @@
           wrapper.append(folder, submenu);
           parent.append(wrapper);
         };
-        root.leading.forEach((item) => appendOption(item.element));
-        root.folders.forEach((branch, name) => appendBranch(name, branch, menu));
+        if (select.dataset.pickerFoldersFirst !== undefined) {
+          root.folders.forEach((branch, name) => appendBranch(name, branch, menu));
+          root.leading.forEach((item) => appendOption(item.element));
+        } else {
+          root.leading.forEach((item) => appendOption(item.element));
+          root.folders.forEach((branch, name) => appendBranch(name, branch, menu));
+        }
         root.options.forEach((item) => appendOption(item.element));
         return;
       }
@@ -250,8 +286,22 @@
       const scrollSurface = submenu.querySelector(":scope > .select-choice-submenu-scroll");
       const rootRect = rootMenu.getBoundingClientRect();
       const edge = 12;
-      const width = Math.min(SELECT_MENU_WIDTH, window.innerWidth - edge * 2);
+      // Every surface in one hierarchy must share the root's fitted width. Using
+      // the fixed default here makes deep menus overlap on narrower editor
+      // windows, leaving a visible parent button underneath an intercepting
+      // child surface.
+      const width = rootRect.width;
       const height = fitMenuSurface(scrollSurface || submenu);
+      // The root menu receives an explicit fitted height from
+      // fitMenuSurface(). Do the same for the top-layer submenu wrapper:
+      // Safari otherwise expands a manual popover with `height:max-content`
+      // to its available maximum even when the inner surface has only one or
+      // two rows.
+      submenu.style.setProperty("height", `${height}px`, "important");
+      submenu.style.setProperty("block-size", `${height}px`, "important");
+      submenu.style.setProperty("min-height", "0", "important");
+      submenu.style.setProperty("max-height", `${height}px`, "important");
+      submenu.style.setProperty("max-block-size", `${height}px`, "important");
       let depth = 1;
       for (let parent = branch.parentElement; parent && parent !== rootMenu; parent = parent.parentElement) {
         if (parent.classList.contains("select-choice-submenu")) depth += 1;
@@ -283,6 +333,11 @@
     function focusSelectedChoice(select, menu, picker = select.closest(".select-choice-picker")) {
       const selected = [...menu.querySelectorAll("[data-select-value]")]
         .find((choice) => !choice.disabled && choice.dataset.selectValue === select.value);
+      if (select.dataset.pickerFoldersFirst !== undefined && !selected?.closest(".select-choice-submenu")) {
+        const firstFolder = directMenuItems(menu, "[data-select-folder-toggle]", "[data-select-value]")
+          .find((item) => item.matches("[data-select-folder-toggle]"));
+        if (firstFolder) return focusMenuItem(picker, firstFolder);
+      }
       return focusMenuItem(picker, choiceRepresentative(menu, selected));
     }
 
@@ -325,7 +380,6 @@
       const rect = trigger.getBoundingClientRect();
       anchorRects.set(picker, { x: rect.x, y: rect.y, width: rect.width, height: rect.height });
       const edge = 12;
-      const width = Math.min(SELECT_MENU_WIDTH, window.innerWidth - edge * 2);
       const model = buildOptionHierarchy([...picker.querySelectorAll(".select-choice-option")].map((option) => ({
         pickerPath: option.dataset.pickerPath || "",
       })));
@@ -339,6 +393,8 @@
         return depth;
       };
       const depth = Math.max(hierarchyDepth(model), domDepth(menu));
+      const availableForSurfaces = Math.max(1, window.innerWidth - edge * 2 - depth * SUBMENU_GAP);
+      const width = Math.min(SELECT_MENU_WIDTH, Math.floor(availableForSurfaces / (depth + 1)));
       const pitch = width + SUBMENU_GAP;
       const totalWidth = width + depth * pitch;
       const naturalRightLeft = Math.max(edge, Math.min(rect.left, window.innerWidth - width - edge));

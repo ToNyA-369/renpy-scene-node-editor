@@ -1,10 +1,13 @@
 "use strict";
 
 (function exposeEventEditor(root, factory) {
-  const api = factory();
+  const api = factory(
+    typeof module === "object" && module.exports ? require("../core/group_tree.js") : root.SceneGroupTree,
+    typeof module === "object" && module.exports ? require("../core/effect_groups.js") : root.SceneEffectGroups,
+  );
   if (typeof module === "object" && module.exports) module.exports = api;
   if (root) root.SceneEventEditor = api;
-})(typeof globalThis !== "undefined" ? globalThis : this, () => {
+})(typeof globalThis !== "undefined" ? globalThis : this, (groupTree, effectGroups) => {
   const DEFAULT_EVENT_GROUP = "Normal";
   const DEFAULT_CONDITION_CLAUSE = "and_1";
   const CONDITION_OR_GROUP = "__or__";
@@ -18,13 +21,13 @@
     return (nodes || []).map((node) => {
       const id = String(node?.id || node?.path || "");
       const name = String(node?.name || node?.Name || id);
-      const group = normalizeEventGroup(node?.group ?? node?.Group);
+      const groupPath = groupTree.path(node);
       return {
         id,
         name,
-        pickerPath: group === DEFAULT_EVENT_GROUP
+        pickerPath: !groupPath.length
           ? ""
-          : `${pickerSegment(group)}/${pickerSegment(name)}`,
+          : [...groupPath, name].map(pickerSegment).join("/"),
       };
     });
   }
@@ -136,26 +139,7 @@
   }
 
   function eventPoolBlocks(events) {
-    const ordered = events || [];
-    const grouped = new Map();
-    ordered.forEach((event) => {
-      const group = normalizeEventGroup(event?.Group);
-      if (group === DEFAULT_EVENT_GROUP) return;
-      if (!grouped.has(group)) grouped.set(group, []);
-      grouped.get(group).push(event);
-    });
-    const emitted = new Set();
-    const blocks = [];
-    ordered.forEach((event) => {
-      const group = normalizeEventGroup(event?.Group);
-      if (group === DEFAULT_EVENT_GROUP) {
-        blocks.push({ type: "item", event });
-      } else if (!emitted.has(group)) {
-        emitted.add(group);
-        blocks.push({ type: "group", name: group, events: grouped.get(group) || [] });
-      }
-    });
-    return blocks;
+    return groupTree.blocks(events);
   }
 
   function choiceEntries(value) {
@@ -195,6 +179,7 @@
     const {
       CONDITION_TYPES,
       conditionOperators,
+      conditionUsesId,
       defaultCondition,
       defaultEffect,
       effectOperators,
@@ -216,7 +201,8 @@
       if (!rule) return false;
       const key = kind === "condition" ? "Conditions" : "Effects";
       if (kind === "condition") rule.clause = draft[key][Number(index)]?.clause ?? null;
-      draft[key][Number(index)] = rule;
+      if (kind === "effect") effectGroups.replace(draft.Effects, index, rule);
+      else draft[key][Number(index)] = rule;
       return true;
     }
 
@@ -240,7 +226,7 @@
             ${isMemory ? `
               <label class="field"><span class="visually-hidden">${tr("記憶庫")}</span><select name="conditionBank" aria-label="${tr("記憶庫")}">${namedOptionTags(memoryChoices(), condition.bank || "memory")}</select></label>
               <label class="field rule-operator"><span class="visually-hidden">${tr("判斷")}</span><select name="conditionOp" aria-label="${tr("判斷")}">${optionTags(conditionOperators(type), condition.op)}</select></label>
-              <label class="field"><span class="visually-hidden">${tr("記憶標籤")}</span><input name="conditionId" data-memory-tag-input aria-label="${tr("記憶標籤")}" value="${escapeHtml(condition.id || "")}" placeholder="${tr("標籤")}"></label>
+              <label class="field"><span class="visually-hidden">${tr("記憶標籤")}</span><input name="conditionId" data-memory-tag-input aria-label="${tr("記憶標籤")}" value="${escapeHtml(condition.id || "")}" placeholder="${conditionUsesId(type, condition.op) ? tr("標籤") : tr("判斷整個記憶庫")}" ${conditionUsesId(type, condition.op) ? "" : "disabled"}></label>
             ` : `
               ${numericField.render(condition.left ?? { type: "stat", id: condition.id }, "conditionId", tr("比較左值"))}
               <label class="field rule-operator"><span class="visually-hidden">${tr("判斷")}</span><select name="conditionOp" aria-label="${tr("判斷")}">${optionTags(conditionOperators(type), condition.op)}</select></label>
@@ -268,18 +254,32 @@
     function effectRowsHtml(effects) {
       if (!effects.length) return `<div class="row-empty">${tr("尚未設定 Effect。")}</div>`;
       return effects.map((effect, index) => {
+        if (!effectGroups.isGroup(effect)) return effectRowHtml(effect, String(index));
+        const odds = effectGroups.percentages(effect.choices.map((choice) => choice.weight ?? 1));
+        return `<section class="effect-random-group" data-effect-group="random:${index}">
+          <div class="effect-random-header" title="${tr("拖移以排序整個群組")}"><span>${tr("隨機擇一")}</span><strong>RANDOM</strong></div>
+          <div class="effect-group-items">${effect.choices.map((choice, child) => effectRowHtml(choice.effect, `${index}.${child}`, {
+            group: `random:${index}`, weight: choice.weight ?? 1, chance: odds[child],
+          })).join("")}</div>
+        </section>`;
+      }).join("");
+    }
+
+    function effectRowHtml(effect, index, { group = effectGroups.LOOSE, weight = 1, chance = null } = {}) {
+        const weightField = group === effectGroups.LOOSE ? "" : `<label class="effect-choice-weight" title="${tr("權重")}"><span class="visually-hidden">${tr("權重")}</span><input name="effectChoiceWeight" aria-label="${tr("權重")}" type="number" min="0" step="any" value="${escapeHtml(weight)}"><output data-effect-chance aria-label="${tr("機率")}">${effectGroups.percentageLabel(chance)}</output></label>`;
         const type = normalizeRuleType(effect.type);
         const isStat = type === "stat";
         const isOption = type === "option";
         const opItems = effectOperators(type);
         if (isOption) {
           return `
-            <div class="repeat-row effect-row option-effect-row list-reorder-item" data-event-nav-item data-badge-row="effect-${index}" data-index="${index}" data-reorder-id="${index}" data-effect-type="${escapeHtml(type)}" aria-grabbed="false">
+            <div class="repeat-row effect-row option-effect-row group-drag-item" data-event-nav-item data-badge-row="effect-${index}" data-index="${index}" data-effect-id="${index}" data-effect-membership="${group}" data-effect-type="${escapeHtml(type)}" aria-grabbed="false">
               <div class="rule-fields type-badge-scope">
               ${ruleTypeBadge("effect", effectTypeChoices(), type)}
               <label class="field option-effect-target-field"><span class="visually-hidden">${tr("Option 目標")}</span><select name="effectOptionTarget" aria-label="${tr("Option 目標")}">${optionEffectOptionTags(effect)}</select></label>
               <label class="field rule-operator option-effect-operation-field"><span class="visually-hidden">${tr("操作")}</span><select name="effectOp" aria-label="${tr("操作")}">${optionTags(opItems, effect.op)}</select></label>
               </div>
+              ${weightField}
               <button class="row-button" type="button" data-remove-effect="${index}" title="${tr("移除 Effect")}" aria-label="${tr("移除 Effect")}">×</button>
             </div>
           `;
@@ -291,31 +291,32 @@
           ? `<select name="effectId" aria-label="Stat">${namedOptionTags(statChoices(), effect.id)}</select>`
           : `<select name="effectBank" aria-label="${tr("記憶庫")}">${namedOptionTags(memoryChoices(), effect.bank || "memory")}</select>`;
         return `
-          <div class="repeat-row effect-row list-reorder-item${isStat ? " numeric-stat-row" : ""}" data-event-nav-item data-badge-row="effect-${index}" data-index="${index}" data-reorder-id="${index}" data-effect-type="${escapeHtml(type)}" aria-grabbed="false">
+          <div class="repeat-row effect-row group-drag-item${isStat ? " numeric-stat-row" : ""}" data-event-nav-item data-badge-row="effect-${index}" data-index="${index}" data-effect-id="${index}" data-effect-membership="${group}" data-effect-type="${escapeHtml(type)}" aria-grabbed="false">
             <div class="rule-fields type-badge-scope">
             ${ruleTypeBadge("effect", effectTypeChoices(), type)}
             <label class="field"><span class="visually-hidden">${isStat ? "Stat" : tr("記憶庫")}</span>${resourceField}</label>
             <label class="field rule-operator"><span class="visually-hidden">${tr("操作")}</span><select name="effectOp" aria-label="${tr("操作")}">${optionTags(opItems, effect.op)}</select></label>
             ${valueField}
             </div>
+            ${weightField}
             <button class="row-button" type="button" data-remove-effect="${index}" title="${tr("移除 Effect")}" aria-label="${tr("移除 Effect")}">×</button>
           </div>
         `;
-      }).join("");
     }
 
     function weightedRowsHtml(value, kind) {
       const rows = choiceEntries(value);
       if (!rows.length) return `<div class="row-empty">${tr("尚未加入權重項目。")}</div>`;
       const choices = kind === "content" ? [] : nodeChoices();
+      const chances = effectGroups.percentages(rows.map(([, weight]) => weight));
       return rows.map(([id, weight], index) => {
         const choiceControl = kind === "content"
           ? contentPickerHtml(id, index)
-          : `<label class="field"><span class="visually-hidden">${tr("節點名稱")}</span><select name="nextWeightedId" aria-label="${tr("節點名稱")}">${namedOptionTags(choices, id)}</select></label>`;
+          : `<label class="field"><span class="visually-hidden">${tr("節點名稱")}</span><select name="nextWeightedId" data-picker-folders-first aria-label="${tr("節點名稱")}">${namedOptionTags(choices, id)}</select></label>`;
         return `
           <div class="repeat-row weight-row list-reorder-item ${kind === "content" ? "content-weight-row" : ""}" data-event-nav-item data-index="${index}" data-reorder-id="${index}" data-weighted-kind="${kind}" aria-grabbed="false">
             ${choiceControl}
-            <label class="field"><span class="visually-hidden">Weight</span><input name="${kind}WeightedValue" aria-label="${tr("權重")}" type="number" min="0.0001" step="any" value="${escapeHtml(weight)}"></label>
+            <label class="field choice-weight"><span class="visually-hidden">Weight</span><input name="${kind}WeightedValue" aria-label="${tr("權重")}" type="number" min="0.0001" step="any" value="${escapeHtml(weight)}"><span data-${kind}-chance aria-label="${tr("機率")}">${effectGroups.percentageLabel(chances[index])}</span></label>
             <button class="row-button" type="button" data-remove-weighted="${kind}:${index}" title="${tr("移除項目")}" aria-label="${tr("移除項目")}">×</button>
           </div>
         `;
@@ -330,6 +331,15 @@
           <div class="repeat-list">${weightedRowsHtml(value, kind)}</div>
         </div>
       `;
+    }
+
+    function updateWeightedChances(form, kind) {
+      const weights = [...form.querySelectorAll(`[name="${kind}WeightedValue"]`)]
+        .map((input) => input.value === "" ? null : Number(input.value));
+      const chances = effectGroups.percentages(weights);
+      form.querySelectorAll(`[data-${kind}-chance]`).forEach((output, index) => {
+        output.textContent = effectGroups.percentageLabel(chances[index]);
+      });
     }
 
     function readWeighted(form, kind) {
@@ -367,13 +377,13 @@
           result.value = numericField.read(row, "conditionValue");
         }
         if (type === "memory") {
-          result.id = row.querySelector('[name="conditionId"]').value.trim();
           result.bank = row.querySelector('[name="conditionBank"]').value;
+          if (conditionUsesId(type, result.op)) result.id = row.querySelector('[name="conditionId"]').value.trim();
         }
         result.clause = String(row.dataset?.conditionClause || "").trim() || null;
         return result;
       });
-      const effects = [...form.querySelectorAll(".effect-row")].map((row) => {
+      const effectEntries = [...form.querySelectorAll(".effect-row")].map((row) => {
         const type = row.querySelector('[name="effectType"]').value;
         const result = { type, op: row.querySelector('[name="effectOp"]').value };
         if (type === "stat") {
@@ -389,9 +399,11 @@
           result.element = target.element;
           if (target.target === "item") result.item = target.item;
         }
-        return result;
+        const group = row.dataset?.effectMembership || effectGroups.LOOSE;
+        const weight = group === effectGroups.LOOSE ? 1 : row.querySelector('[name="effectChoiceWeight"]').value;
+        return { effect: result, group, weight: weight === "" ? "" : Number(weight) };
       });
-      return { conditions, effects };
+      return { conditions, effects: effectGroups.assemble(effectEntries) };
     }
 
     return {
@@ -402,6 +414,7 @@
       readChoice,
       readRules,
       replaceRuleType,
+      updateWeightedChances,
       weightedRowsHtml,
     };
   }

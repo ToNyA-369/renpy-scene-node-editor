@@ -85,6 +85,15 @@ test("node overview groups registered Memory Tags by creator-facing bank", () =>
   assert.doesNotMatch(html, /not_registered/);
 });
 
+test("node overview includes all random Memory add possibilities without running a draw", () => {
+  const tags = registeredMemoryTags([{ Effects: [{ type: "random", choices: [
+    { weight: 1, effect: { type: "memory", bank: "memory", op: "add", id: "rare" } },
+    { weight: 99, effect: { type: "memory", bank: "memory", op: "add", id: "common" } },
+    { weight: 2, effect: { type: "memory", bank: "memory", op: "remove", id: "not_registered" } },
+  ] }] }]);
+  assert.deepEqual(tags, [{ id: "memory", name: "memory", tags: ["rare", "common"] }]);
+});
+
 test("node template preserves root safety, global scope, and escaped creator names", () => {
   const root = createViewModel({
     detail: { node: { ID: "root", Name: "<Start>" } },

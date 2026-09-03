@@ -23,6 +23,7 @@ class GroupPathContractTest(unittest.TestCase):
         project_bootstrap.initialize_scene_project(self.project_root, connect_script=False)
         self.project_patch = mock.patch.object(app, "PROJECT_ROOT", self.project_root)
         self.project_patch.start()
+        app.clear_undo_history()
         app.create_node({"id": "other", "path": "other", "name": "Other"})
 
     def tearDown(self):
@@ -117,6 +118,40 @@ class GroupPathContractTest(unittest.TestCase):
         app.save_event({"node": "root", "event": self.event("other_event", **{"Group Path": ["Other"]})})
         app.rename_event_group({"node": "root", "assignments": {"other_event": []}})
         self.assertEqual(self.read_event("grouped")["Group Path"], ["Only"])
+        app.save_event({"node": "root", "event": self.event("deleted", **{"Group Path": ["Only"]})})
+        handler = mock.Mock(spec=app.EditorHandler)
+        handler.path = "/api/events?node=root&id=deleted"
+        handler.query_value.side_effect = {"node": "root", "id": "deleted"}.get
+        app.EditorHandler.do_DELETE(handler)
+        handler.send_error_json.assert_not_called()
+        handler.send_json.assert_called_once_with({"deleted": True})
+        self.assertEqual(self.read_event("grouped")["Group Path"], ["Only"])
+        self.assertFalse((self.project_root / "SCENENODE/root/EVENTPOOL/deleted.json").exists())
+
+    def test_node_delete_retains_singleton_and_undo_restores_nested_paths(self):
+        app.create_node({"id": "deleted", "path": "deleted", "name": "Deleted"})
+        paths = {"other": ["Chapter", "Town", "Inn"], "deleted": ["Chapter", "Town", "Inn"]}
+        app.save_node_groups({"assignments": paths})
+        with app.undo_transaction("node groups"):
+            app.save_node_groups({"assignments": {"other": []}})
+        app.perform_undo()
+        self.assertEqual(app.read_node("other")["node"]["Group Path"], paths["other"])
+        with app.undo_transaction("node deletion"):
+            app.delete_node("deleted")
+        self.assertEqual(app.read_node("other")["node"]["Group Path"], paths["other"])
+        app.perform_undo()
+        self.assertEqual(app.read_node("deleted")["node"]["Group Path"], paths["deleted"])
+
+    def test_legacy_ungroup_updates_explicit_path(self):
+        app.save_event({"node": "root", "event": self.event("nested", **{"Group Path": ["Old"]})})
+        app.rename_event_group({"node": "root", "source": "Old", "target": "Normal"})
+        self.assertEqual(self.read_event("nested")["Group Path"], [])
+        self.assertEqual(self.read_event("nested")["Group"], "Normal")
+
+    def test_legacy_lowercase_normal_is_a_real_group_not_the_reserved_sentinel(self):
+        app.save_event({"node": "root", "event": self.event("lowercase", Group="normal")})
+        app.rename_event_group({"node": "root", "assignments": {"lowercase": ["normal", "Child"]}})
+        self.assertEqual(self.read_event("lowercase")["Group Path"], ["normal", "Child"])
 
     def test_runtime_selection_ignores_group_path_metadata(self):
         runtime = load_runtime_namespace()

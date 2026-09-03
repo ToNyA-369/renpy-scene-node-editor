@@ -1,10 +1,10 @@
 "use strict";
 
 (function exposeNodeWorkspace(root, factory) {
-  const api = factory();
+  const api = factory(typeof module === "object" && module.exports ? require("../core/effect_groups.js") : root.SceneEffectGroups);
   if (typeof module === "object" && module.exports) module.exports = api;
   if (root) root.SceneNodeWorkspace = api;
-})(typeof globalThis !== "undefined" ? globalThis : this, () => {
+})(typeof globalThis !== "undefined" ? globalThis : this, (effectGroups) => {
   function defaultEscapeHtml(value) {
     return String(value ?? "")
       .replaceAll("&", "&amp;")
@@ -29,7 +29,7 @@
   function registeredMemoryTags(events = [], memories = {}) {
     const banks = new Map();
     events.forEach((event) => {
-      (event?.Effects || []).forEach((effect) => {
+      effectGroups.entries(event?.Effects || []).forEach(({ effect }) => {
         const type = String(effect?.type || "").toLocaleLowerCase();
         const operation = String(effect?.op || "").toLocaleLowerCase();
         const tagId = String(effect?.id || "").trim();

@@ -1,6 +1,6 @@
 # Scene Node Editor 專案交接
 
-最後整理日期：2026-08-30
+最後整理日期：2026-08-31
 
 這份文件提供給新開啟的 Codex 對話。開始修改前，先閱讀本文件及「規格來源」列出的文件，不要重新設計已經定案的遊戲架構。
 
@@ -94,7 +94,7 @@ REPLACE 是 `[父, 目前] → [父, 目標]` 的單一 Stack 操作。它先跑
 
 創作者可在編輯器「狀態」工作區新增其他記憶庫。每個庫支援檢查、新增、移除指定標籤與清空全部。記憶庫不帶硬編碼的每日／每週生命週期；換日等流程應明確呼叫 `scene_memory_clear(bank_id)`。舊 `type: "tag"` 資料在讀取時映射至預設庫，下次儲存時轉成新格式。
 
-公開 Runtime API 包含 `scene_get_stat()`、`scene_change_stat()`、`scene_current_node_id()`、`scene_current_node_name()`、`scene_memory_has()`、`scene_memory_tags()`、`scene_memory_add()`、`scene_memory_remove()` 與 `scene_memory_clear()`。`scene_change_stat()` 與 Event Stat Effect 共用同一個 `set`／`+`／`-`／`*`／`/` 核心、Min／Max 限制、reassignment 與原子錯誤契約；Content 中的呼叫先於該 Event 返回後的 Effects。`scene_memory_tags()` 只回傳有序 tuple 快照，Node 查詢只回傳 ID／Name，不暴露可變 Catalog 或 Stack。修改 API 是原生 Content、Screen Action 與專屬系統的補充橋接；能由 Editor 表達時仍優先使用 Event Effects，Screen render expression 只允許查詢。其他 `scene_*`、Runtime 集合、Event 選擇、Stack 操作、Catalog reload／reset 與 Option 控制仍是內部介面。
+公開 Runtime API 包含 `scene_get_stat()`、`scene_change_stat()`、`scene_current_node_id()`、`scene_current_node_name()`、`scene_memory_has()`、`scene_memory_tags()`、`scene_memory_add()`、`scene_memory_remove()` 與 `scene_memory_clear()`。Event Memory Condition 的 `has`／`not_has` 判斷單一 Tag；`empty`／`not_empty` 判斷整個 Bank 並省略 `id`。`scene_change_stat()` 與 Event Stat Effect 共用同一個 `set`／`+`／`-`／`*`／`/` 核心、Min／Max 限制、reassignment 與原子錯誤契約；Content 中的呼叫先於該 Event 返回後的 Effects。`scene_memory_tags()` 只回傳有序 tuple 快照，Node 查詢只回傳 ID／Name，不暴露可變 Catalog 或 Stack。修改 API 是原生 Content、Screen Action 與專屬系統的補充橋接；能由 Editor 表達時仍優先使用 Event Effects，Screen render expression 只允許查詢。其他 `scene_*`、Runtime 集合、Event 選擇、Stack 操作、Catalog reload／reset 與 Option 控制仍是內部介面。
 
 ### 3.5 演出責任
 
@@ -184,12 +184,12 @@ Options Renderer 會把目前節點與 Global Options 合併後依 Element `Z Or
 - 中文顯示名稱與穩定技術 ID 映射。
 - Event Conditions、Effects、Content、Next Node 與權重表單；Next Node 選單沿用 Scene Node 的 authoring Group 顯示「Group → Node」，未群組節點留在第一層，JSON 仍只保存穩定 Node ID。
 - Event Conditions 使用一層 OR-of-AND 語意群組：同一非空 `clause` 是 AND，不同 clause 與 `null` 獨立條件是 OR；舊平面 Conditions 仍按全 AND 讀取並在保存時正規化至 `and_1`。群組內外可直接拖移，單成員 AND 群組保留；只有單一 AND 群組時新增會加入該組，已有 OR 分支後新增為獨立條件。Effects／Content 權重／Next Node 權重維持無群組 Pointer 排序；Effects 直接保存並依陣列順序執行，權重 object 只保存 Editor 顯示順序而不改變機率。
-- Content 文件與 Textbox Profile 管理清單共用無群組 Pointer 排序。Scene Node 選單則組合 `js/ui/group_drag.js`，以 Node.json 的可選 `Group` 與 `Order` 保存停留成組、跨框移入／移出及整組排序，並由 `PUT /api/node-groups` 原子寫入；Global Node 固定在群組流之外。共用群組意圖停留時間為 500ms，未群組候選會向下展開 48px 的真實預留空間；Event／Node 群組內排序後以暫時 pinned-open 狀態保持展開至 pointerleave，整組預覽則以 220ms 從目前高度縮合。包含目前選取 Node 或正在編輯 Event 的群組必須持續展開，不受 pointerleave 影響；選取移至其他群組或未群組元素後，舊群組恢復預設折疊。Node.json 的可選 `Content Order` 與 Profile 的可選 `Order` 同樣是 Editor-only metadata。缺值時保持既有穩定順序，首次拖移後才正規化，不得改變 ROOT、Stack、圖面布局或 Runtime。
+- Content 文件與 Textbox Profile 管理清單共用無群組 Pointer 排序。Scene Node 選單則組合 `js/ui/group_drag.js`，以 Node.json 的可選 `Group`、`Group Path` 與 `Order` 保存停留成組、跨框移入／移出及整組排序，並由 `PUT /api/node-groups` 原子寫入；Global Node 固定在群組流之外。共用群組意圖停留時間為 500ms，未群組候選會向下展開 48px 的真實預留空間；Event／Node 群組內排序後以暫時 pinned-open 狀態保持展開至 pointerleave，整組預覽則以 220ms 從目前高度縮合。包含目前選取 Node 或正在編輯 Event 的所有上層群組必須持續展開，不受 pointerleave 影響；選取移至其他群組或未群組元素後，舊群組恢復預設折疊。Node.json 的可選 `Content Order` 與 Profile 的可選 `Order` 同樣是 Editor-only metadata。缺值時保持既有穩定順序，首次拖移後才正規化，不得改變 ROOT、Stack、圖面布局或 Runtime。
 - 刪除 Content 權重列時，最後一列必須正規化為 `null`，不可保存空 object；空 object 會被 API 視為不合法權重表並造成正常刪除顯示 autosave 錯誤。
 - Event Trigger 的 Options 來源在 UI 顯示為 `Option`，JSON／Runtime 契約仍是 `Action:<id>`；Auto 顯示為 On Enter／On Node／On Exit，保存為 `Auto:Enter`／`Auto:Node`／`Auto:Exit`。
 - Event Content 使用創作者命名的文件第一層與 label 第二層的階層選單；只有一個 label 的文件在 UI 直接映射為創作者名稱，實際保存值仍是技術 label。
-- Event 的 `Group` 是單層 authoring metadata；缺值／空值正規化為固定 `Normal`，不參與 Runtime、Priority／Weight、生命週期或關聯圖。Event Pool 只保留一個展滿側欄的新增 Event 按鈕；未群組 Event 與群組卡片依 `Order` 共用同一排序流，末端永遠保留自然落點，可將 Event 排在最末群組之後。Pointer 拖移以真實元素即時騰出插入間隙並用 FLIP 位移推開 Event／群組；只有游標仍位於候選項目或群組的目前幾何邊界內，500ms 停留才可成組，未群組候選會向下展開 48px 預留空間，讓位移開後立即取消。普通點擊在 7px 拖移門檻前不得改動 DOM或阻擋 Event 選取。群組預設收起為較短的可改名欄位與數量，hover、鍵盤 focus、拖移進入時展開；包含目前正在編輯 Event 的群組也固定展開，直到改選其他群組或未群組 Event；群組內排序後保持展開至 pointerleave。名稱與數量之間的無圖示留白可將群組當成單一排序區塊拖移，浮動預覽以 220ms 從目前高度縮合，成員歸屬與內部順序不變。群組剩一個 Event 時自動解散；順序保存於可選、非負整數的 Editor-only `Order`，舊資料缺值時依現有穩定順序讀取。成功拖移只更新同步狀態、不顯示 Toast；批次群組與排序經 `/api/event-groups` 一次保存，失敗不得提交畫面狀態且仍需顯示錯誤。
-- 所有固定選項 `<select>`（包含 Event Content label）由前端提升為同一個共用自訂選單；所有可選列固定為 38px，選單依目前層的實際內容長高並在 320px 後捲動。圖片、音訊與 Content 文件依路徑資料建立任意深度的父子選單，父子框之間固定保留間隔與透明滑鼠通道。滑鼠開啟後焦點立即進入選單；上下鍵在目前層巡覽，聚焦父層時只展開子選單，右鍵才把焦點移入，左鍵返回父層，Enter 選取，Esc 關閉。欄位只顯示創作者名稱。原始欄位仍保留在表單內，確保既有表單讀取與 API payload 不變。
+- Event 的 `Group` 與可選 `Group Path` 支援最多三層 authoring metadata；缺值／空值正規化為固定 `Normal`，不參與 Runtime、Priority／Weight、生命週期或關聯圖。Event Pool 只保留一個展滿側欄的新增 Event 按鈕；未群組 Event 與群組卡片依 `Order` 共用同一排序流，末端永遠保留自然落點，可將 Event 排在最末群組之後。Pointer 拖移以真實元素即時騰出插入間隙並用 FLIP 位移推開 Event／群組；只有游標仍位於候選項目或群組的目前幾何邊界內，500ms 停留才可成組，未群組候選會向下展開 48px 預留空間，讓位移開後立即取消。普通點擊在 7px 拖移門檻前不得改動 DOM或阻擋 Event 選取。群組預設收起為較短的可改名欄位與數量，hover、鍵盤 focus、拖移進入時展開；包含目前正在編輯 Event 的群組也固定展開，直到改選其他群組或未群組 Event；群組內排序後保持展開至 pointerleave。名稱與數量之間的無圖示留白可將群組當成單一排序區塊拖移，浮動預覽以 220ms 從目前高度縮合，成員歸屬與內部順序不變。群組剩一個 Event 時保留，空群組才消失；順序保存於可選、非負整數的 Editor-only `Order`，舊資料缺值時依現有穩定順序讀取。成功拖移只更新同步狀態、不顯示 Toast；批次群組與排序經 `/api/event-groups` 一次保存，失敗不得提交畫面狀態且仍需顯示錯誤。
+- 所有固定選項 `<select>`（包含 Event Content label）由前端提升為同一個共用自訂選單；所有可選列固定為 38px，選單與每一層子選單都依目前層的實際內容明確計算高度，只在超過 320px 後捲動，不可讓少量項目的 Popover 撐滿最大高度。圖片、音訊、Content 文件與 End up Next Node 依路徑資料建立任意深度的父子選單；同一階層鏈在視窗不足以容納預設 240px 寬度時必須共同縮窄，每層維持等寬、固定間隔且不可互相覆蓋。每一層子選單都是保留 DOM 親子關係的獨立 manual Popover，避免 Safari 將主 Popover 內的 fixed 子層裁掉而形成可鍵盤操作但畫面不可見的狀態。Next Node 根層固定先列群組資料夾、再列未群組 Node；目前值若是未群組 Node，開啟時先聚焦第一個群組入口，避免大量未群組項目把群組推到 320px 可視範圍之外。滑鼠開啟後焦點立即進入選單；上下鍵在目前層巡覽，聚焦父層時只展開子選單，右鍵才把焦點移入，左鍵返回父層，Enter 選取，Esc 關閉。欄位只顯示創作者名稱。原始欄位仍保留在表單內，確保既有表單讀取與 API payload 不變。
 - Options 的 Hover Sound 與 Click Sound 只掃描 `game/audio/`。Event 不提供 BGM／SE Effect 或 Persistent；音訊演出由 Content 使用 Ren'Py 原生語法。
 - TEXTBOX、PICTURE、HITBOX 選項表單。
 - TEXTBOX 專案共用外觀設定檔：獨立檔案 CRUD、Profile 選擇、Feature 開關、稀疏局部覆寫、Editor 預覽、Runtime hover accent／text shadow／staggered entrance，以及缺檔回退與引用刪除保護。
@@ -203,6 +203,8 @@ Options Renderer 會把目前節點與 Global Options 合併後依 Element `Z Or
 - 前端已開始漸進式模組化：API Client、Editor Settings、Event Trigger／End up 契約、Event 規則與權重表單、Event／Stats 排序流區塊模型、共用 Pointer 即時插入與停留群組控制器、無群組清單排序控制器、共用階層下拉選單、Content 程式碼提示轉換、Node 總覽、Project Validation 及關聯圖純資料模型都有獨立模組與 Node 測試；`app.js` 保留狀態組裝與跨模組協調。
 - Content 的 Monaco／Shiki 瀏覽器資產由 `tools/build_editor_assets.mjs` 依鎖定 npm 版本與 `tools/editor_assets/renpy-language/` 的官方 grammar／snippets 產生至 `EDITOR/static/vendor/`。安裝包只帶生成資產，不需要 Node 或網路；`python3 tools/verify.py` 會檢查生成物沒有過期。進階編輯器透過隱藏 textarea 的既有 `input`／autosave 契約接線，載入失敗必須回退到可用 textarea，不可改變 Content API 或 `.rpy` 格式。第三方聲明位於 `EDITOR/THIRD_PARTY_NOTICES.md`。
 - Condition／Effect 類型、操作與預設資料形狀集中於 `state_rule_contract.js`；跨層測試會直接比較前端 registry、Editor API registry 與 Runtime 分支，新增操作不得只修改表單。
+- Content 與 GOTO／REPLACE Next Node 權重列在同一行顯示相對機率，沿用 `SceneEffectGroups.percentages()`／`percentageLabel()` 的換算與精度；`event_editor.js` 的 `updateWeightedChances(form, kind)` 分別計算兩份清單。單項為 100%，空白或非法權重顯示破折號，百分比不寫入 JSON，也不影響抽選。權重區以內容寬度排列，百分比到刪除按鈕為 8px；所有 Event 規則列的刪除按鈕共用 26px 寬度與 hover 樣式。Browser `Content chances`、`GOTO chances`／`REPLACE chances` 覆蓋即時更新、增刪、hover／對齊及 reload。
+- Event Version 3 加入單層 `{type:"random", choices:[{weight, effect}]}` 效果容器，不能列入葉效果類型選單。`core/effect_groups.js` 管理渲染位址、群組序列化、權重百分比及拖移計畫；`event_editor.js` 負責表單，`effect_groups.css` 沿用 Conditions 的灰色框／hover 輪廓。單成員保留，空組消失；整組排序保持為單一執行位置。舊事件不自動成組，只有新功能升至 V3，移除群組不降版。Runtime 到執行位置才以獨立、縮放權重的 `scene_random_effect_choice()` 抽一項；不得修改既有 Event／Content 權重抽選。組內所有候選先驗證形狀／引用，不求值；只對抽中者做最新狀態的數值求值與寫入。Editor `iter_effect_leaves()`、前端 `SceneEffectGroups.entries()` 必須涵蓋引用保護、驗證及 Tag 彙整；新增 Effects 消費者不得只巡覽頂層。驗證入口：`test_random_effects.py`、`effect_groups.test.js`、browser `random Effect groups`。Editor／FRAMEWORK 必須一起更新，Stack／存檔格式／公開 API 不變。
 - Event Version 2 數值欄位支援有限數字、Stat 引用及單層 `calc`（`+ - * / %`）；`ui/numeric_field.js` 負責來源切換／運算元表單／序列化，`css/workspaces/event_numeric.css` 載於 editor.css 後，沿用共用 picker。Condition `left` 取代 `id`，Effect 目標仍是 `id`；每個數值欄位最多一個運算子。Editor 儲存新格式才標記 Version 2；舊格式不批次重寫，Editor 與 FRAMEWORK 必須一起更新。
 - `validate_numeric_value` 與 Runtime `scene_numeric_value` 必須共同維護；禁止 eval／巢狀運算。Conditions 維持只讀／生命週期快照，Effects 維持 Content 後依序求值與最終寫入 clamp，沒有新增存檔狀態或 public API。動態零除數／未知引用會報錯，前面成功的 Effects 不自動回復。驗證入口：`test_runtime_numeric_expressions.py`、`test_event_api_round_trip.py`、JS event_editor 測試及 browser `numeric expressions` 路徑。
 - 數值規則的所有控制項保持同一水平中心線，來源與值合成單一框，來源以 `123`／`Stat`／`ƒx` 小標記呈現。choice picker 的 option 可用 `data-picker-label` 提供關閉時的短標籤，選單本身與 tooltip／輔助描述仍顯示完整名稱，不改變選項值。雙側運算共用單行 flex 配置；窄視窗只橫向捲動該列，不能退回堆疊，popover 與 Tab／Esc 不可被捲動框截斷。
@@ -338,8 +340,15 @@ EDITOR/static/js/ui/type_badge.js
 EDITOR/static/js/ui/prefix_picker.js
   Event Memory Tag 自由輸入欄位的共用前綴建議：沿用 choice picker 尺寸與選項樣式，保留滑鼠、方向鍵、Home／End、Enter、Esc 與 Tab 行為；只篩選候選，不限制新 Tag。
 
+EDITOR/static/js/core/group_tree.js
+  Event／Node 三層群組純資料模型：Group Path 陣列優先、舊 Group 整名視為一層；樹狀區塊、祖先 key、改名、跨層排序／搬動規劃；保留單成員，只有空群組消失。整組搬動檢查所有後代深度與循環，不改 Runtime。Stats 與 Conditions 不使用此模型。tests/js/group_tree.test.js、tests/test_group_paths.py 與 browser nested-group 路徑覆蓋兼容、保存與拖移。
+  Event／Node 群組底部只保留外框內距，inner-drop-tail 不再占位；候選元素共用未群組時的 48px 展開框與陰影。群組內成組預覽不能同時放大／強調父群組；items 的等量 padding／負 margin 提供框線出血空間而不增加排版尺寸，仍保留收合所需的 overflow clip。Browser nested-group 路徑檢查底距、框線一致與父層不縮放。
+
 EDITOR/static/js/ui/group_drag.js
-  Event／Stats／Node 共用 Pointer 拖移、即時插入間隙、FLIP 讓位、跨群組歸屬與 500ms 停留成組；同時負責 Event／Node 因選取切換而重繪時，從既有展開幾何反向收合舊群組。整組落位後，只有目前選取元素位於該群組時，才從標題高度重新展開；其他群組維持收合。收合進行中會抑制 hover，直到動畫完成且 pointerleave 後才重新武裝。純資料排序／解散規劃可由 Node 測試直接呼叫。
+  浮動群組收合高度必須扣除直接子 event-group-items-shell 的排版高度，不可扣除帶出血 padding／負 margin 的 inner list；預覽搬至 body 時保留來源群組 padding，避免巢狀選擇器失效後改變尺寸。Browser nested-group 路徑覆蓋一般／巢狀群組在正常及 reduced-motion 下，收合後完整外框不被預覽裁切。
+  Stat 群組浮動預覽必須在 body 層取消列表專用的負 margin，並讓 is-group-block-dragging 卡片以 100% 實際跟隨 wrapper 高度及自行 overflow clip；其直接子 stat-group-items 必須完全 hidden，只保留標題。若只縮短 wrapper，Stats 的左右／底框會被截斷且底部會漏出部分成員。Browser Stats 路徑在正常及 reduced-motion 下檢查 preview 與群組框四邊幾何貼合及成員 visibility。
+  Event／Node 的相鄰群組 hover 使用 180ms 交接寬限；一次清單 hover 行程中經過的群組以 is-group-hover-held 保持展開，離開清單後一併沿既有路徑收合。這避免上方群組收合時把正在瞄準的下方群組移走；開始拖移或 controller destroy 必須立即清除暫存 class／timer。Browser nested-group 路徑同時檢查兩工作區的內容座標不產生整列跳動。
+  Event／Stats／Node 共用 Pointer 拖移、即時插入間隙、FLIP 讓位、跨群組歸屬與 500ms 停留成組；同時負責 Event／Node 因選取切換而重繪時，從既有展開幾何反向收合舊群組。整組落位後，只有目前選取元素位於該群組時，才從標題高度重新展開；其他群組維持收合。收合進行中會抑制 hover，直到動畫完成且 pointerleave 後才重新武裝。Event／Node 以 nested:true 啟用深層命中、父層插入與整組停留移入；Stats／Conditions 保持舊單層流程。收合 CSS 只選直接子 shell，不可因 hover 上層而打開所有後代。純資料規劃由 group_tree.js 負責，可由 Node 測試直接呼叫。
 
 EDITOR/static/js/ui/list_reorder.js
   Scene Nodes、Event Effects／Content／Next Node、Options Elements／Textbox Items、Content 文件、Textbox Profiles 與 Memory Banks 共用的無群組 Pointer 排序；提供 7px 起拖門檻、1:1 預覽、表格列 colgroup 幾何複製、即時插入間隙、中線遲滯、FLIP 讓位、邊緣自動捲動與 reduced-motion 回退，並以依賴注入的 `onDrop` 保存各工作區既有資料順序。Pointer capture 只能在超過門檻、確定開始拖移後建立，門檻前的普通 click 必須保留給卡片內的選取與控制元件。Event Conditions 改由 `group_drag.js` 組合語意 AND 群組與 OR 分支。

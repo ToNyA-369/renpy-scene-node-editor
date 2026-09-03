@@ -597,23 +597,24 @@ body.sidebar-open .sidebar-scrim {
   transition: grid-template-rows 220ms cubic-bezier(0.2, 0.82, 0.2, 1), opacity 140ms ease;
 }
 
-.event-group:hover .event-group-items-shell,
-.event-group:focus-within .event-group-items-shell,
-.event-group.is-group-drop-ready .event-group-items-shell,
-.event-group.is-group-preview-open .event-group-items-shell,
-.event-group.is-group-editing .event-group-items-shell,
-.event-group.is-group-pinned-open .event-group-items-shell {
+.event-group:hover > .event-group-items-shell,
+.event-group:focus-within > .event-group-items-shell,
+.event-group.is-group-drop-ready > .event-group-items-shell,
+.event-group.is-group-preview-open > .event-group-items-shell,
+.event-group.is-group-editing > .event-group-items-shell,
+.event-group.is-group-hover-held > .event-group-items-shell,
+.event-group.is-group-pinned-open > .event-group-items-shell {
   grid-template-rows: 1fr;
   opacity: 1;
 }
 
-.event-group.is-group-selection-collapsing .event-group-items-shell,
-.event-group.is-group-drop-collapsed .event-group-items-shell {
+.event-group.is-group-selection-collapsing > .event-group-items-shell,
+.event-group.is-group-drop-collapsed > .event-group-items-shell {
   grid-template-rows: 0fr;
   opacity: 0;
 }
 
-.event-group.is-group-block-dragging .event-group-items-shell {
+.event-group.is-group-block-dragging > .event-group-items-shell {
   grid-template-rows: 0fr;
   opacity: 0;
 }
@@ -740,10 +741,32 @@ body.sidebar-open .sidebar-scrim {
   border-color: color-mix(in srgb, var(--accent) 34%, transparent);
 }
 
-.group-drag-item[data-group-item-group="Normal"].is-group-ready {
+/* Nested authoring groups keep a usable rail for dragging back to a parent. */
+.event-group[data-group-depth] > .event-group-items-shell > .event-group-items {
+  gap: 8px;
+  /* Let a candidate's outline breathe without adding layout space or losing
+     the overflow clip needed by the group's collapse animation. */
+  margin: -9px;
+  padding: 9px;
+}
+
+.event-group[data-group-depth] .event-group {
+  min-width: 0;
+  padding: 6px;
+}
+
+.group-inner-drop-tail {
+  display: none;
+}
+
+.group-drag-item[data-group-item-group="Normal"].is-group-ready,
+.event-pool-flow .group-drag-item.is-group-ready,
+.node-pool-flow .group-drag-item.is-group-ready {
   margin-bottom: 48px;
 }
 
+.event-pool-flow .group-drag-item.is-group-ready::after,
+.node-pool-flow .group-drag-item.is-group-ready::after,
 .group-drag-item[data-group-item-group="Normal"].is-group-ready::after {
   inset: -6px -6px -48px;
   background: var(--surface-soft);
@@ -793,7 +816,19 @@ body.sidebar-open .sidebar-scrim {
 
 .group-drag-preview.is-group-block-preview > .event-group,
 .group-drag-preview.is-group-block-preview > .stat-group-card {
+  box-sizing: border-box;
+  width: 100%;
   height: auto;
+  margin: 0;
+}
+
+.group-drag-preview.is-group-block-preview > .stat-group-card.is-group-block-dragging {
+  height: 100%;
+  overflow: hidden;
+}
+
+.group-drag-preview.is-group-block-preview > .stat-group-card.is-group-block-dragging > .stat-group-items {
+  visibility: hidden;
 }
 
 .group-drag-preview > .group-drag-item {
@@ -2760,6 +2795,7 @@ input.select-choice-trigger {
 .content-label-submenu-scroll,
 .select-choice-submenu-scroll {
   display: grid;
+  align-content: start;
   box-sizing: border-box;
   width: 100%;
   max-height: 320px;
@@ -2783,6 +2819,7 @@ input.select-choice-trigger {
 .select-choice-menu {
   position: fixed;
   z-index: 300;
+  align-content: start;
   max-height: 320px;
   overflow: auto;
   overscroll-behavior: contain;
@@ -2872,10 +2909,25 @@ input.select-choice-trigger {
 
 .select-choice-submenu {
   position: fixed;
+  inset: auto;
   z-index: 310;
   display: none;
   width: 270px;
+  height: max-content;
+  min-width: 0;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
   overflow: visible;
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+}
+
+.select-choice-submenu:popover-open {
+  right: auto;
+  bottom: auto;
+  display: grid;
 }
 
 /* Read-only directed GOTO / REPLACE graph. */

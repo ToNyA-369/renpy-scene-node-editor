@@ -54,11 +54,17 @@ This document defines the current public-alpha data and Runtime contracts. For n
 
 - `ID`: stable technical ID.
 - `Name`: editable display name.
-- `Group`: optional single-level Editor group name; missing or blank values normalize to `Normal`.
+- `Group`: legacy Editor group name (used as one whole level when Group Path is absent); missing or blank values normalize to `Normal`.
 - `Order`: optional non-negative integer storing Scene Node list drag order only.
 - `Content Order`: optional string array storing the Content-file list order for this authoring scope only.
 
-`Group`, Scene Node `Order`, and Content `Content Order` are Editor-only metadata. Legacy data without them uses the existing stable scan order and writes metadata only after the first drag. Scene Node groups reuse the Event Pool's dwell-to-group, boundary-crossing membership, whole-group reorder, and singleton-dissolution behavior. A selected member keeps its group open; selecting an outside Node contracts that group along the reverse opening path and suppresses hover reopening until the contraction finishes and the pointer leaves. After a group is dropped and saved, it expands from its dragged heading height only when it contains the selected Node. The Global Node remains outside this flow. None participates in ROOT, the Stack, Event selection, graph layout, or Runtime.
+`Group Path` is an optional array of zero to three group names, also supported on Events. Each name is trimmed, non-empty, at most 80 characters, and cannot be the exact sentinel `Normal`. For example, `["Chapter One", "Town", "Inn"]` places the member in three nested groups. The explicit path is authoritative: `Group` mirrors the last name, or `Normal` for `[]`. Without a path, a legacy group name is one complete level; slashes in names are not separators.
+
+Whole-group moves preserve all descendant paths and order, reject self/descendant destinations, and cannot exceed three levels. Renaming changes only the chosen path prefix, not identically named groups elsewhere. Group-assignment APIs accept path arrays as well as legacy strings. Existing documents need no rewrite or schema-version migration; use the updated Editor for nested groups. Undo restores the entire path/order batch. Stats and Condition AND/OR groups retain their existing single-level rules.
+
+`Group`, `Group Path`, Scene Node `Order`, and Content `Content Order` are Editor-only metadata. Legacy data without them uses the existing stable scan order and writes metadata only after the first drag. Scene Node groups reuse the Event Pool's dwell-to-group, boundary-crossing membership, whole-group reorder, and singleton-retention behavior; only empty groups disappear. A selected member keeps all its ancestor groups open; selecting an outside Node contracts that group along the reverse opening path and suppresses hover reopening until the contraction finishes and the pointer leaves. After a group is dropped and saved, it expands from its dragged heading height only when it contains the selected Node. The Global Node remains outside this flow. None participates in ROOT, the Stack, Event selection, graph layout, or Runtime.
+
+Event and Node lists use a 180 ms pointer-hover handoff. Groups traversed during one list-hover session stay open until the pointer leaves the list, stabilizing neighboring targets without writing `Group Path` / `Order` or changing keyboard focus, dragging, or Runtime behavior.
 
 ## Global Node
 
@@ -240,7 +246,9 @@ Options have no lifecycle, condition expressions, or custom Screen source. Every
 
 `Priority` must be an integer from 0 through 9; a missing value defaults to 5 for a new Event. The Runtime still selects only the lowest matching layer, or runs lifecycle Events in ascending numeric order.
 
-`Group` is single-level authoring metadata used only to organize the Event Pool in the Editor. Missing or blank values normalize to the fixed `Normal` group, presented as visually ungrouped without a heading. Optional non-negative integer `Order` is also Editor-only and persists drag order; legacy Events without it retain their stable read order. Neither field participates in Trigger matching, Priority, Weight, lifecycle ordering, the graph, or Runtime execution. The drag preview updates on every pointer event while geometry checks and DOM reflow are coalesced by animation frame. Midpoint hysteresis prevents insertion jitter, the nearest scrollable ancestor supports progressive edge auto-scroll, and window-level lifecycle listeners preserve the gesture while the source moves between containers. Pointer dragging moves a live insertion gap and uses short FLIP offsets to push Event and group blocks aside. A permanent trailing gap allows placement after the bottommost group, while crossing a group boundary changes membership without a dedicated ungroup button. Grouping dwell remains armed for 500ms only while the pointer is inside the candidate's current geometry; an ungrouped candidate opens a 48px group reservation below itself, while live reflow moving it away cancels that intent. Groups collapse to a compact name and count by default, then expand on hover, keyboard focus, drag entry, or while an internal Event is selected. Selecting an outside Event restores the pre-redraw expanded geometry and contracts it over the same 220ms curve used for opening; hover remains disarmed until the contraction finishes and the pointer leaves. An internal reorder keeps the group open until pointerleave. The unmarked blank space beside the name drags the whole group as one stable block: its floating preview contracts over 220ms, and after saving only a group containing the selected Event expands from that heading height at its new position. Releasing after the reservation expands creates a group, and a one-Event group dissolves automatically. Successful drags do not produce toasts; failures remain visible.
+`Group` and optional `Group Path` are authoring metadata supporting up to three group levels used only to organize the Event Pool in the Editor. Missing or blank values normalize to the fixed `Normal` group, presented as visually ungrouped without a heading. Optional non-negative integer `Order` is also Editor-only and persists drag order; legacy Events without it retain their stable read order. None of these fields participates in Trigger matching, Priority, Weight, lifecycle ordering, the graph, or Runtime execution. The drag preview updates on every pointer event while geometry checks and DOM reflow are coalesced by animation frame. Midpoint hysteresis prevents insertion jitter, the nearest scrollable ancestor supports progressive edge auto-scroll, and window-level lifecycle listeners preserve the gesture while the source moves between containers. Pointer dragging moves a live insertion gap and uses short FLIP offsets to push Event and group blocks aside. A permanent trailing gap allows placement after the bottommost group, while crossing a group boundary changes membership without a dedicated ungroup button. Grouping dwell remains armed for 500ms only while the pointer is inside the candidate's current geometry; a candidate below the depth limit opens a 48px group reservation below itself, while live reflow moving it away cancels that intent. Groups collapse to a compact name and count by default, then expand on hover, keyboard focus, drag entry, or while an internal Event is selected. Selecting an outside Event restores the pre-redraw expanded geometry and contracts it over the same 220ms curve used for opening; hover remains disarmed until the contraction finishes and the pointer leaves. An internal reorder keeps the group open until pointerleave. The unmarked blank space beside the name drags the whole group as one stable block: its floating preview contracts over 220ms, and after saving only a group containing the selected Event expands from that heading height at its new position. Releasing after the reservation expands creates a group, and a one-Event group remains intact; only empty groups disappear. Successful drags do not produce toasts; failures remain visible.
+
+Neighboring Event groups use the same hover handoff. Its held-open state exists only in the DOM and is cleared immediately when dragging begins or the controller is destroyed for a redraw.
 
 `Content` and `Next Node` may be `null`, one string, or a positive weight map:
 
@@ -307,9 +315,10 @@ Memory:
 
 ```json
 { "type": "memory", "bank": "memory", "id": "has_key", "op": "has" }
+{ "type": "memory", "bank": "memory", "op": "empty" }
 ```
 
-Operators: `has`, `not_has`. For example, `(money >= 10 AND member) OR hour >= 18` is stored as:
+Operators `has` and `not_has` test one tag and require `id`. Operators `empty` and `not_empty` test the whole Memory Bank and omit `id`; `not_empty` matches when at least one tag exists. For example, `(money >= 10 AND member) OR hour >= 18` is stored as:
 
 ```json
 [
@@ -350,6 +359,28 @@ Conditions only read state, including lifecycle candidate snapshots. Effects eva
 The Editor promotes an Event to `Version: 2` when it saves structured numeric values or a custom left value. Untouched files and numeric-only legacy shapes remain compatible; absent Version means 1, existing Version 2 stays 2. No saved-state layout changes are needed. **Update the project's Editor and FRAMEWORK together before using this feature; older Runtimes do not understand these objects.** New Runtime rejects unknown Event versions. The public `scene_change_stat()` API still accepts an already computed number; expression evaluation is internal, not a new scripting API.
 
 ## Effects
+
+### Random groups (Event Version 3)
+
+`Effects` execute top-to-bottom. A normal leaf executes directly; a `random` group occupies one position, executes **exactly one** child by relative weight, then continues with the next block:
+
+```json
+{
+  "type": "random",
+  "choices": [
+    { "weight": 1, "effect": { "type": "stat", "id": "money", "op": "+", "value": 10 } },
+    { "weight": 3, "effect": { "type": "memory", "bank": "memory", "id": "reward", "op": "add" } }
+  ]
+}
+```
+
+This gives 25% / 75% chances. Omitted `weight` defaults to 1; weights must be finite positive numbers, not booleans. `choices` must be nonempty and contain only the Stat / Memory / Option leaves below, never another random group. A singleton group remains valid at 100%.
+
+The draw uses Ren'Py's rollback-aware RNG when execution reaches the group after Content returns, not during Event preparation. The selected expression reads the latest state, including previous Effects. Every candidate must have valid structure and references; unselected candidates do not perform numeric calculations. Errors identify the Event, Effect, and child position, never reroll, and do not undo preceding completed Effects.
+
+Only Events using groups automatically promote to `Version: 3`; an explicit Version 3 stays 3 after groups are removed. Legacy Events never auto-group, and existing Version 1 / 2 behavior stays unchanged. **Update the project's Editor and FRAMEWORK together before use.** This extends Event data only, without changing stable IDs, Stack behavior, saved-state layout, or public APIs. Project validation, deletion protections, and Memory Tag discovery include every candidate regardless of its chance.
+
+### Leaf Effects
 
 Stat:
 
