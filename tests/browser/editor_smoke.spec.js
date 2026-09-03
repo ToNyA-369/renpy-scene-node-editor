@@ -136,6 +136,15 @@ async function dragWithDwell(page, source, target, dwellMs = 720, beforeDrop = n
   await page.mouse.up();
 }
 
+async function expectGroupReservation(target) {
+  await expect.poll(() => target.evaluate((item) => {
+    const style = getComputedStyle(item, "::after");
+    return { margin: getComputedStyle(item).marginBottom,
+      top: style.top, right: style.right, bottom: style.bottom, left: style.left,
+      hasShadow: style.boxShadow !== "none" };
+  })).toEqual({ margin: "48px", top: "-6px", right: "-6px", bottom: "-48px", left: "-6px", hasShadow: true });
+}
+
 async function dragWithoutFollowingReflow(page, source, target, dwellMs = 720, beforeDrop = null) {
   const sourceElement = source.first();
   const targetElement = target.first();
@@ -202,9 +211,10 @@ async function dragListItemBefore(page, source, target, beforeDrop = null) {
   const sourceBox = await sourceElement.boundingBox();
   const targetBox = await targetElement.boundingBox();
   if (!sourceBox || !targetBox) throw new Error("List reorder source or target is not visible");
-  await page.mouse.move(sourceBox.x + 2, sourceBox.y + sourceBox.height / 2);
+  // Stay inside the card's drag surface instead of its anti-aliased border.
+  await page.mouse.move(sourceBox.x + 10, sourceBox.y + sourceBox.height / 2);
   await page.mouse.down();
-  await page.mouse.move(targetBox.x + 2, targetBox.y + Math.min(12, targetBox.height * 0.2), { steps: 12 });
+  await page.mouse.move(targetBox.x + 10, targetBox.y + Math.min(12, targetBox.height * 0.2), { steps: 12 });
   await expect(page.locator(".list-reorder-preview")).toBeVisible();
   await page.waitForTimeout(180);
   if (beforeDrop) await beforeDrop();
@@ -214,12 +224,13 @@ async function dragListItemBefore(page, source, target, beforeDrop = null) {
 async function dragConditionBefore(page, source, target) {
   const sourceElement = source.first();
   const targetElement = target.first();
+  await sourceElement.scrollIntoViewIfNeeded();
   const sourceBox = await sourceElement.boundingBox();
   const targetBox = await targetElement.boundingBox();
   if (!sourceBox || !targetBox) throw new Error("Condition drag source or target is not visible");
-  await page.mouse.move(sourceBox.x + 2, sourceBox.y + sourceBox.height / 2);
+  await page.mouse.move(sourceBox.x + 10, sourceBox.y + sourceBox.height / 2);
   await page.mouse.down();
-  await page.mouse.move(targetBox.x + 2, targetBox.y + Math.min(12, targetBox.height * 0.2), { steps: 12 });
+  await page.mouse.move(targetBox.x + 10, targetBox.y + Math.min(12, targetBox.height * 0.2), { steps: 12 });
   await expect(page.locator(".group-drag-preview")).toBeVisible();
   await page.waitForTimeout(180);
   await page.mouse.up();
@@ -368,6 +379,292 @@ test.afterAll(() => {
   if (projectRoot) fs.rmSync(projectRoot, { recursive: true, force: true });
 });
 
+test("Event End up picker traverses three Node group levels and saves the stable Node ID", async ({ page }) => {
+  const originalDetail = await (await page.request.get(`${editorUrl}/api/node?path=branch_lab`)).json();
+  const originalEvent = originalDetail.events.find((entry) => entry.data.ID === "branch_random").data;
+  const grouped = await page.request.put(`${editorUrl}/api/node-groups`, { data: { assignments: {
+    outcome_success: ["章節", "區域", "場景"],
+  } } });
+  expect(grouped.ok()).toBe(true);
+
+  await page.setViewportSize({ width: 900, height: 760 });
+  await page.goto(editorUrl);
+  await openNodeSidebar(page);
+  await page.locator('#nodeList [data-node-path="branch_lab"]').click({ force: true });
+  await page.getByRole("button", { name: /^事件 / }).click();
+  await page.locator('[data-event-id="branch_random"]').click();
+  await changeSelect(page, "EndUp", "GOTO");
+
+  const select = page.locator('select[name="nextWeightedId"]').first();
+  await expect(select.locator('option[value="outcome_success"]'))
+    .toHaveAttribute("data-picker-path", /章節\/區域\/場景\//);
+  const picker = select.locator("xpath=..");
+  await picker.locator("[data-select-picker-toggle]").click();
+  const firstFolder = picker.locator(":scope > .select-choice-menu > .select-choice-branch > [data-select-folder-toggle]").first();
+  await expect(firstFolder).toBeFocused();
+  expect(await firstFolder.evaluate((folder) => {
+    const menu = folder.closest(".select-choice-menu").getBoundingClientRect();
+    const rect = folder.getBoundingClientRect();
+    return rect.top >= menu.top && rect.bottom <= menu.bottom;
+  })).toBe(true);
+  for (const name of ["章節", "區域", "場景"]) {
+    await picker.getByRole("button", { name, exact: true }).click();
+    const openSubmenu = picker.locator(".select-choice-submenu:popover-open").last();
+    await expect(openSubmenu).toBeVisible();
+    expect(await openSubmenu.evaluate((submenu) => {
+      const rect = submenu.getBoundingClientRect();
+      const surfaceRect = submenu.querySelector(":scope > .select-choice-submenu-scroll").getBoundingClientRect();
+      const hit = document.elementFromPoint(rect.left + 16, rect.top + 16);
+      return rect.width > 0
+        && rect.height > 0
+        && (submenu.querySelector(":scope > .select-choice-submenu-scroll").children.length !== 1 || rect.height < 80)
+        && Math.abs(rect.height - surfaceRect.height) < 1
+        && Boolean(hit?.closest(".select-choice-submenu"));
+    })).toBe(true);
+  }
+  const save = page.waitForResponse((candidate) => (
+    candidate.url().endsWith("/api/events") && candidate.request().method() === "POST" && candidate.ok()
+  ));
+  await picker.locator('[data-select-value="outcome_success"]').click();
+  await save;
+  await expect(select).toHaveValue("outcome_success");
+
+  const restored = await page.request.put(`${editorUrl}/api/node-groups`, { data: { assignments: {
+    outcome_success: [],
+  } } });
+  expect(restored.ok()).toBe(true);
+  const restoredEvent = await page.request.post(`${editorUrl}/api/events`, { data: {
+    node: "branch_lab",
+    originalId: originalEvent.ID,
+    event: originalEvent,
+  } });
+  expect(restoredEvent.ok(), await restoredEvent.text()).toBe(true);
+});
+
+for (const endUp of ["GOTO", "REPLACE"]) {
+  test(`${endUp} chances and weighted remove buttons match Event rule spacing`, async ({ page }) => {
+    const errors = [];
+    page.on("pageerror", (error) => errors.push(error.message));
+    page.on("console", (message) => { if (message.type() === "error") errors.push(message.text()); });
+    const id = `next_chances_${endUp.toLowerCase()}`;
+    expect((await page.request.post(`${editorUrl}/api/events`, { data: { node: "branch_lab", event: {
+      ID: id, Name: id, Trigger: "Action:resolve_branch", Priority: 5, Weight: 1,
+      Conditions: [{ type: "stat", id: "test_actions", op: ">=", value: 0, clause: null }],
+      Effects: [{ type: "stat", id: "test_actions", op: "+", value: 1 }],
+      Content: { test_branch_success: 1, test_branch_random: 1 },
+      "End up": endUp, "Next Node": { outcome_success: 1, outcome_fallback: 3 },
+    } } })).ok()).toBe(true);
+    await page.goto(editorUrl);
+    await openNodeSidebar(page);
+    await page.locator('#nodeList [data-node-path="branch_lab"]').click();
+    await page.getByRole("button", { name: /^事件 / }).click();
+    await page.locator(`[data-event-id="${id}"]`).click();
+    const nextRows = page.locator('[data-weighted-kind="next"]');
+    await expect(nextRows.locator("[data-next-chance]")).toHaveText(["25%", "75%"]);
+    await waitForEventSave(page, () => nextRows.first().locator('[name="nextWeightedValue"]').fill("3"));
+    await expect(nextRows.locator("[data-next-chance]")).toHaveText(["50%", "50%"]);
+    await waitForEventSave(page, () => nextRows.last().locator('[name="nextWeightedValue"]').fill("1"));
+    await expect(nextRows.locator("[data-next-chance]")).toHaveText(["75%", "25%"]);
+    await expect(page.locator("[data-content-chance]")).toHaveText(["50%", "50%"]);
+    const hoverStyle = (button) => button.evaluate((element) => {
+      const style = getComputedStyle(element);
+      return [style.width, style.height, style.borderRadius, style.backgroundColor, style.borderColor];
+    });
+    const reference = page.locator(".condition-row > .row-button").first();
+    await reference.hover();
+    await expect.poll(() => hoverStyle(reference)).not.toContain("rgba(0, 0, 0, 0)");
+    // Compare the settled hover, not an intermediate transition color.
+    await reference.evaluate((element) => Promise.all(element.getAnimations().map((animation) => animation.finished)));
+    const expected = await hoverStyle(reference);
+    for (const selector of [".effect-row", '[data-weighted-kind="content"]', '[data-weighted-kind="next"]']) {
+      const button = page.locator(`${selector} > .row-button`).first();
+      await button.hover();
+      await expect.poll(() => hoverStyle(button)).toEqual(expected);
+    }
+    for (const kind of ["content", "next"]) {
+      const row = page.locator(`[data-weighted-kind="${kind}"]`).first();
+      expect(await row.evaluate((element) => {
+        const chance = element.querySelector("[data-content-chance], [data-next-chance]").getBoundingClientRect();
+        const button = element.querySelector(".row-button").getBoundingClientRect();
+        return Math.round(button.left - chance.right);
+      })).toBe(8);
+    }
+    await nextRows.last().scrollIntoViewIfNeeded();
+    await page.screenshot({ path: test.info().outputPath("next-chances.png") });
+    await reloadAndWaitForProject(page);
+    await openNodeSidebar(page);
+    await page.locator('#nodeList [data-node-path="branch_lab"]').click();
+    await page.getByRole("button", { name: /^事件 / }).click();
+    await page.locator(`[data-event-id="${id}"]`).click();
+    await expect(nextRows.locator("[data-next-chance]")).toHaveText(["75%", "25%"]);
+    await waitForEventSave(page, () => nextRows.last().locator("[data-remove-weighted]").click());
+    await expect(nextRows.locator("[data-next-chance]")).toHaveText("100%");
+    const saved = JSON.parse(fs.readFileSync(path.join(projectRoot, `game/SCENENODE/branch_lab/EVENTPOOL/${id}.json`), "utf8"));
+    expect(saved["End up"]).toBe(endUp);
+    expect(saved["Next Node"]).toEqual({ outcome_success: 3 });
+    expect(saved.Version).toBeUndefined();
+    // The suite shares its disposable project; do not leave extra graph edges.
+    expect((await page.request.delete(`${editorUrl}/api/events?node=branch_lab&id=${id}`)).ok()).toBe(true);
+    expect(errors).toEqual([]);
+  });
+}
+
+test("Content chances update with weights, removal and reload without changing the event format", async ({ page }) => {
+  const errors = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  page.on("console", (message) => { if (message.type() === "error") errors.push(message.text()); });
+  expect((await page.request.post(`${editorUrl}/api/events`, { data: { node: "branch_lab", event: {
+    ID: "content_chances", Name: "Content chances", Trigger: "Auto:Enter", Effects: [], Conditions: [],
+    Content: { test_branch_success: 1, test_branch_random: 3 },
+  } } })).ok()).toBe(true);
+  await page.goto(editorUrl);
+  await openNodeSidebar(page);
+  await page.locator('#nodeList [data-node-path="branch_lab"]').click();
+  await page.getByRole("button", { name: /^事件 / }).click();
+  await page.locator('[data-event-id="content_chances"]').click();
+  const rows = page.locator(".content-weight-row");
+  await expect(rows.locator("[data-content-chance]")).toHaveText(["25%", "75%"]);
+  await waitForEventSave(page, () => rows.first().locator('[name="contentWeightedValue"]').fill("3"));
+  await expect(rows.locator("[data-content-chance]")).toHaveText(["50%", "50%"]);
+  await waitForEventSave(page, () => rows.last().locator("[data-remove-weighted]").click());
+  await expect(rows.locator("[data-content-chance]")).toHaveText("100%");
+  await waitForEventSave(page, () => page.getByRole("button", { name: "新增演出", exact: true }).click());
+  await expect(rows.locator("[data-content-chance]")).toHaveText(["75%", "25%"]);
+  await rows.last().scrollIntoViewIfNeeded();
+  await page.screenshot({ path: test.info().outputPath("content-chances.png") });
+  const alignment = await rows.first().evaluate((row) => {
+    const weight = row.querySelector('[name="contentWeightedValue"]').getBoundingClientRect();
+    const chance = row.querySelector('[data-content-chance]').getBoundingClientRect();
+    return { delta: Math.abs(weight.top + weight.height / 2 - chance.top - chance.height / 2), gap: chance.left - weight.right };
+  });
+  expect(alignment.delta).toBeLessThan(1);
+  expect(alignment.gap).toBeGreaterThanOrEqual(5);
+  await reloadAndWaitForProject(page);
+  await openNodeSidebar(page);
+  await page.locator('#nodeList [data-node-path="branch_lab"]').click();
+  await page.getByRole("button", { name: /^事件 / }).click();
+  await page.locator('[data-event-id="content_chances"]').click();
+  await expect(rows.locator("[data-content-chance]")).toHaveText(["75%", "25%"]);
+  const saved = JSON.parse(fs.readFileSync(path.join(projectRoot, "game/SCENENODE/branch_lab/EVENTPOOL/content_chances.json"), "utf8"));
+  expect(Object.values(saved.Content)).toEqual([3, 1]);
+  expect(saved.Version).toBeUndefined();
+  expect(errors).toEqual([]);
+});
+
+test("random Effect groups preserve weights, ordering, keyboard editing and reload", async ({ page }) => {
+  test.setTimeout(60_000);
+  await page.setViewportSize({ width: 1440, height: 1100 });
+  const errors = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  page.on("console", (message) => { if (message.type() === "error") errors.push(message.text()); });
+  const seeded = await page.request.post(`${editorUrl}/api/events`, { data: { node: "branch_lab", event: {
+    ID: "random_browser", Name: "Random browser", Trigger: "Auto:Enter",
+    Conditions: [], Effects: [
+      { type: "stat", id: "test_actions", op: "+", value: 10 },
+      { type: "memory", bank: "memory", id: "random_reward", op: "add" },
+      { type: "stat", id: "test_actions", op: "+", value: 20 },
+    ], Content: null,
+  } } });
+  expect(seeded.ok()).toBe(true);
+  await page.goto(editorUrl);
+  await openNodeSidebar(page);
+  await page.locator('#nodeList [data-node-path="branch_lab"]').click();
+  await page.getByRole("button", { name: /^事件 / }).click();
+  await page.locator('[data-event-id="random_browser"]').click();
+  const list = page.locator("#effectList");
+  await list.scrollIntoViewIfNeeded();
+  await waitForEventSave(page, () => groupConditionsByDwell(page,
+    list.locator(".effect-row").nth(0), list.locator(".effect-row").nth(1)));
+  const group = list.locator(".effect-random-group");
+  await expect(group).toHaveCount(1);
+  await expect(group.locator(".effect-row")).toHaveCount(2);
+  await expect(group.locator("[data-effect-chance]")).toHaveText(["50%", "50%"]);
+  await waitForEventSave(page, () => group.locator('[name="effectChoiceWeight"]').nth(1).fill("3"));
+  await expect(group.locator("[data-effect-chance]")).toHaveText(["25%", "75%"]);
+  await page.mouse.move(0, 0);
+  await expect.poll(() => group.locator(".effect-row").first().evaluate((row) => getComputedStyle(row).borderColor)).toBe("rgba(0, 0, 0, 0)");
+  await expect(group.locator(".rule-fields").first()).toBeVisible();
+  await page.screenshot({ path: test.info().outputPath("random-effects.png"), fullPage: true });
+
+  // Whole-group drag is atomic; it cannot nest in another group.
+  await waitForEventSave(page, async () => {
+    const header = await group.locator(".effect-random-header").boundingBox();
+    const groupBox = await group.boundingBox();
+    const loose = await list.locator(":scope > .effect-row").boundingBox();
+    await page.mouse.move(header.x + header.width / 2, header.y + header.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(loose.x + 3, loose.y + loose.height - 3, { steps: 12 });
+    await expect(page.locator(".group-drag-preview")).toBeVisible();
+    await page.waitForTimeout(250);
+    expect((await page.locator(".group-drag-preview").boundingBox()).height).toBeCloseTo(groupBox.height, 0);
+    await page.mouse.up();
+  });
+  await expect(list.locator(":scope > .effect-row")).toHaveAttribute("data-effect-id", "0");
+  await expect(group.locator("[data-effect-chance]")).toHaveText(["25%", "75%"]);
+
+  // Remove the only loose row; every remaining item is grouped.
+  await waitForEventSave(page, () => list.locator(":scope > .effect-row [data-remove-effect]").click());
+  await waitForEventSave(page, async () => {
+    const source = await group.locator(".effect-row").first().boundingBox();
+    await page.mouse.move(source.x + 2, source.y + source.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(source.x + 3, source.y + source.height + 8, { steps: 6 });
+    await expect(page.locator(".group-drag-preview")).toBeVisible();
+    for (let step = 0; step < 3; step += 1) {
+      const tail = await list.locator(".effect-drop-tail").boundingBox();
+      await page.mouse.move(tail.x + 4, tail.y + tail.height / 2, { steps: 4 });
+      await page.waitForTimeout(100);
+    }
+    await page.mouse.up();
+  });
+  await expect(group.locator(".effect-row")).toHaveCount(1);
+  await expect(group.locator("[data-effect-chance]")).toHaveText("100%");
+  await expect(list.locator(":scope > .effect-row")).toHaveCount(1);
+
+  await reloadAndWaitForProject(page);
+  await openNodeSidebar(page);
+  await page.locator('#nodeList [data-node-path="branch_lab"]').click();
+  await page.getByRole("button", { name: /^事件 / }).click();
+  await page.locator('[data-event-id="random_browser"]').click();
+  await expect(group.locator("[data-effect-chance]")).toHaveText("100%");
+  await expect(group.locator('[name="effectChoiceWeight"]')).toHaveValue("3");
+  await group.locator('[name="effectChoiceWeight"]').focus();
+  await page.keyboard.press("Escape");
+  await expect(page.locator('[data-event-section="effects"]')).toBeFocused();
+  await waitForEventSave(page, () => page.keyboard.press("Meta+Enter"));
+  await expect(list.locator(":scope > .effect-row")).toHaveCount(2);
+  await expect(list.locator(":scope > .effect-row").last().locator(".select-choice-trigger").first()).toBeFocused();
+  await page.keyboard.press("Tab");
+  await expect(list.locator(":scope > .effect-row").last().locator('[name="effectId"]').locator("xpath=..").locator(".select-choice-trigger")).toBeFocused();
+
+  // The final child removes the empty container, but does not downgrade Version 3.
+  await waitForEventSave(page, () => group.locator("[data-remove-effect]").click());
+  await expect(group).toHaveCount(0);
+  const saved = JSON.parse(fs.readFileSync(path.join(projectRoot, "game/SCENENODE/branch_lab/EVENTPOOL/random_browser.json"), "utf8"));
+  expect(saved.Version).toBe(3);
+  expect(saved.Effects.every((effect) => effect.type !== "random")).toBe(true);
+  await page.locator('[data-event-section="effects"]').focus();
+  const undoResponse = page.waitForResponse((response) => response.url().endsWith("/api/undo") && response.ok());
+  await page.keyboard.press("Meta+z");
+  await undoResponse;
+  await expect(group.locator("[data-effect-chance]")).toHaveText("100%");
+  await expect(group.locator('[name="effectChoiceWeight"]')).toHaveValue("3");
+  await waitForEventSave(page, () => changeSelect(group.locator(".effect-row"), "effectType", "stat"));
+  await expect(group.locator('[name="effectType"]')).toHaveValue("stat");
+  await expect(group.locator('[name="effectChoiceWeight"]')).toHaveValue("3");
+  await list.scrollIntoViewIfNeeded();
+  const joinTargetId = await group.locator(".effect-row").first().getAttribute("data-effect-id");
+  await waitForEventSave(page, () => groupConditionsByDwell(page,
+    list.locator(":scope > .effect-row").first(), list.locator(`[data-effect-id="${joinTargetId}"]`)));
+  await expect(group.locator(".effect-row")).toHaveCount(2);
+  const weightsBefore = await group.locator('[name="effectChoiceWeight"]').evaluateAll((inputs) => inputs.map((input) => input.value));
+  await waitForEventSave(page, () => dragConditionBefore(page,
+    group.locator(".effect-row").nth(1), group.locator(".effect-row").nth(0)));
+  await expect(group.locator(".effect-row")).toHaveCount(2);
+  expect(await group.locator('[name="effectChoiceWeight"]').evaluateAll((inputs) => inputs.map((input) => input.value))).toEqual(weightsBefore.reverse());
+  expect(errors).toEqual([]);
+});
+
 test("numeric expressions author through shared pickers and persist across reload", async ({ page }) => {
   const errors = [];
   page.on("pageerror", (error) => errors.push(error.message));
@@ -483,6 +780,13 @@ test("type badges fit every rule and reversibly cover only their own fields", as
   await page.locator('#nodeList [data-node-path="options_lab"]').click();
   await page.locator('.tab[data-tab="events"]').click();
   await page.locator('[data-event-id="badge_browser"]').click();
+  // Geometry assertions must run after the existing workspace entrance scale.
+  await expect.poll(() => page.locator("#eventForm").evaluate((form) => {
+    for (let element = form; element; element = element.parentElement) {
+      if (element.getAnimations().some((animation) => animation.playState === "running")) return false;
+    }
+    return true;
+  })).toBe(true);
   for (const collection of ["#conditionList", "#effectList"]) {
     const geometry = await page.locator(`${collection} .rule-fields`).evaluateAll((scopes) => scopes.map((scope) => {
       const rect = scope.getBoundingClientRect();
@@ -740,6 +1044,15 @@ test("critical editor interactions survive reload without browser errors", async
   const condition = page.locator('.condition-row[data-condition-type="memory"]');
   await expect(condition).toBeVisible();
   await changeSelect(condition, "conditionBank", "test_session");
+  await condition.locator('input[name="conditionId"]').fill("smoke_not_seen");
+  await changeSelect(condition, "conditionOp", "empty");
+  await expect(condition.locator('input[name="conditionId"]')).toBeDisabled();
+  await expect(condition.locator('input[name="conditionId"]')).toHaveAttribute("placeholder", "判斷整個記憶庫");
+  await changeSelect(condition, "conditionOp", "not_empty");
+  await expect(condition.locator('input[name="conditionId"]')).toBeDisabled();
+  await changeSelect(condition, "conditionOp", "has");
+  await expect(condition.locator('input[name="conditionId"]')).toBeEnabled();
+  await expect(condition.locator('input[name="conditionId"]')).toHaveValue("新標籤");
   await condition.locator('input[name="conditionId"]').fill("smoke_not_seen");
   await changeSelect(condition, "conditionOp", "not_has");
 
@@ -1558,6 +1871,34 @@ test("Stats use the same dwell grouping, rollback, and singleton dissolution", a
   await expect(newGroup.locator(".stat-row")).toHaveCount(2);
   await expect(newGroup.locator("[data-stat-group-name]")).toBeFocused();
 
+  for (const reduced of [false, true]) {
+    await page.emulateMedia({ reducedMotion: reduced ? "reduce" : "no-preference" });
+    const handle = newGroup.locator(".stat-group-drag-space");
+    const box = await handle.boundingBox();
+    if (!box) throw new Error("Stat group drag handle geometry is unavailable");
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(box.x + box.width / 2 + 12, box.y + box.height / 2, { steps: 3 });
+    const preview = page.locator(".group-drag-preview.is-group-block-preview");
+    await expect(preview).toBeVisible();
+    await expect.poll(() => preview.evaluate((wrapper) => {
+      const clip = wrapper.getBoundingClientRect();
+      const card = wrapper.firstElementChild;
+      const frame = card.getBoundingClientRect();
+      return {
+        left: Math.abs(frame.left - clip.left),
+        right: Math.abs(frame.right - clip.right),
+        bottom: Math.abs(frame.bottom - clip.bottom),
+        itemsVisibility: getComputedStyle(card.querySelector(".stat-group-items")).visibility,
+      };
+    })).toEqual({ left: 0, right: 0, bottom: 0, itemsVisibility: "hidden" });
+    await page.screenshot({ path: test.info().outputPath(`floating-stat-group-${reduced}.png`) });
+    await page.keyboard.press("Escape");
+    await page.mouse.up();
+    await expect(preview).toHaveCount(0);
+  }
+  await page.emulateMedia({ reducedMotion: "no-preference" });
+
   const moveStatGroupResponse = page.waitForResponse((candidate) => (
     candidate.url().endsWith("/api/stats")
     && candidate.request().method() === "PUT"
@@ -1659,7 +2000,7 @@ test("graph refreshes newly created nodes without a page reload", async ({ page 
   await expect(page.locator("#projectGraphSvg")).toHaveCount(0);
 });
 
-test("Event groups form through dwell-drag and dissolve when one item remains", async ({ page }) => {
+test("Event groups form through dwell-drag and retain one remaining item", async ({ page }) => {
   await page.setViewportSize({ width: 1680, height: 900 });
   await page.goto(editorUrl);
   await expect(page.getByRole("navigation", { name: "編輯器分頁" })).toBeVisible();
@@ -1695,6 +2036,7 @@ test("Event groups form through dwell-drag and dissolve when one item remains", 
   });
   await dragWithDwell(page, savedEvent, backEvent, 520, async () => {
     await expect(backEvent).toHaveClass(/is-group-ready/);
+    await expectGroupReservation(backEvent);
     await expect(page.locator(".group-drag-preview")).toBeVisible();
     await expect.poll(() => backEvent.evaluate((item) => Number.parseFloat(getComputedStyle(item).marginBottom)))
       .toBeGreaterThan(40);
@@ -1713,7 +2055,7 @@ test("Event groups form through dwell-drag and dissolve when one item remains", 
   await dragWithDwell(page, savedEvent, backEvent);
   await createGroupResponse;
   await expect(page.locator(".toast", { hasText: "群組已建立" })).toHaveCount(0);
-  const newGroup = page.locator('[data-group-drop="新群組"]');
+  const newGroup = page.locator('[data-group-label="新群組"]');
   await expect(newGroup.locator(".subnav-item")).toHaveCount(2);
   const groupName = newGroup.locator("[data-event-group-name]");
   await expect(groupName).toBeFocused();
@@ -1725,7 +2067,7 @@ test("Event groups form through dwell-drag and dissolve when one item remains", 
   await groupName.fill("主線流程");
   await groupName.press("Enter");
   await renameResponse;
-  const renamedGroup = page.locator('[data-group-drop="主線流程"]');
+  const renamedGroup = page.locator('[data-group-label="主線流程"]');
   await expect(renamedGroup).toBeVisible();
   await expect(renamedGroup.locator("button")).toHaveCount(2);
   const eventSidebarGaps = await page.locator(".event-pool-flow").evaluate((flow) => {
@@ -1796,24 +2138,24 @@ test("Event groups form through dwell-drag and dissolve when one item remains", 
     && candidate.request().method() === "PUT"
     && candidate.ok()
   ));
-  const groupItemIds = await page.locator('[data-group-drop="主線流程"] [data-group-item-id]').evaluateAll((items) => (
+  const groupItemIds = await page.locator('[data-group-label="主線流程"] [data-group-item-id]').evaluateAll((items) => (
     items.map((item) => item.dataset.groupItemId)
   ));
   await dispatchImmediateDrag(
     page,
-    `[data-group-drop="主線流程"] [data-group-item-id="${groupItemIds[1]}"]`,
-    `[data-group-drop="主線流程"] [data-group-item-id="${groupItemIds[0]}"]`,
+    `[data-group-label="主線流程"] [data-group-item-id="${groupItemIds[1]}"]`,
+    `[data-group-label="主線流程"] [data-group-item-id="${groupItemIds[0]}"]`,
   );
   await reorderInsideGroupResponse;
-  await expect(page.locator('[data-group-drop="主線流程"]')).toHaveClass(/is-group-pinned-open/);
-  await expect.poll(() => page.locator('[data-group-drop="主線流程"] .event-group-items-shell').evaluate((shell) => (
+  await expect(page.locator('[data-group-label="主線流程"]')).toHaveClass(/is-group-pinned-open/);
+  await expect.poll(() => page.locator('[data-group-label="主線流程"] .event-group-items-shell').evaluate((shell) => (
     shell.getBoundingClientRect().height
   ))).toBeGreaterThan(20);
 
-  const expandedGroupHeight = await page.locator('[data-group-drop="主線流程"] .event-group-items-shell').evaluate((shell) => (
+  const expandedGroupHeight = await page.locator('[data-group-label="主線流程"] .event-group-items-shell').evaluate((shell) => (
     shell.getBoundingClientRect().height
   ));
-  const groupDragSpace = page.locator('[data-group-drop="主線流程"] .event-group-drag-space');
+  const groupDragSpace = page.locator('[data-group-label="主線流程"] .event-group-drag-space');
   const groupDragSpaceBox = await groupDragSpace.boundingBox();
   if (!groupDragSpaceBox) throw new Error("Event group drag space is not visible");
   await page.mouse.move(groupDragSpaceBox.x + groupDragSpaceBox.width / 2, groupDragSpaceBox.y + groupDragSpaceBox.height / 2);
@@ -1835,18 +2177,18 @@ test("Event groups form through dwell-drag and dissolve when one item remains", 
   ));
   await dragToLiveTarget(
     page,
-    '[data-group-drop="主線流程"] .event-group-drag-space',
+    '[data-group-label="主線流程"] .event-group-drag-space',
     ".event-loose-drop-tail",
     async () => {
-      await expect(page.locator('[data-group-drop="主線流程"]').first()).toHaveClass(/is-group-block-dragging/);
-      expect(await page.locator('[data-group-drop="主線流程"] .event-group-items-shell').first().evaluate((shell) => (
+      await expect(page.locator('[data-group-label="主線流程"]').first()).toHaveClass(/is-group-block-dragging/);
+      expect(await page.locator('[data-group-label="主線流程"] .event-group-items-shell').first().evaluate((shell) => (
         shell.getBoundingClientRect().height
       ))).toBeLessThan(2);
     },
   );
   await moveGroupResponse;
   await expect(page.locator(".toast", { hasText: "Event 排序已更新" })).toHaveCount(0);
-  const droppedEventGroup = page.locator('[data-group-drop="主線流程"]');
+  const droppedEventGroup = page.locator('[data-group-label="主線流程"]');
   await expect(droppedEventGroup).toHaveClass(/is-group-drop-opening/);
   const eventDropOpenHeights = await droppedEventGroup.evaluate(async (group) => {
     const shell = group.querySelector(".event-group-items-shell");
@@ -1864,7 +2206,7 @@ test("Event groups form through dwell-drag and dissolve when one item remains", 
       child.matches(".event-group, [data-group-item-id]")
     ));
     return blocks.at(-1)?.getAttribute("data-group-drop");
-  })).toBe("主線流程");
+  })).toBe(JSON.stringify(["主線流程"]));
 
   const looseEvent = page.locator(".event-pool-flow > [data-group-item-id]").first();
   const looseEventId = await looseEvent.getAttribute("data-group-item-id");
@@ -1892,43 +2234,24 @@ test("Event groups form through dwell-drag and dissolve when one item remains", 
     && candidate.request().method() === "PUT"
     && candidate.ok()
   ));
-  const renamedGroupHeader = page.locator('[data-group-drop="主線流程"] .event-group-header');
+  const renamedGroupHeader = page.locator('[data-group-label="主線流程"] .event-group-header');
   await renamedGroupHeader.hover();
   await page.waitForTimeout(260);
   await dragToLiveTarget(
     page,
-    '[data-group-drop="主線流程"] [data-group-item-id="branch_random"]',
+    '[data-group-label="主線流程"] [data-group-item-id="branch_random"]',
     ".event-loose-drop-tail",
   );
   await dissolveResponse;
-  await expect(page.locator('[data-group-drop="主線流程"]')).toHaveCount(0);
+  await expect(page.locator('[data-group-label="主線流程"]')).toHaveCount(1);
   await expect(ungrouped.locator(':scope > [data-group-item-id="branch_random"]')).toBeVisible();
-  await expect(ungrouped.locator(':scope > [data-group-item-id="branch_back"]')).toBeVisible();
-
-  const reorderResponse = page.waitForResponse((candidate) => (
-    candidate.url().endsWith("/api/event-groups")
-    && candidate.request().method() === "PUT"
-    && candidate.ok()
-  ));
-  await dispatchImmediateDrag(
-    page,
-    '.event-pool-flow > [data-group-item-id="branch_random"]',
-    '.event-pool-flow > [data-group-item-id="branch_back"]',
-  );
-  await reorderResponse;
-  await expect.poll(() => ungrouped.locator(":scope > [data-group-item-id]").evaluateAll((items) => {
-    const order = items.map((item) => item.dataset.groupItemId);
-    return order.indexOf("branch_random") < order.indexOf("branch_back");
-  })).toBe(true);
+  await expect(renamedGroup.locator('[data-group-item-id="branch_back"]')).toHaveCount(1);
 
   await reloadAndWaitForProject(page);
   await page.getByRole("button", { name: /^事件 / }).click();
-  await expect(page.locator('[data-group-drop="主線流程"]')).toHaveCount(0);
-  await expect(page.locator('.event-pool-flow > [data-group-item-id="branch_back"]')).toBeVisible();
-  await expect.poll(() => page.locator(".event-pool-flow > [data-group-item-id]").evaluateAll((items) => {
-    const order = items.map((item) => item.dataset.groupItemId);
-    return order.indexOf("branch_random") < order.indexOf("branch_back");
-  })).toBe(true);
+  await expect(page.locator('[data-group-label="主線流程"]')).toHaveCount(1);
+  await expect(page.locator('[data-group-label="主線流程"] [data-group-item-id="branch_back"]')).toHaveCount(1);
+  await expect(page.locator('.event-pool-flow > [data-group-item-id="branch_random"]')).toBeVisible();
 });
 
 test("language switch handles failed persistence with atomic rollback and error toast", async ({ page }) => {
@@ -1990,6 +2313,7 @@ test("language switch refuses an unsaved draft while autosave is disabled", asyn
   await page.reload();
   await expect(page.getByRole("navigation", { name: "編輯器分頁" })).toBeVisible();
   await page.evaluate(() => document.querySelector("#settingsButton")?.click());
+  await expect(page.locator("#settingsDialog")).toBeVisible();
   const restorePut = page.waitForResponse((candidate) => (
     candidate.url().endsWith("/api/editor-settings") && candidate.request().method() === "PUT" && candidate.ok()
   ));
@@ -2233,6 +2557,7 @@ test("choice picker mouse selection survives Safari focusout without a related t
         <option value="nested_middle" data-picker-path="Folder/Middle">Middle</option>
         <option value="nested_lower" data-picker-path="Folder/Lower">Lower</option>
         <option value="nested_bottom" data-picker-path="Folder/Bottom">Bottom</option>
+        <option value="nested_deep" data-picker-path="Folder/Chapter/Area/Deep">Deep</option>
       </select>
     `;
     document.body.append(fixture);
@@ -2290,7 +2615,7 @@ test("choice picker mouse selection survives Safari focusout without a related t
   await expect(trigger).toHaveValue("Second");
   await expect(picker).not.toHaveClass(/open/);
 
-  const folder = fixture.locator("[data-select-folder-toggle]");
+  const folder = fixture.locator("[data-select-folder-toggle]").filter({ hasText: "Folder" }).first();
   const openMenu = async () => {
     await trigger.evaluate((element) => element.click());
     await expect(picker).toHaveClass(/open/);
@@ -2298,7 +2623,7 @@ test("choice picker mouse selection survives Safari focusout without a related t
   const openNestedMenu = async () => {
     await openMenu();
     await folder.click();
-    await expect(fixture.locator(".select-choice-branch")).toHaveClass(/submenu-open/);
+    await expect(folder.locator("xpath=..")).toHaveClass(/submenu-open/);
   };
 
   await openMenu();
@@ -2312,9 +2637,9 @@ test("choice picker mouse selection survives Safari focusout without a related t
   await expect(secondChoice).toBeFocused();
   await page.keyboard.press("ArrowDown");
   await expect(folder).toBeFocused();
-  await expect(fixture.locator(".select-choice-branch")).toHaveClass(/submenu-open/);
-  await expect(fixture.locator(".select-choice-submenu")).toBeVisible();
-  const submenuGeometry = await fixture.locator(".select-choice-submenu-scroll").evaluate((surface) => {
+  await expect(folder.locator("xpath=..")).toHaveClass(/submenu-open/);
+  await expect(folder.locator("xpath=../div[contains(@class, 'select-choice-submenu')]")).toBeVisible();
+  const submenuGeometry = await folder.locator("xpath=../div[contains(@class, 'select-choice-submenu')]/div[contains(@class, 'select-choice-submenu-scroll')]").evaluate((surface) => {
     const style = getComputedStyle(surface);
     const itemHeights = [...surface.children].map((item) => item.getBoundingClientRect().height);
     const expectedHeight = itemHeights.reduce((sum, height) => sum + height, 0)
@@ -2326,11 +2651,13 @@ test("choice picker mouse selection survives Safari focusout without a related t
   expect(new Set(submenuGeometry.itemHeights)).toEqual(new Set([38]));
   expect(submenuGeometry.height).toBeCloseTo(submenuGeometry.expectedHeight, 0);
   await page.keyboard.press("ArrowRight");
+  await expect(fixture.locator("[data-select-folder-toggle]").filter({ hasText: "Chapter" })).toBeFocused();
+  await page.keyboard.press("ArrowDown");
   await expect(fixture.locator('[data-select-value="nested_top"]')).toBeFocused();
   await page.keyboard.press("ArrowLeft");
   await expect(folder).toBeFocused();
   await folder.hover();
-  await expect(fixture.locator(".select-choice-branch")).toHaveClass(/submenu-open/);
+  await expect(folder.locator("xpath=..")).toHaveClass(/submenu-open/);
 
   const travel = await fixture.evaluate((root) => {
     const menu = root.querySelector(".select-choice-menu").getBoundingClientRect();
@@ -2348,13 +2675,14 @@ test("choice picker mouse selection survives Safari focusout without a related t
   await page.mouse.move(travel.folderX, travel.folderY);
   await page.mouse.move(travel.bridgeX, travel.bridgeY);
   await page.waitForTimeout(240);
-  await expect(fixture.locator(".select-choice-branch")).toHaveClass(/submenu-open/);
+  await expect(folder.locator("xpath=..")).toHaveClass(/submenu-open/);
   const bridgeOwner = await page.evaluate(({ x, y }) => (
     document.elementFromPoint(x, y)?.closest(".select-choice-submenu")?.className || ""
   ), { x: travel.bridgeX, y: travel.bridgeY });
   expect(bridgeOwner).toContain("select-choice-submenu");
 
   await page.keyboard.press("ArrowRight");
+  await page.keyboard.press("ArrowDown");
   await expect(fixture.locator('[data-select-value="nested_top"]')).toBeFocused();
   await page.keyboard.press("ArrowDown");
   await expect(fixture.locator('[data-select-value="nested_middle"]')).toBeFocused();
@@ -2383,6 +2711,15 @@ test("choice picker mouse selection survives Safari focusout without a related t
   await expect(select).toHaveValue("nested_bottom");
   await expect(trigger).toHaveValue("Bottom");
   await page.locator("#choicePickerUnderlyingControl").evaluate((element) => element.remove());
+
+  await openNestedMenu();
+  const chapterFolder = fixture.locator("[data-select-folder-toggle]").filter({ hasText: "Chapter" });
+  await chapterFolder.click();
+  const areaFolder = fixture.locator("[data-select-folder-toggle]").filter({ hasText: "Area" });
+  await areaFolder.click();
+  await fixture.locator('[data-select-value="nested_deep"]').click();
+  await expect(select).toHaveValue("nested_deep");
+  await expect(trigger).toHaveValue("Deep");
   await fixture.evaluate((element) => element.remove());
 });
 
@@ -2688,7 +3025,7 @@ test("shared drag sorting persists Event rules, Options, and Memory order", asyn
   const effectSave = page.waitForResponse((candidate) => (
     candidate.url().endsWith("/api/events") && candidate.request().method() === "POST" && candidate.ok()
   ));
-  await dragListItemBefore(
+  await dragConditionBefore(
     page,
     page.locator("#effectList .effect-row").nth(1),
     page.locator("#effectList .effect-row").nth(0),
@@ -3087,7 +3424,9 @@ test("workspace tabs drag horizontally, persist their order, and do not change t
     await expect.poll(tabIds).toEqual(defaultOrder);
     await expect(draggedTab).toHaveCSS("transition-duration", "0s");
     const draggedBox = await draggedTab.boundingBox();
-    expect(Math.abs((draggedBox?.x || 0) + grabOffset - pointerX)).toBeLessThan(1.5);
+    // Fractional tab widths can round the 1:1 grab point by up to two device
+    // pixels while a genuine detached preview is displaced much farther.
+    expect(Math.abs((draggedBox?.x || 0) + grabOffset - pointerX)).toBeLessThan(2);
     const tabbarBox = await page.locator("#tabbar").boundingBox();
     if (!tabbarBox) throw new Error("Workspace tab bar geometry is unavailable");
     await page.mouse.move(
@@ -3301,3 +3640,184 @@ test("interaction details expose keyboard focus and honor reduced motion", async
 
   expect(browserErrors, browserErrors.join("\n")).toEqual([]);
 });
+
+for (const kind of ["Event", "Node"]) {
+  test(`${kind} groups support three levels, retain singletons, and lift members to the parent`, async ({ page, request }) => {
+    await page.setViewportSize({ width: 1680, height: 1050 });
+    const errors = [];
+    page.on("pageerror", (error) => errors.push(error.message));
+    page.on("console", (message) => { if (message.type() === "error") errors.push(message.text()); });
+    const prefix = `nested_${kind.toLowerCase()}`;
+    const paths = {
+      x: [], a: ["Depth", "Inside"], b: ["Depth", "Inside"], z: ["Depth"],
+      w: ["Below A"], v: ["Below B"],
+    };
+    if (kind === "Event") {
+      expect((await request.post(`${editorUrl}/api/nodes`, { data: { id: prefix, path: prefix, name: prefix } })).ok()).toBe(true);
+    }
+    for (const suffix of Object.keys(paths)) {
+      const id = `${prefix}_${suffix}`;
+      const response = kind === "Node"
+        ? await request.post(`${editorUrl}/api/nodes`, { data: { id, path: id, name: id } })
+        : await request.post(`${editorUrl}/api/events`, { data: {
+          node: prefix, event: { ID: id, Name: id, Trigger: "Auto:Node", Priority: 5, Weight: 1,
+            Once: false, Conditions: [], Effects: [], Content: null, "End up": "REDO", "Next Node": null },
+        } });
+      expect(response.ok()).toBe(true);
+    }
+    const endpoint = kind === "Node" ? "/api/node-groups" : "/api/event-groups";
+    const project = kind === "Node" ? await (await request.get(editorUrl + "/api/project")).json() : null;
+    const memberIds = Object.keys(paths).map((suffix) => prefix + "_" + suffix);
+    expect((await request.put(editorUrl + endpoint, { data: {
+      ...(kind === "Event" ? { node: prefix } : {}),
+      // Keep this gesture fixture in view regardless of earlier smoke-test Nodes.
+      ...(project ? { order: [...memberIds, ...project.nodes.map((node) => node.path).filter((id) => !memberIds.includes(id))] } : {}),
+      assignments: Object.fromEntries(Object.entries(paths).map(([suffix, parts]) => [`${prefix}_${suffix}`, parts])),
+    } })).ok()).toBe(true);
+    await page.goto(editorUrl);
+    await openNodeSidebar(page);
+    await page.locator(`#nodeList [data-node-path="${kind === "Event" ? prefix : prefix + "_x"}"]`).click();
+    if (kind === "Event") {
+      await page.getByRole("button", { name: /^事件 / }).click();
+      await page.locator(`[data-event-id="${prefix}_x"]`).click();
+    }
+    else await openNodeSidebar(page);
+    const flow = page.locator(kind === "Node" ? "#nodeList" : ".event-pool-flow");
+    const a = flow.locator(`[data-group-item-id="${prefix}_a"]`);
+    const b = flow.locator(`[data-group-item-id="${prefix}_b"]`);
+    const z = flow.locator(`[data-group-item-id="${prefix}_z"]`);
+    await flow.evaluate(async (root) => {
+      const animations = root.closest(".sidebar, .subnav")?.getAnimations({ subtree: true }) || [];
+      await Promise.all(animations.map((animation) => animation.finished.catch(() => {})));
+    });
+    const upperNeighbor = flow.locator('[data-group-label="Below A"]');
+    const lowerNeighbor = flow.locator('[data-group-label="Below B"]');
+    await upperNeighbor.locator(":scope > .event-group-header").hover();
+    await expect.poll(() => upperNeighbor.locator(":scope > .event-group-items-shell").evaluate(
+      (shell) => shell.getBoundingClientRect().height,
+    )).toBeGreaterThan(20);
+    const groupFlowTop = (group) => group.evaluate((element) => {
+      const scroll = element.closest(".node-list, .subnav-list");
+      return element.getBoundingClientRect().top + (scroll?.scrollTop || 0);
+    });
+    const lowerTop = await groupFlowTop(lowerNeighbor);
+    await lowerNeighbor.locator(":scope > .event-group-header").hover();
+    await page.waitForTimeout(260);
+    // Browser scroll anchoring may contribute a few subpixels; a collapsed
+    // source group would move this by an entire member-row height.
+    expect(Math.abs(await groupFlowTop(lowerNeighbor) - lowerTop)).toBeLessThan(4);
+    await expect(upperNeighbor).toHaveClass(/is-group-hover-held/);
+    await expect.poll(() => lowerNeighbor.locator(":scope > .event-group-items-shell").evaluate(
+      (shell) => shell.getBoundingClientRect().height,
+    )).toBeGreaterThan(20);
+    await page.mouse.move(900, 800);
+    await expect.poll(() => upperNeighbor.evaluate((group) => group.classList.contains("is-group-hover-held"))).toBe(false);
+    await flow.locator('[data-group-label="Depth"] > .event-group-header').hover();
+    await flow.locator('[data-group-label="Inside"] > .event-group-header').hover();
+    await a.click();
+    if (kind === "Node") await openNodeSidebar(page);
+    await expect(flow.locator(".is-group-editing")).toHaveCount(2);
+    const saved = (action) => Promise.all([
+      page.waitForResponse((response) => response.url().endsWith(endpoint) && response.request().method() === "PUT" && response.ok()),
+      action(),
+    ]);
+    const inside = flow.locator('[data-group-label="Inside"]');
+    // A floating group must retain its complete heading/frame, including when
+    // a nested group leaves its ancestor's CSS context or motion is disabled.
+    for (const reduced of [false, true]) {
+      await page.emulateMedia({ reducedMotion: reduced ? "reduce" : "no-preference" });
+      for (const label of ["Depth", "Inside"]) {
+        const group = flow.locator(`[data-group-label="${label}"]`);
+        const handle = group.locator(":scope > .event-group-header > .group-block-drag-space");
+        await handle.hover();
+        const box = await handle.boundingBox();
+        await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+        await page.mouse.down();
+        await page.mouse.move(box.x + box.width / 2 + 12, box.y + box.height / 2, { steps: 3 });
+        const preview = page.locator(".group-drag-preview.is-group-block-preview");
+        await expect(preview).toBeVisible();
+        await expect.poll(() => preview.locator(":scope > .event-group > .event-group-items-shell").evaluate(
+          (shell) => shell.getBoundingClientRect().height,
+        )).toBeLessThan(1);
+        await expect.poll(() => preview.evaluate((wrapper) => {
+          const frame = wrapper.firstElementChild.getBoundingClientRect();
+          const clip = wrapper.getBoundingClientRect();
+          return Math.abs(frame.bottom - clip.bottom);
+        })).toBeLessThan(1);
+        await page.screenshot({ path: test.info().outputPath(`floating-${label}-${reduced}.png`) });
+        await page.keyboard.press("Escape");
+        await page.mouse.up();
+        await expect(preview).toHaveCount(0);
+      }
+    }
+    await page.emulateMedia({ reducedMotion: "no-preference" });
+    await expect.poll(() => inside.evaluate((group) => {
+      const items = group.querySelector(":scope > .event-group-items-shell > .event-group-items");
+      const last = [...items.children].filter((item) => item.matches("[data-group-item-id], [data-group-drop]")).at(-1);
+      return Math.round(group.getBoundingClientRect().bottom - last.getBoundingClientRect().bottom);
+    })).toBe(7);
+    await saved(() => dragWithDwell(page, a, b, 720, async () => {
+      await expectGroupReservation(b);
+      await expect(inside).not.toHaveClass(/is-group-preview-open|is-group-drop-ready/);
+      const geometry = await b.evaluate((item) => {
+        const rect = item.getBoundingClientRect();
+        const clip = item.parentElement.getBoundingClientRect();
+        return { left: rect.left - clip.left, right: clip.right - rect.right,
+          bottom: clip.bottom - rect.bottom, transform: getComputedStyle(item.closest("[data-group-drop]")).transform };
+      });
+      expect(geometry.transform).toBe("none");
+      expect(geometry.left).toBeGreaterThanOrEqual(8.9);
+      expect(geometry.right).toBeGreaterThanOrEqual(8.9);
+      expect(geometry.bottom).toBeGreaterThanOrEqual(51);
+      await page.screenshot({ path: test.info().outputPath("nested-group-preview.png") });
+    }));
+    const third = flow.locator('[data-group-depth="3"]');
+    await expect(third.locator("[data-group-item-id]")).toHaveCount(2);
+    const name = third.locator("input").first();
+    await name.fill("Inn");
+    await saved(() => name.press("Enter"));
+    await a.click();
+    if (kind === "Node") await openNodeSidebar(page);
+    await expect(flow.locator(".is-group-editing")).toHaveCount(3);
+    // A fourth level must not even be suggested; the gesture can still reorder.
+    await dragWithDwell(page, a, b, 600, async () => {
+      await expect(b).not.toHaveClass(/is-group-ready/);
+    });
+    await expect(flow.locator('[data-group-depth="4"]')).toHaveCount(0);
+    await saved(() => dragToLiveTarget(page, `[data-group-item-id="${prefix}_a"]`, `[data-group-item-id="${prefix}_z"]`));
+    await expect(a).toHaveAttribute("data-group-item-group", JSON.stringify(["Depth"]));
+    await expect(third.locator("[data-group-item-id]")).toHaveCount(1);
+    await reloadAndWaitForProject(page);
+    await openNodeSidebar(page);
+    if (kind === "Event") {
+      await page.locator(`#nodeList [data-node-path="${prefix}"]`).click();
+      await page.getByRole("button", { name: /^事件 / }).click();
+    }
+    await expect(third.locator("[data-group-item-id]")).toHaveCount(1);
+    // Reveal the remaining member, then lift it too: now the empty ancestors disappear.
+    await flow.locator('[data-group-label="Depth"] > .event-group-header').hover();
+    await flow.locator('[data-group-label="Inside"] > .event-group-header').hover();
+    await third.locator(".event-group-header").hover();
+    await saved(() => dragToLiveTarget(page, `[data-group-item-id="${prefix}_b"]`, `[data-group-item-id="${prefix}_a"]`));
+    await expect(b).toHaveAttribute("data-group-item-group", JSON.stringify(["Depth"]));
+    await expect(flow.locator('[data-group-depth="3"]')).toHaveCount(0);
+    await expect(flow.locator('[data-group-label="Inside"]')).toHaveCount(0);
+    // Move a two-level subtree into another group, retaining its descendant path.
+    expect((await request.put(editorUrl + endpoint, { data: {
+      ...(kind === "Event" ? { node: prefix } : {}),
+      assignments: { [prefix + "_b"]: ["Inn", "Room"] },
+    } })).ok()).toBe(true);
+    await reloadAndWaitForProject(page);
+    await openNodeSidebar(page);
+    if (kind === "Event") {
+      await page.locator(`#nodeList [data-node-path="${prefix}"]`).click();
+      await page.getByRole("button", { name: /^事件 / }).click();
+    }
+    await saved(() => dragWithDwell(page,
+      flow.locator('[data-group-label="Inn"] > .event-group-header > .group-block-drag-space'),
+      flow.locator('[data-group-label="Depth"] > .event-group-header')));
+    await expect(b).toHaveAttribute("data-group-item-group", JSON.stringify(["Depth", "Inn", "Room"]));
+    await expect(flow.locator('[data-group-depth="3"]')).toHaveCount(1);
+    expect(errors).toEqual([]);
+  });
+}

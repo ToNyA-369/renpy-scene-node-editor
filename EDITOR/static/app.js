@@ -129,6 +129,7 @@ let expandedEventGroup = null;
 let pendingStatGroupFocus = null;
 let eventGroupDragController = null;
 let conditionGroupDragController = null;
+let effectGroupDragController = null;
 let eventFocusNavigationController = null;
 let eventTagPrefixController = null;
 let pendingEventSectionEntry = null;
@@ -408,7 +409,7 @@ function memoryTagChoices(bankId) {
 }
 
 function rememberMemoryTags(event) {
-  (event?.Effects || []).forEach((effect) => {
+  SceneEffectGroups.entries(event?.Effects || []).forEach(({ effect }) => {
     const type = String(effect?.type || "").toLocaleLowerCase();
     const operation = String(effect?.op || "").toLocaleLowerCase();
     const tagId = String(effect?.id || "").trim();
@@ -592,6 +593,7 @@ const {
   readChoice,
   readRules,
   replaceRuleType,
+  updateWeightedChances,
 } = eventEditor;
 const {
   CONDITION_OR_GROUP,
@@ -640,20 +642,13 @@ function updateEmptyState() {
   dom.workspace.classList.toggle("no-node", !state.nodeDetail && needsNode);
 }
 
-function normalizeNodeGroup(value) {
-  return SceneGroupDrag.normalizeGroup(value, DEFAULT_EVENT_GROUP);
-}
-
 function nodeListBlocks(nodes) {
-  return eventPoolBlocks(nodes.map((node) => ({ ...node, Group: normalizeNodeGroup(node.group) })))
-    .map((block) => block.type === "item"
-      ? { type: "item", node: block.event }
-      : { type: "group", name: block.name, nodes: block.events });
+  return SceneGroupTree.blocks(nodes);
 }
 
 function nodeListItemHtml(node) {
   return `
-    <button class="node-item group-drag-item ${node.path === state.selectedNodePath ? "active" : ""}" type="button" data-node-path="${escapeHtml(node.path)}" data-group-item-id="${escapeHtml(node.path)}" data-group-item-group="${escapeHtml(normalizeNodeGroup(node.group))}" aria-grabbed="false">
+    <button class="node-item group-drag-item ${node.path === state.selectedNodePath ? "active" : ""}" type="button" data-node-path="${escapeHtml(node.path)}" data-group-item-id="${escapeHtml(node.path)}" data-group-item-group="${escapeHtml(SceneGroupTree.key(SceneGroupTree.path(node)))}" aria-grabbed="false">
       <span class="node-accent" aria-hidden="true"></span>
       <span class="node-item-copy">
         <strong>${escapeHtml(node.name || node.id)}${node.isRoot ? '<span class="root-node-badge is-compact">ROOT</span>' : ""}</strong>
@@ -679,9 +674,7 @@ function renderNodeList() {
     return !query || haystack.includes(query);
   });
   const selectedNode = state.nodes.find((node) => node.path === state.selectedNodePath);
-  const currentEditingGroup = selectedNode && normalizeNodeGroup(selectedNode.group) !== DEFAULT_EVENT_GROUP
-    ? normalizeNodeGroup(selectedNode.group)
-    : null;
+  const currentEditingGroup = SceneGroupTree.ancestorKeys(SceneGroupTree.path(selectedNode));
   if (!nodes.length && !globalMatches) {
     dom.nodeList.innerHTML = `<div class="node-list-empty">${state.nodes.length ? escapeHtml(t("沒有符合的節點")) : escapeHtml(t("尚未建立 Scene Node"))}</div>`;
     return;
@@ -697,19 +690,20 @@ function renderNodeList() {
       </button>
     </div>
   ` : "";
-  const blocksHtml = nodeListBlocks(nodes).map((block) => {
-    if (block.type === "item") return nodeListItemHtml(block.node);
+  const renderBlock = (block) => {
+    if (block.type === "item") return nodeListItemHtml(block.event);
     return `
-      <section class="event-group node-group ${expandedNodeGroup === block.name ? "is-group-pinned-open" : ""} ${block.nodes.some((node) => node.path === state.selectedNodePath) ? "is-group-editing" : ""}" data-group-drop="${escapeHtml(block.name)}" aria-label="${escapeHtml(block.name)}">
+      <section class="event-group node-group ${expandedNodeGroup && SceneGroupTree.within(SceneGroupTree.fromKey(expandedNodeGroup), block.path) ? "is-group-pinned-open" : ""} ${query || block.events.some((node) => node.path === state.selectedNodePath) ? "is-group-editing" : ""}" data-group-drop="${escapeHtml(block.key)}" data-group-label="${escapeHtml(block.name)}" data-group-depth="${block.path.length}" aria-label="${escapeHtml(block.name)}">
         <div class="event-group-header node-group-header">
-          <input class="event-group-name node-group-name" value="${escapeHtml(block.name)}" data-node-group-name="${escapeHtml(block.name)}" aria-label="${escapeHtml(t("群組名稱"))}">
+          <input class="event-group-name node-group-name" value="${escapeHtml(block.name)}" data-node-group-name="${escapeHtml(block.key)}" maxlength="80" aria-label="${escapeHtml(t("群組名稱"))}">
           <div class="group-block-drag-space node-group-drag-space" aria-hidden="true"></div>
-          <span class="event-group-count">${block.nodes.length}</span>
+          <span class="event-group-count">${block.events.length}</span>
         </div>
-        <div class="event-group-items-shell"><div class="event-group-items node-group-items">${block.nodes.map(nodeListItemHtml).join("")}</div></div>
+        <div class="event-group-items-shell"><div class="event-group-items node-group-items">${block.blocks.map(renderBlock).join("")}<div class="group-inner-drop-tail" aria-hidden="true"></div></div></div>
       </section>
     `;
-  }).join("");
+  };
+  const blocksHtml = nodeListBlocks(nodes).map(renderBlock).join("");
   dom.nodeList.innerHTML = `${globalHtml}<div class="node-pool-flow" data-node-ungrouped-drop>${blocksHtml}<div class="group-loose-drop-tail node-loose-drop-tail" aria-hidden="true"></div></div>`;
   SceneGroupDrag.animateEditingGroupExit(dom.nodeList, {
     groupSelector: ".node-group[data-group-drop]",
@@ -723,7 +717,7 @@ function renderNodeList() {
     });
     pendingNodeGroupDropOpen = null;
   }
-  if (!query && nodes.length > 1) {
+  if (!query && nodes.length) {
     nodeGroupDragController = SceneGroupDrag.createController({
       root: dom.nodeList.querySelector(".node-pool-flow"),
       itemSelector: "[data-group-item-id]",
@@ -731,6 +725,7 @@ function renderNodeList() {
       ungroupedSelector: "[data-node-ungrouped-drop]",
       groupHandleSelector: ".node-group-drag-space",
       listSelector: ".node-group-items",
+      nested: true,
       onDrop: applyNodeGroupDrop,
       onGroupDrop: applyNodeGroupBlockDrop,
       onError: (error) => toast(error.message, "error"),
@@ -743,7 +738,7 @@ function renderNodeList() {
         event.preventDefault();
         input.blur();
       } else if (event.key === "Escape") {
-        input.value = source;
+        input.value = SceneGroupTree.fromKey(source).at(-1);
         input.blur();
       }
     });
@@ -753,7 +748,7 @@ function renderNodeList() {
     group.addEventListener("pointerleave", () => {
       if (expandedNodeGroup !== group.dataset.groupDrop) return;
       expandedNodeGroup = null;
-      group.classList.remove("is-group-pinned-open");
+      dom.nodeList.querySelectorAll(".is-group-pinned-open").forEach((entry) => entry.classList.remove("is-group-pinned-open"));
     });
   });
   if (pendingNodeGroupFocus) {
@@ -791,23 +786,14 @@ async function assignNodeGroups(assignments, {
 }
 
 async function renameNodeGroup(source, rawTarget) {
-  const target = normalizeNodeGroup(rawTarget);
-  if (!rawTarget.trim() || source === target) {
-    renderNodeList();
-    return source === target;
-  }
-  const assignments = Object.fromEntries(
-    state.nodes.filter((node) => normalizeNodeGroup(node.group) === source).map((node) => [node.path, target]),
-  );
+  const assignments = SceneGroupTree.rename(state.nodes.map((node) => ({ ...node, id: node.path })), source, rawTarget);
+  if (!assignments) { renderNodeList(); return false; }
   return assignNodeGroups(assignments);
 }
 
 async function applyNodeGroupDrop({ mode, sourceId, targetId, targetGroup, position }) {
-  const items = state.nodes.map((node) => ({ id: node.path, group: normalizeNodeGroup(node.group) }));
-  const settings = { sourceId, targetId, targetGroup, position, defaultGroup: DEFAULT_EVENT_GROUP };
-  const plan = mode === "group"
-    ? SceneGroupDrag.planGroupDrop(items, { ...settings, newGroupName: t("新群組") })
-    : SceneGroupDrag.planReorder(items, settings);
+  const items = state.nodes.map((node) => ({ ...node, id: node.path }));
+  const plan = SceneGroupTree.planDrop(items, { mode, sourceId, targetId, targetGroup, position, newGroupName: t("新群組") });
   if (!plan) return false;
   expandedNodeGroup = plan.destination === DEFAULT_EVENT_GROUP ? null : plan.destination;
   if (expandedNodeGroup) {
@@ -816,21 +802,15 @@ async function applyNodeGroupDrop({ mode, sourceId, targetId, targetGroup, posit
   return assignNodeGroups(plan.assignments, { focusGroup: plan.createdGroup, order: plan.order });
 }
 
-async function applyNodeGroupBlockDrop({ sourceGroup, targetId, position }) {
-  const items = state.nodes.map((node) => ({ id: node.path, group: normalizeNodeGroup(node.group) }));
-  const plan = SceneGroupDrag.planGroupBlockReorder(items, {
-    sourceGroup,
-    targetId,
-    position,
-    defaultGroup: DEFAULT_EVENT_GROUP,
-  });
+async function applyNodeGroupBlockDrop(detail) {
+  const items = state.nodes.map((node) => ({ ...node, id: node.path }));
+  const plan = SceneGroupTree.planDrop(items, { ...detail, newGroupName: t("新群組") });
   if (!plan) return false;
   const selectedNode = state.nodes.find((node) => node.path === state.selectedNodePath);
-  const selectedGroup = selectedNode ? normalizeNodeGroup(selectedNode.group) : DEFAULT_EVENT_GROUP;
-  return assignNodeGroups({}, {
+  return assignNodeGroups(plan.assignments, {
     order: plan.order,
-    droppedGroup: sourceGroup,
-    openDroppedGroup: selectedGroup === sourceGroup ? sourceGroup : null,
+    droppedGroup: detail.sourceGroup,
+    openDroppedGroup: selectedNode && SceneGroupTree.within(SceneGroupTree.path(selectedNode), SceneGroupTree.fromKey(detail.sourceGroup)) ? plan.destination : null,
   });
 }
 
@@ -882,9 +862,7 @@ async function selectNode(path, { preserveTab = false } = {}) {
     const detail = await api(`/api/node?path=${encodeURIComponent(path)}`);
     detail.events = normalizeEventEntries(detail.events);
     const selectedNode = state.nodes.find((node) => node.path === path);
-    const destinationGroup = selectedNode && normalizeNodeGroup(selectedNode.group) !== DEFAULT_EVENT_GROUP
-      ? normalizeNodeGroup(selectedNode.group)
-      : null;
+    const destinationGroup = selectedNode ? SceneGroupTree.key(SceneGroupTree.path(selectedNode)) : null;
     if (path !== state.selectedNodePath && expandedNodeGroup !== destinationGroup) expandedNodeGroup = null;
     state.selectedNodePath = path;
     state.nodeDetail = detail;
@@ -1248,7 +1226,8 @@ function normalizeEventEntries(entries) {
     }));
 }
 
-function eventListItemHtml(event, group) {
+function eventListItemHtml(event) {
+  const group = SceneGroupTree.key(SceneGroupTree.path(event));
   return `
     <button class="subnav-item group-drag-item ${event.ID === state.selectedEventId ? "active" : ""}" type="button" aria-grabbed="false" data-event-id="${escapeHtml(event.ID)}" data-group-item-id="${escapeHtml(event.ID)}" data-group-item-group="${escapeHtml(group)}">
       <span class="subnav-item-copy">
@@ -1263,24 +1242,25 @@ function eventListItemHtml(event, group) {
 function eventListHtml() {
   const events = eventPoolItems();
   if (!events.length) return `<div class="node-list-empty">${escapeHtml(t("尚未建立 Event"))}</div>`;
-  return `
-    <div class="event-pool-flow" data-group-drop="${DEFAULT_EVENT_GROUP}" data-event-ungrouped-drop>
-      ${eventPoolBlocks(events).map((block) => block.type === "item"
-        ? eventListItemHtml(block.event, DEFAULT_EVENT_GROUP)
+  const renderBlock = (block) => block.type === "item"
+        ? eventListItemHtml(block.event)
         : `
-          <section class="event-group ${expandedEventGroup === block.name ? "is-group-pinned-open" : ""} ${block.events.some((event) => event.ID === state.selectedEventId) ? "is-group-editing" : ""}" data-group-drop="${escapeHtml(block.name)}">
+          <section class="event-group ${expandedEventGroup && SceneGroupTree.within(SceneGroupTree.fromKey(expandedEventGroup), block.path) ? "is-group-pinned-open" : ""} ${block.events.some((event) => event.ID === state.selectedEventId) ? "is-group-editing" : ""}" data-group-drop="${escapeHtml(block.key)}" data-group-label="${escapeHtml(block.name)}" data-group-depth="${block.path.length}">
             <div class="event-group-header">
-              <input class="event-group-name" data-event-group-name="${escapeHtml(block.name)}" aria-label="${escapeHtml(t("群組名稱"))}" maxlength="80" value="${escapeHtml(block.name)}">
+              <input class="event-group-name" data-event-group-name="${escapeHtml(block.key)}" aria-label="${escapeHtml(t("群組名稱"))}" maxlength="80" value="${escapeHtml(block.name)}">
               <div class="group-block-drag-space event-group-drag-space" title="${escapeHtml(t("拖移群組"))}" aria-label="${escapeHtml(t("拖移群組"))}"></div>
               <span class="event-group-count" aria-hidden="true">${block.events.length}</span>
             </div>
             <div class="event-group-items-shell">
               <div class="event-group-items">
-                ${block.events.map((event) => eventListItemHtml(event, block.name)).join("")}
+                ${block.blocks.map(renderBlock).join("")}<div class="group-inner-drop-tail" aria-hidden="true"></div>
               </div>
             </div>
           </section>
-        `).join("")}
+        `;
+  return `
+    <div class="event-pool-flow" data-group-drop="${DEFAULT_EVENT_GROUP}" data-event-ungrouped-drop>
+      ${eventPoolBlocks(events).map(renderBlock).join("")}
       <div class="group-loose-drop-tail event-loose-drop-tail" aria-hidden="true"></div>
     </div>
   `;
@@ -1341,14 +1321,15 @@ function renderEventsPanel({ preserveView = false } = {}) {
   eventRuleReorderControllers = [];
   conditionGroupDragController?.destroy();
   conditionGroupDragController = null;
+  effectGroupDragController?.destroy();
+  effectGroupDragController = null;
   eventGroupDragController?.destroy();
   eventGroupDragController = null;
   if (!state.nodeDetail) {
     dom.eventsPanel.innerHTML = "";
     return;
   }
-  const selectedEventGroup = normalizeEventGroup(state.eventDraft?.Group);
-  const currentEditingGroup = selectedEventGroup !== DEFAULT_EVENT_GROUP ? selectedEventGroup : null;
+  const currentEditingGroup = SceneGroupTree.ancestorKeys(SceneGroupTree.path(state.eventDraft));
   const leftHidden = state.leftPanelHidden.events;
   dom.eventsPanel.innerHTML = `
     <div class="event-workspace ${leftHidden ? "left-panel-hidden" : ""}">
@@ -1449,10 +1430,10 @@ function eventEditorHtml(event) {
 
       <section class="form-section event-rule-section" data-event-section="effects" tabindex="0" aria-label="Effects">
         <div class="form-section-header">
-          <div><h3>Effects</h3><span>${escapeHtml(t("{count} 個效果", { count: event.Effects?.length || 0 }))}</span></div>
+          <div><h3>Effects</h3><span>${escapeHtml(t("{count} 個效果", { count: SceneEffectGroups.entries(event.Effects || []).length }))}</span></div>
           <button class="icon-button section-add-button add-button" id="addEffectButton" type="button" title="${escapeHtml(t("新增 Effect"))}" aria-label="${escapeHtml(t("新增 Effect"))}">＋</button>
         </div>
-        <div class="event-section-body"><div class="repeat-list" id="effectList">${effectRowsHtml(event.Effects || [])}</div></div>
+        <div class="event-section-body"><div class="repeat-list" id="effectList">${effectRowsHtml(event.Effects || [])}<div class="effect-drop-tail" aria-hidden="true"></div></div></div>
       </section>
 
       <section class="form-section event-rule-section event-choice-section" data-event-section="content" tabindex="0" aria-label="Content">
@@ -1499,7 +1480,9 @@ function readEventForm() {
     Effects: effects,
     Content: readChoice(form, "content"),
   };
-  if (state.eventDraft?.Version === 2) result.Version = 2;
+  if (state.eventDraft?.Version >= 2) result.Version = state.eventDraft.Version;
+  if (effects.some(SceneEffectGroups.isGroup)) result.Version = 3;
+  if (Array.isArray(state.eventDraft?.["Group Path"])) result["Group Path"] = [...state.eventDraft["Group Path"]];
   if (lifecycle) return result;
   const endUp = form.elements.EndUp?.value || state.eventDraft?.["End up"] || "REDO";
   result.Weight = numberValue(form.elements.Weight?.value ?? state.eventDraft?.Weight, 1);
@@ -1514,19 +1497,20 @@ function bindEventPanel() {
   document.querySelector("#emptyNewEventButton")?.addEventListener("click", () => createEventDraft());
   document.querySelectorAll("[data-event-group-name]").forEach((input) => {
     const source = input.dataset.eventGroupName;
+    const originalName = input.value;
     input.addEventListener("keydown", (event) => {
       if (event.key === "Enter") {
         event.preventDefault();
         input.blur();
       } else if (event.key === "Escape") {
-        input.value = source;
+        input.value = originalName;
         input.blur();
       }
     });
     input.addEventListener("change", async () => {
       const target = input.value.trim();
       if (!target) {
-        input.value = source;
+        input.value = originalName;
         return;
       }
       await renameEventGroup(source, target);
@@ -1536,7 +1520,7 @@ function bindEventPanel() {
     group.addEventListener("pointerleave", () => {
       if (expandedEventGroup !== group.dataset.groupDrop) return;
       expandedEventGroup = null;
-      group.classList.remove("is-group-pinned-open");
+      dom.eventsPanel.querySelectorAll(".is-group-pinned-open").forEach((entry) => entry.classList.remove("is-group-pinned-open"));
     });
   });
   eventGroupDragController = SceneGroupDrag.createController({
@@ -1546,6 +1530,7 @@ function bindEventPanel() {
     ungroupedSelector: "[data-event-ungrouped-drop]",
     groupHandleSelector: ".event-group-drag-space",
     listSelector: ".event-group-items",
+    nested: true,
     onDrop: applyEventGroupDrop,
     onGroupDrop: applyEventGroupBlockDrop,
     onError: (error) => toast(error.message, "error"),
@@ -1613,8 +1598,23 @@ function bindEventPanel() {
     onDrop: applyConditionGroupDrop,
     onError: (error) => toast(error.message, "error"),
   });
+  effectGroupDragController = SceneGroupDrag.createController({
+    root: form.querySelector("#effectList"),
+    itemSelector: ".effect-row[data-effect-id]",
+    groupSelector: ".effect-random-group[data-effect-group]",
+    ungroupedSelector: "#effectList",
+    groupHandleSelector: ".effect-random-header",
+    collapseGroupPreview: false,
+    listSelector: ".effect-group-items",
+    defaultGroup: SceneEffectGroups.LOOSE,
+    getItemId: (element) => element.dataset.effectId,
+    getItemGroup: (element) => element.dataset.effectMembership,
+    getGroupName: (element) => element.dataset.effectGroup,
+    onDrop: applyEffectGroupDrop,
+    onGroupDrop: applyEffectGroupDrop,
+    onError: (error) => toast(error.message, "error"),
+  });
   const reorderRoots = [
-    document.querySelector("#effectList"),
     ...document.querySelectorAll("#eventForm .weighted-choice-table .repeat-list"),
   ];
   reorderRoots.forEach((root) => {
@@ -1667,7 +1667,7 @@ function bindEventPanel() {
       state.eventDraft.Conditions.splice(Number(conditionIndex), 1);
     } else if (effectIndex !== undefined) {
       state.eventDraft = readEventForm();
-      state.eventDraft.Effects.splice(Number(effectIndex), 1);
+      state.eventDraft.Effects = SceneEffectGroups.remove(state.eventDraft.Effects, effectIndex);
     } else if (weighted) {
       state.eventDraft = readEventForm();
       const [kind, indexText] = weighted.split(":");
@@ -1770,7 +1770,7 @@ function bindEventPanel() {
       renderEventsPanel({ preserveView: true });
     } else if (event.target.name === "effectType") {
       const row = event.target.closest(".effect-row");
-      const index = Number(row.dataset.index);
+      const index = row.dataset.index;
       const type = event.target.value;
       event.target.value = row.dataset.effectType;
       state.eventDraft = readEventForm();
@@ -1780,6 +1780,14 @@ function bindEventPanel() {
         renderEventsPanel({ preserveView: true });
         scheduleEventAutosave({ useDraft: true });
         return;
+      }
+      renderEventsPanel({ preserveView: true });
+    } else if (event.target.name === "conditionOp" && event.target.closest(".condition-row")?.dataset.conditionType === "memory") {
+      const index = Number(event.target.closest(".condition-row").dataset.index);
+      state.eventDraft = readEventForm();
+      const condition = state.eventDraft.Conditions[index];
+      if (condition && SceneStateRuleContract.conditionUsesId("memory", condition.op) && !condition.id) {
+        condition.id = newStateRule("condition", "memory")?.id || "新標籤";
       }
       renderEventsPanel({ preserveView: true });
     } else if (event.target.name === "effectOp" && event.target.closest(".effect-row")?.dataset.effectType === "memory") {
@@ -1794,8 +1802,18 @@ function bindEventPanel() {
     scheduleEventAutosave();
   });
   form.addEventListener("input", (event) => {
+    if (event.target.name === "contentWeightedValue") updateWeightedChances(form, "content");
+    if (event.target.name === "nextWeightedValue") updateWeightedChances(form, "next");
     if (event.target.matches("[data-numeric-source]")) return;
     if (["Trigger", "conditionType", "effectType", "EndUp"].includes(event.target.name)) return;
+    if (event.target.name === "effectChoiceWeight") {
+      const group = event.target.closest(".effect-random-group");
+      const inputs = [...group.querySelectorAll('[name="effectChoiceWeight"]')];
+      const odds = SceneEffectGroups.percentages(inputs.map((input) => input.value === "" ? null : Number(input.value)));
+      group.querySelectorAll("[data-effect-chance]").forEach((output, index) => {
+        output.textContent = SceneEffectGroups.percentageLabel(odds[index]);
+      });
+    }
     scheduleEventAutosave();
   });
 }
@@ -1804,7 +1822,7 @@ async function selectEvent(id) {
   if (id !== state.selectedEventId && !await flushAutosave()) return;
   const entry = state.nodeDetail.events.find((item) => item.data.ID === id);
   if (!entry) return;
-  const destinationGroup = normalizeEventGroup(entry.data.Group);
+  const destinationGroup = SceneGroupTree.key(SceneGroupTree.path(entry.data));
   if (id !== state.selectedEventId && expandedEventGroup !== destinationGroup) expandedEventGroup = null;
   state.selectedEventId = id;
   state.eventOriginalId = id;
@@ -1829,31 +1847,10 @@ async function createEventDraft(group = DEFAULT_EVENT_GROUP) {
 }
 
 async function renameEventGroup(source, target) {
-  const normalizedTarget = normalizeEventGroup(target);
-  if (source === normalizedTarget) return true;
-  if (!await flushAutosave()) return false;
-  setSaveState(t("儲存中..."), "saving");
-  try {
-    const result = await api("/api/event-groups", {
-      method: "PUT",
-      body: { node: state.selectedNodePath, source, target: normalizedTarget },
-    });
-    const updates = new Map((result.events || []).map((event) => [event.ID, event]));
-    state.nodeDetail.events.forEach((entry) => {
-      if (updates.has(entry.data.ID)) entry.data = clone(updates.get(entry.data.ID));
-    });
-    if (state.eventDraft && updates.has(state.eventDraft.ID)) {
-      state.eventDraft = clone(updates.get(state.eventDraft.ID));
-    }
-    renderEventsPanel({ preserveView: true });
-    setSaveState(t("已同步"));
-    toast(source === normalizedTarget ? t("Event 群組未變更") : t("Event 群組已更新"));
-    return true;
-  } catch (error) {
-    setSaveState(t("儲存失敗"), "error");
-    toast(error.message, "error");
-    return false;
-  }
+  const items = eventPoolItems().map((event) => ({ ...event, id: event.ID }));
+  const assignments = SceneGroupTree.rename(items, source, target);
+  if (!assignments) { renderEventsPanel({ preserveView: true }); return false; }
+  return assignEventGroups(assignments, { notify: false });
 }
 
 async function assignEventGroups(assignments, {
@@ -1898,11 +1895,8 @@ async function assignEventGroups(assignments, {
 }
 
 async function applyEventGroupDrop({ mode, sourceId, targetId, targetGroup, position }) {
-  const items = eventPoolItems().map((event) => ({ id: event.ID, group: event.Group }));
-  const settings = { sourceId, targetId, targetGroup, position, defaultGroup: DEFAULT_EVENT_GROUP };
-  const plan = mode === "group"
-    ? SceneGroupDrag.planGroupDrop(items, { ...settings, newGroupName: t("新群組") })
-    : SceneGroupDrag.planReorder(items, settings);
+  const items = eventPoolItems().map((event) => ({ ...event, id: event.ID }));
+  const plan = SceneGroupTree.planDrop(items, { mode, sourceId, targetId, targetGroup, position, newGroupName: t("新群組") });
   if (!plan) return false;
   expandedEventGroup = plan.destination === DEFAULT_EVENT_GROUP ? null : plan.destination;
   if (expandedEventGroup) {
@@ -1913,6 +1907,16 @@ async function applyEventGroupDrop({ mode, sourceId, targetId, targetGroup, posi
     order: plan.order,
     notify: false,
   });
+}
+
+function applyEffectGroupDrop(detail) {
+  const effects = SceneEffectGroups.applyDrop(SceneGroupDrag, state.eventDraft?.Effects || [], detail);
+  if (!effects) return false;
+  state.eventDraft.Effects = effects;
+  if (effects.some(SceneEffectGroups.isGroup)) state.eventDraft.Version = 3;
+  scheduleEventAutosave({ useDraft: true });
+  renderEventsPanel({ preserveView: true });
+  return true;
 }
 
 function applyConditionGroupDrop({ mode, sourceId, targetId, targetGroup, position }) {
@@ -1931,21 +1935,15 @@ function applyConditionGroupDrop({ mode, sourceId, targetId, targetGroup, positi
   return true;
 }
 
-async function applyEventGroupBlockDrop({ sourceGroup, targetId, position }) {
-  const items = eventPoolItems().map((event) => ({ id: event.ID, group: event.Group }));
-  const plan = SceneGroupDrag.planGroupBlockReorder(items, {
-    sourceGroup,
-    targetId,
-    position,
-    defaultGroup: DEFAULT_EVENT_GROUP,
-  });
+async function applyEventGroupBlockDrop(detail) {
+  const items = eventPoolItems().map((event) => ({ ...event, id: event.ID }));
+  const plan = SceneGroupTree.planDrop(items, { ...detail, newGroupName: t("新群組") });
   if (!plan) return false;
-  const selectedGroup = normalizeEventGroup(state.eventDraft?.Group);
-  return assignEventGroups({}, {
+  return assignEventGroups(plan.assignments, {
     order: plan.order,
     notify: false,
-    droppedGroup: sourceGroup,
-    openDroppedGroup: selectedGroup === sourceGroup ? sourceGroup : null,
+    droppedGroup: detail.sourceGroup,
+    openDroppedGroup: SceneGroupTree.within(SceneGroupTree.path(state.eventDraft), SceneGroupTree.fromKey(detail.sourceGroup)) ? plan.destination : null,
   });
 }
 

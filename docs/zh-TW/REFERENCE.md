@@ -57,11 +57,17 @@
 
 - `ID`：穩定技術 ID。
 - `Name`：可修改的顯示名稱。
-- `Group`：可選的單層 Editor 群組名稱；省略或留空時正規化為 `Normal`。
+- `Group`：舊式 Editor 群組名稱（沒有 Group Path 時視為完整一層）；省略或留空時正規化為 `Normal`。
 - `Order`：可選的非負整數，只保存 Scene Node 列表拖移順序。
 - `Content Order`：可選的字串陣列，只保存該 authoring scope 的 Content 文件清單順序。
 
-`Group`、Scene Node `Order` 與 Content `Content Order` 都是 Editor-only metadata；舊資料缺值時依既有穩定掃描順序顯示，首次拖移後才寫入。Scene Node 群組沿用 Event Pool 的停留成組、跨框移入／移出、整組排序與單一成員自動解散行為；選中成員時群組保持展開，改選外部節點後則沿展開的反向路徑縮合，收合完成且 pointerleave 前不接受 hover 重新展開。整組落位保存後，只有包含目前選取節點的群組才從拖移時的標題高度重新展開。Global Node 固定在群組流之外。這些資訊不參與 ROOT、Stack、Event 選擇、關聯圖布局或 Runtime。
+`Group Path` 是可選的零至三層群組名稱陣列，Event 也支援此欄位。各層去除頭尾空白後不得為空、超過 80 字元或為 固定保留名稱 `Normal`。例如 `["第一章", "城鎮", "旅館"]` 表示三層巢狀群組。有此欄位時以它為準：`Group` 同步為末層名稱，`[]` 則為 `Normal`；沒有路徑時，舊群組名稱視為完整一層，名稱中的斜線不作為分層符號。
+
+整組搬動保留所有後代的相對路徑與順序，禁止移入自己、後代或造成任何成員超過三層。改名只更換所選路徑前綴，不影響其他父層中的同名群組。群組指派 API 接受路徑陣列並相容舊式字串。舊資料不需重寫或更改 Schema 版本；請使用新版 Editor 編輯巢狀群組。Undo 以一次交易恢復整批路徑與排序。Stats 與條件 AND／OR 群組維持原本的單層規則。
+
+`Group`、`Group Path`、Scene Node `Order` 與 Content `Content Order` 都是 Editor-only metadata；舊資料缺值時依既有穩定掃描順序顯示，首次拖移後才寫入。Scene Node 群組沿用 Event Pool 的停留成組、跨框移入／移出、整組排序與單一成員保留行為（空群組才消失）；選中成員時所有上層群組保持展開，改選外部節點後則沿展開的反向路徑縮合，收合完成且 pointerleave 前不接受 hover 重新展開。整組落位保存後，只有包含目前選取節點的群組才從拖移時的標題高度重新展開。Global Node 固定在群組流之外。這些資訊不參與 ROOT、Stack、Event 選擇、關聯圖布局或 Runtime。
+
+Event／Node 清單的滑鼠 hover 交接有 180ms 寬限；在同一次清單 hover 行程中，經過的群組維持展開，直到游標離開清單才收合。這只穩定相鄰目標的位置，不寫入 `Group Path`／`Order`，也不影響鍵盤 focus、拖移或 Runtime。
 
 ## Global Node
 
@@ -250,7 +256,9 @@ Options 沒有生命週期、條件運算式或自訂 Screen 來源。所有已�
 
 `Priority` 必須是 0–9 的整數；新 Event 缺值時預設為 5。Runtime 仍只取數字最小的符合層級，或在生命週期 Events 中依數字由小到大執行。
 
-`Group` 是只供 Editor 整理 Event Pool 的單層創作者資訊；省略或留空時會正規化為固定的 `Normal`。`Normal` 在介面上表示未群組，不顯示群組標題。可選的非負整數 `Order` 同樣只供 Editor 保存拖曳順序；舊 Event 缺值時沿用原本的穩定讀取順序。兩者都不參與 Trigger 比對、Priority、Weight、生命週期順序、關聯圖或 Runtime 執行。Pointer 拖移預覽逐事件更新，幾何判定與 DOM 重排則以 animation frame 合併；中線遲滯避免插入位置抖動，最近的可捲動容器支援漸進邊緣自動捲動。拖移生命週期由視窗持續接收，因此元素跨容器重排不會中斷後續 pointer 事件。真實插入間隙以短促 FLIP 位移推開 Event／群組區塊；排序流有永遠存在的末端留白，跨出或跨入群組邊界即改變歸屬，不使用專用未群組按鈕。只有游標持續位於候選項目目前的幾何邊界內，500ms 停留計時才會成立；未群組候選下方會展開 48px 的群組預留空間，讓位後離開邊界則取消成組。群組預設收起為精簡名稱與數量，hover、鍵盤 focus、拖移進入或選中內部 Event 時展開；改選外部 Event 會先還原重繪前的展開幾何，再使用與展開相同的 220ms 曲線反向縮合，動畫完成且 pointerleave 前不重新接受 hover。群組內排序後保持展開至 pointerleave。名稱旁的無圖示留白是群組區塊拖移面，起拖時浮動預覽會以 220ms 縮合並以成員原順序整組移動；落位保存後，只有包含目前選取 Event 的群組才從相同標題高度展開，其他群組維持收合。只剩一個 Event 時自動解散。成功拖移不產生 Toast，失敗仍顯示錯誤。
+`Group` 與可選 `Group Path` 是只供 Editor 整理 Event Pool 的創作者資訊，最多支援三層群組；省略或留空時會正規化為固定的 `Normal`。`Normal` 在介面上表示未群組，不顯示群組標題。可選的非負整數 `Order` 同樣只供 Editor 保存拖曳順序；舊 Event 缺值時沿用原本的穩定讀取順序。這些欄位都不參與 Trigger 比對、Priority、Weight、生命週期順序、關聯圖或 Runtime 執行。Pointer 拖移預覽逐事件更新，幾何判定與 DOM 重排則以 animation frame 合併；中線遲滯避免插入位置抖動，最近的可捲動容器支援漸進邊緣自動捲動。拖移生命週期由視窗持續接收，因此元素跨容器重排不會中斷後續 pointer 事件。真實插入間隙以短促 FLIP 位移推開 Event／群組區塊；排序流有永遠存在的末端留白，跨出或跨入群組邊界即改變歸屬，不使用專用未群組按鈕。只有游標持續位於候選項目目前的幾何邊界內，500ms 停留計時才會成立；未達深度限制的候選下方會展開 48px 的群組預留空間，讓位後離開邊界則取消成組。群組預設收起為精簡名稱與數量，hover、鍵盤 focus、拖移進入或選中內部 Event 時展開；改選外部 Event 會先還原重繪前的展開幾何，再使用與展開相同的 220ms 曲線反向縮合，動畫完成且 pointerleave 前不重新接受 hover。群組內排序後保持展開至 pointerleave。名稱旁的無圖示留白是群組區塊拖移面，起拖時浮動預覽會以 220ms 縮合並以成員原順序整組移動；落位保存後，只有包含目前選取 Event 的群組才從相同標題高度展開，其他群組維持收合。只剩一個 Event 時仍保留群組，空群組才消失。成功拖移不產生 Toast，失敗仍顯示錯誤。
+
+相鄰 Event 群組沿用上述 hover 交接規則；暫存展開狀態只存在 DOM，開始拖移或重繪時立即清除。
 
 `Content` 與 `Next Node` 可為 `null`、單一字串或權重物件：
 
@@ -322,9 +330,10 @@ Memory：
 
 ```json
 { "type": "memory", "bank": "memory", "id": "has_key", "op": "has" }
+{ "type": "memory", "bank": "memory", "op": "empty" }
 ```
 
-支援 `has`、`not_has`。例如 `(money >= 10 AND member) OR hour >= 18` 可保存為：
+`has`、`not_has` 用來判斷單一標籤，必須提供 `id`；`empty`、`not_empty` 判斷整個 Memory Bank，不保存 `id`，其中 `not_empty` 會在至少有一個標籤時成立。例如 `(money >= 10 AND member) OR hour >= 18` 可保存為：
 
 ```json
 [
@@ -365,6 +374,28 @@ Conditions 只讀狀態，生命週期仍先取得候選快照。Effects 在 Con
 Editor 儲存結構化數值或自訂左值時，會將該 Event 標記為 `Version: 2`。未修改的文件與舊數值格式不需重寫；沒有 Version 代表 1，已是 2 的事件維持 2。不改變存檔狀態格式。**使用前需一併更新專案的 Editor 與 FRAMEWORK；舊 Runtime 無法理解新的數值物件。** 新 Runtime 會拒絕未知 Event 版本。公開 `scene_change_stat()` API 仍接收已算好的數字；數值物件的求值是內部機制，不新增腳本 API。
 
 ## Effects
+
+### 機率群組（Event Version 3）
+
+`Effects` 由上到下執行。普通效果直接執行；`random` 群組佔用其中一個順序位置，依相對權重**只執行一個**子效果，再繼續下一個區塊：
+
+```json
+{
+  "type": "random",
+  "choices": [
+    { "weight": 1, "effect": { "type": "stat", "id": "money", "op": "+", "value": 10 } },
+    { "weight": 3, "effect": { "type": "memory", "bank": "memory", "id": "reward", "op": "add" } }
+  ]
+}
+```
+
+此例機率為 25%／75%。省略 `weight` 時為 1；權重必須是大於零的有限數字，不接受布林值。`choices` 不可為空，只接受下述 Stat／Memory／Option 葉效果，不可巢狀群組；單成員群組合法且為 100%。
+
+群組在 Content 返回後、執行到該位置時才透過 Ren'Py 可 rollback 的亂數抽選，不在 Event prepare 時預抽。抽中的數值效果讀取前面 Effects 已更新的最新狀態。全部候選的結構與引用必須有效；未抽中的候選不進行數值運算。錯誤會標示 Event、Effect 與子項位置，不改抽其他項目，也不撤銷同一事件中先前已完成的效果。
+
+僅使用群組的事件自動升為 `Version: 3`，已是 3 的事件移除群組後仍維持 3；舊事件不自動成組，Version 1／2 的既有行為不變。**使用前請一併更新專案的 Editor 與 FRAMEWORK。** 這是 Event 資料格式擴充，不改變 Stable ID、Stack、存檔結構或公開 API。專案驗證、刪除引用保護及 Memory Tag 彙整包含每一個候選，不受機率影響。
+
+### 葉效果
 
 Stat：
 

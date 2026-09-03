@@ -72,6 +72,35 @@ class MemorySchemaTest(unittest.TestCase):
             "op": "clear",
         })
 
+    def test_memory_empty_conditions_do_not_require_or_keep_a_tag(self):
+        self.assertEqual(app.validate_condition({
+            "type": "memory",
+            "bank": "chapter",
+            "id": "不應保留",
+            "op": "empty",
+        }), {
+            "type": "memory",
+            "bank": "chapter",
+            "op": "empty",
+        })
+        self.assertEqual(app.validate_condition({
+            "type": "memory",
+            "bank": "chapter",
+            "op": "not_empty",
+        }), {
+            "type": "memory",
+            "bank": "chapter",
+            "op": "not_empty",
+        })
+
+        for operation in ("has", "not_has"):
+            with self.subTest(operation=operation), self.assertRaises(app.ApiError):
+                app.validate_condition({
+                    "type": "memory",
+                    "bank": "chapter",
+                    "op": operation,
+                })
+
 
 if __name__ == "__main__":
     unittest.main()

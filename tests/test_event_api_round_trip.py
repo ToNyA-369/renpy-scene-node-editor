@@ -43,7 +43,7 @@ class EventApiRoundTripTest(unittest.TestCase):
                 app.validate_condition({"type": "stat", "id": "money", "value": value})
             with self.subTest(effect=value), self.assertRaises(app.ApiError):
                 app.validate_effect({"type": "stat", "id": "money", "value": value})
-        for version in [True, 0, 3, "2"]:
+        for version in [True, 0, 4, "2"]:
             with self.subTest(version=version), self.assertRaises(app.ApiError):
                 app.validate_event({"Version": version, "Trigger": "Auto:Enter"})
         with self.assertRaises(app.ApiError):
@@ -110,6 +110,23 @@ class EventApiRoundTripTest(unittest.TestCase):
 
         self.assertEqual(response, normalized)
         self.assertEqual(self.saved_event("root", "weighted_replace"), normalized)
+
+    def test_whole_bank_memory_conditions_round_trip_without_a_tag(self):
+        event = {
+            "ID": "memory_bank_state",
+            "Trigger": "Auto:Enter",
+            "Conditions": [
+                {"type": "memory", "bank": "memory", "id": "stale", "op": "empty"},
+                {"type": "memory", "bank": "memory", "op": "not_empty", "clause": None},
+            ],
+        }
+
+        saved = app.save_event({"node": "root", "event": event})
+        self.assertEqual(saved["Conditions"], [
+            {"type": "memory", "bank": "memory", "op": "empty", "clause": None},
+            {"type": "memory", "bank": "memory", "op": "not_empty", "clause": None},
+        ])
+        self.assertEqual(self.saved_event("root", "memory_bank_state"), saved)
 
     def test_string_choices_and_lifecycle_omissions_round_trip(self):
         app.create_node({"id": "target", "path": "target", "name": "Target"})

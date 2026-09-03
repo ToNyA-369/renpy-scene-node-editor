@@ -1,7 +1,7 @@
 init -100 python:
     import json
     import math
-    from collections.abc import Mapping
+    from collections.abc import Mapping, MutableSequence
 
     SCENE_PROJECT_FILE = "DATA/SceneProject.json"
     SCENE_STATS_FILE = "DATA/Stats.json"
@@ -188,7 +188,7 @@ init -100 python:
                 options[node_id] = {"Version": 3, "Canvas": {}, "Elements": []}
 
         for event in global_events + [item for pool in events.values() for item in pool]:
-            if type(event.get("Version", 1)) is not int or event.get("Version", 1) not in (1, 2):
+            if type(event.get("Version", 1)) is not int or event.get("Version", 1) not in (1, 2, 3):
                 raise Exception("Unsupported Event Version: {} ({})".format(event.get("Version"), event.get("ID")))
 
         return {
@@ -418,6 +418,10 @@ init -100 python:
                 return scene_memory_has(bank_id, condition.get("id"))
             if operation == "not_has":
                 return not scene_memory_has(bank_id, condition.get("id"))
+            if operation == "empty":
+                return not scene_memory_tags(bank_id)
+            if operation == "not_empty":
+                return bool(scene_memory_tags(bank_id))
             return False
 
         if condition_type != "stat":
@@ -706,9 +710,125 @@ init -100 python:
         scene_enabled_options = enabled
 
 
+    def scene_random_weight(value):
+        if not isinstance(value, (int, float)) or isinstance(value, bool):
+            raise Exception("Random Effect weight must be a finite number greater than 0.")
+        try:
+            weight = float(value)
+        except (OverflowError, TypeError, ValueError):
+            raise Exception("Random Effect weight must be a finite number greater than 0.")
+        if not math.isfinite(weight) or weight <= 0:
+            raise Exception("Random Effect weight must be a finite number greater than 0.")
+        return weight
+
+
+    def scene_validate_numeric_shape(value, allow_calculation=True):
+        if isinstance(value, bool) or not isinstance(value, (int, float, Mapping)):
+            raise Exception("Numeric expression operand must be a finite number or Stat reference: {!r}".format(value))
+        if isinstance(value, (int, float)):
+            try:
+                if not math.isfinite(value):
+                    raise Exception("Numeric expression operand must be finite: {!r}".format(value))
+            except OverflowError:
+                raise Exception("Numeric expression operand must be finite: {!r}".format(value))
+            return
+        if value.get("type") == "stat" and set(value) == {"type", "id"}:
+            stat_id = value["id"]
+            if not isinstance(stat_id, str) or stat_id not in scene_catalog["stats"]:
+                raise Exception("Unknown expression Stat ID: {!r}".format(stat_id))
+            return
+        if (allow_calculation and value.get("type") == "calc"
+                and set(value) == {"type", "op", "left", "right"}
+                and value.get("op") in ("+", "-", "*", "/", "%")):
+            scene_validate_numeric_shape(value["left"], False)
+            scene_validate_numeric_shape(value["right"], False)
+            if value["op"] in ("/", "%") and isinstance(value["right"], (int, float)) and not isinstance(value["right"], bool) and value["right"] == 0:
+                raise Exception("Numeric expression divisor cannot be zero: {!r}".format(value))
+            return
+        raise Exception("Only one numeric operation is allowed: {!r}".format(value))
+
+
+    def scene_validate_effect(node_id, effect, allow_random=True):
+        if not isinstance(effect, Mapping):
+            raise Exception("Effect must be an object.")
+        effect_type = str(effect.get("type") or "").lower()
+        if effect_type == "random":
+            if not allow_random:
+                raise Exception("Random Effect cannot contain a nested Random Effect.")
+            choices = effect.get("choices")
+            # Ren'Py shadows list with RevertableList; json.load returns built-in lists.
+            if not isinstance(choices, MutableSequence) or not choices:
+                raise Exception("Random Effect choices must be a non-empty array.")
+            for index, choice in enumerate(choices):
+                if not isinstance(choice, Mapping) or not isinstance(choice.get("effect"), Mapping):
+                    raise Exception("Random Effect choice #{} must include an Effect object.".format(index + 1))
+                try:
+                    scene_random_weight(choice.get("weight", 1))
+                    scene_validate_effect(node_id, choice["effect"], False)
+                except Exception as error:
+                    raise Exception("Random Effect choice #{}: {}".format(index + 1, error))
+            return
+        if effect_type == "stat":
+            stat_id = str(effect.get("id") or "").strip()
+            if stat_id not in scene_catalog["stats"]:
+                raise Exception("Unknown Stat ID: {}".format(stat_id))
+            operation = str(effect.get("op") or "")
+            if operation not in ("set", "+", "-", "*", "/"):
+                raise Exception("Unknown Stat operation: {}".format(operation))
+            scene_validate_numeric_shape(effect.get("value", 0))
+            return
+        if effect_type in ("memory", "tag"):
+            operation = effect.get("op")
+            bank_id = effect.get("bank", SCENE_DEFAULT_MEMORY)
+            if operation == "add":
+                scene_memory_bank(bank_id)
+                scene_memory_tag(effect.get("id"))
+            elif operation == "remove":
+                scene_memory_bank(bank_id)
+                scene_memory_tag(effect.get("id"))
+            elif operation == "clear":
+                scene_memory_bank(bank_id)
+            else:
+                raise Exception("Unknown Memory operation: {}".format(operation))
+            return
+        if effect_type == "option":
+            target_node_id = str(effect.get("node") or "").strip()
+            if target_node_id != str(node_id or "").strip():
+                raise Exception(
+                    "Option Effect must target its owning Options scope: {} cannot target {}".format(
+                        node_id, target_node_id
+                    )
+                )
+            scene_option_target(effect)
+            if str(effect.get("op") or "").lower() not in ("enable", "disable"):
+                raise Exception("Unknown Option operation: {}".format(effect.get("op")))
+            return
+        raise Exception("Unknown Effect type: {}".format(effect_type))
+
+
+    def scene_random_effect_choice(choices):
+        weighted = [(choice["effect"], scene_random_weight(choice.get("weight", 1))) for choice in choices]
+        scale = max(weight for _effect, weight in weighted)
+        total = sum(weight / scale for _effect, weight in weighted)
+        threshold = renpy.random.random() * total
+        cursor = 0.0
+        for index, (effect, weight) in enumerate(weighted):
+            cursor += weight / scale
+            if threshold < cursor:
+                return index + 1, effect
+        return len(weighted), weighted[-1][0]
+
+
     def scene_apply_effect(node_id, effect):
         effect_type = str(effect.get("type") or "").lower()
-        if effect_type == "stat":
+        if effect_type == "random":
+            scene_validate_effect(node_id, effect)
+            choice_index, selected = scene_random_effect_choice(effect["choices"])
+            try:
+                scene_apply_effect(node_id, selected)
+            except Exception as error:
+                raise Exception("Random Effect choice #{}: {}".format(choice_index, error))
+        elif effect_type == "stat":
             scene_apply_stat_effect(effect)
         elif effect_type in ("memory", "tag"):
             operation = effect.get("op")

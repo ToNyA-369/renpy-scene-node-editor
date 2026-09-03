@@ -314,10 +314,14 @@
     "操作": "Operation",
     "移除 Effect": "Remove Effect",
     "清空整個記憶庫": "Clear whole bank",
+    "判斷整個記憶庫": "Check whole bank",
     "尚未加入權重項目。": "No weighted items added.",
     "移除項目": "Remove item",
 
     // Conditions and Effects
+    "隨機擇一": "Random choice",
+    "機率": "Chance",
+    "拖移以排序整個群組": "Drag to reorder the whole group",
     "Stat 數值": "Stat Value",
     "Memory 標籤": "Memory Tag",
     "等於 (=)": "Equals (=)",

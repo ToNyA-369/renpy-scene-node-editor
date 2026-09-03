@@ -60,6 +60,28 @@ function fakeRow(values, clause = "") {
   };
 }
 
+test("random Effect rendering and form reading preserve groups, weights and nested type switches", () => {
+  const editor = createEditor();
+  const effects = [{ type: "random", choices: [
+    { weight: 1, effect: { type: "stat", id: "money", op: "+", value: 10 } },
+    { weight: 3, effect: { type: "memory", bank: "daily", id: "reward", op: "add" } },
+  ] }];
+  const html = editor.effectRowsHtml(effects);
+  assert.match(html, /effect-random-group/);
+  assert.match(html, /data-effect-id="0.1"/);
+  assert.match(html, />25%<\/output>/);
+  assert.match(html, />75%<\/output>/);
+  assert.doesNotMatch(html, /condition-logic-block|value="random"/);
+  const a = fakeRow({ effectType: "stat", effectId: "money", effectOp: "+", effectValue: "10", effectChoiceWeight: "1" });
+  const b = fakeRow({ effectType: "memory", effectBank: "daily", effectId: "reward", effectOp: "add", effectChoiceWeight: "3" });
+  for (const row of [a, b]) row.dataset.effectMembership = "random:0";
+  assert.deepEqual(editor.readRules({ querySelectorAll: (selector) => selector === ".effect-row" ? [a, b] : [] }).effects, effects);
+  const draft = { Effects: effects };
+  assert.equal(editor.replaceRuleType(draft, "effect", "0.1", "stat"), true);
+  assert.equal(draft.Effects[0].choices[1].effect.type, "stat");
+  assert.equal(draft.Effects[0].choices[1].weight, 3);
+});
+
 test("numeric Condition and Effect fields serialize one operation without changing effect order", () => {
   const editor = createEditor();
   const condition = fakeRow({ conditionType: "stat", conditionOp: ">=",
@@ -131,6 +153,28 @@ test("Next Node choices mirror Node authoring groups without changing stable IDs
   ]);
 });
 
+test("Content and Next Node probabilities share Effect formatting without changing saved weights", () => {
+  const editor = createEditor();
+  assert.match(editor.weightedRowsHtml("intro", "content"), />100%<\/span>/);
+  const html = editor.weightedRowsHtml({ intro: 1, end: 3 }, "content");
+  assert.match(html, />25%<\/span>/);
+  assert.match(html, />75%<\/span>/);
+  assert.match(editor.weightedRowsHtml({ root: 1 }, "next"), /data-next-chance[^>]*>100%<\/span>/);
+  const outputs = [{}, {}];
+  const weights = [{ value: "3" }, { value: "1" }];
+  const form = { querySelectorAll: (selector) => selector === "[data-content-chance]" ? outputs : weights };
+  editor.updateWeightedChances(form, "content");
+  assert.deepEqual(outputs.map((output) => output.textContent), ["75%", "25%"]);
+  weights[0].value = "";
+  editor.updateWeightedChances(form, "content");
+  assert.deepEqual(outputs.map((output) => output.textContent), ["—", "—"]);
+  const nextOutputs = [{}, {}];
+  editor.updateWeightedChances({ querySelectorAll: (selector) => selector === "[data-next-chance]"
+    ? nextOutputs : [{ value: "1" }, { value: "3" }] }, "next");
+  assert.deepEqual(nextOutputs.map((output) => output.textContent), ["25%", "75%"]);
+  assert.deepEqual(outputs.map((output) => output.textContent), ["—", "—"]);
+});
+
 test("Event groups keep Normal first and preserve flat Event order", () => {
   const events = [
     { ID: "b", Group: "Story" },
@@ -158,7 +202,9 @@ test("Event pool blocks keep loose items at their ordered positions", () => {
   ];
   assert.deepEqual(SceneEventEditor.eventPoolBlocks(events), [
     { type: "item", event: events[0] },
-    { type: "group", name: "Story", events: [events[1], events[2]] },
+    { type: "group", name: "Story", path: ["Story"], key: '["Story"]', events: [events[1], events[2]], blocks: [
+      { type: "item", event: events[1] }, { type: "item", event: events[2] },
+    ] },
     { type: "item", event: events[3] },
   ]);
 });
@@ -218,6 +264,7 @@ test("Condition and Effect DOM values map to the stable Event JSON contract", ()
   const conditions = [
     fakeRow({ conditionType: "stat", conditionId: "money", conditionOp: ">=", conditionValue: "12" }),
     fakeRow({ conditionType: "memory", conditionBank: "daily", conditionId: "visited", conditionOp: "not_has" }),
+    fakeRow({ conditionType: "memory", conditionBank: "daily", conditionOp: "empty" }),
   ];
   const effects = [
     fakeRow({ effectType: "stat", effectId: "money", effectOp: "+", effectValue: "3" }),
@@ -240,6 +287,7 @@ test("Condition and Effect DOM values map to the stable Event JSON contract", ()
     conditions: [
       { type: "stat", id: "money", op: ">=", value: 12, clause: null },
       { type: "memory", id: "visited", op: "not_has", bank: "daily", clause: null },
+      { type: "memory", op: "empty", bank: "daily", clause: null },
     ],
     effects: [
       { type: "stat", op: "+", id: "money", value: 3 },
@@ -269,6 +317,7 @@ test("Event row rendering keeps current selectors and Memory clear semantics", (
   const editor = createEditor();
   const conditionHtml = editor.conditionRowsHtml([
     { type: "memory", bank: "daily", id: "visited", op: "not_has" },
+    { type: "memory", bank: "daily", op: "not_empty" },
   ]);
   const effectHtml = editor.effectRowsHtml([
     { type: "memory", bank: "daily", op: "clear" },
@@ -279,6 +328,7 @@ test("Event row rendering keeps current selectors and Memory clear semantics", (
   assert.match(conditionHtml, /data-condition-type="memory"/);
   assert.match(conditionHtml, /name="conditionBank"/);
   assert.match(conditionHtml, /name="conditionId" data-memory-tag-input/);
+  assert.match(conditionHtml, /placeholder="判斷整個記憶庫" disabled/);
   assert.match(effectHtml, /data-effect-type="memory"/);
   assert.match(effectHtml, /name="effectId" data-memory-tag-input[^>]*disabled/);
   assert.match(effectHtml, /data-effect-type="option"/);

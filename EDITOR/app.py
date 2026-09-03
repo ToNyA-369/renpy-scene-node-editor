@@ -62,7 +62,7 @@ AUTO_TRIGGER_PHASES = {"Enter", "Node", "Exit"}
 LIFECYCLE_TRIGGERS = {"Auto:Enter", "Auto:Exit"}
 CONDITION_OPERATORS = {
     "stat": (">", ">=", "<", "<=", "==", "!="),
-    "memory": ("has", "not_has"),
+    "memory": ("has", "not_has", "empty", "not_empty"),
 }
 EFFECT_OPERATORS = {
     "stat": ("set", "+", "-", "*", "/"),
@@ -186,6 +186,10 @@ PYTHON_EN_DICTIONARY = {
     "Priority 必須是 0 到 9 的整數。": "Priority must be an integer between 0 and 9.",
     "Weight 必須大於 0。": "Weight must be greater than 0.",
     "Event 群組名稱不可超過 80 個字元。": "Event group names cannot exceed 80 characters.",
+    "{field} 必須是最多三層的群組名稱陣列。": "{field} must be an array of group names with at most three levels.",
+    "{field} 的每一層都必須是群組名稱。": "Each level in {field} must be a group name.",
+    "{field} 的群組名稱不合法。": "{field} contains an invalid group name.",
+    "群組指派必須是舊式名稱字串或 Group Path 陣列。": "Group assignments must be legacy name strings or Group Path arrays.",
     "Event 群組指派必須是非空 object。": "Event group assignments must be a non-empty object.",
     "找不到 Event：{id}。": "Event not found: {id}.",
     "{field} 必須是非負整數。": "{field} must be a non-negative integer.",
@@ -194,6 +198,10 @@ PYTHON_EN_DICTIONARY = {
     "Conditions 必須是 object 陣列。": "Conditions must be an array of objects.",
     "Condition clause 必須是 null 或不超過 80 個字元的字串。": "Condition clause must be null or a string of at most 80 characters.",
     "Effects 必須是 object 陣列。": "Effects must be an array of objects.",
+    "{field} 的 Random choices 必須是非空 object 陣列。": "{field} Random choices must be a non-empty array of objects.",
+    "{field} 的 Random choice 必須包含 Effect object。": "{field} Random choice must include an Effect object.",
+    "{field} 的 Random 權重必須是大於 0 的有限數字。": "{field} Random weight must be a finite number greater than 0.",
+    "{field} 不允許巢狀 Random Effect。": "{field} cannot contain a nested Random Effect.",
     "Option Effect 只能控制同一個 Options 作用域內的 Option。": "Option Effect can only control Options in the same Options scope.",
     "End up 必須是 REDO、GOTO、REPLACE 或 EXIT。": "End up must be REDO, GOTO, REPLACE, or EXIT.",
     "{end_up} Event 必須設定 Next Node。": "{end_up} Event must set Next Node.",
@@ -828,14 +836,17 @@ def validate_condition(condition, field="Condition"):
     if condition_type == "memory":
         result.pop("left", None)
         result["bank"] = clean_file_name(result.get("bank") or DEFAULT_MEMORY_ID, "")
-        tag_id = str(result.get("id") or "").strip()
-        if not tag_id:
-            raise ApiError(HTTPStatus.BAD_REQUEST, tr("{field} 的記憶標籤不可為空。", field=field))
-        result["id"] = tag_id
         operation = str(result.get("op") or "has")
         if operation not in CONDITION_OPERATORS["memory"]:
             raise ApiError(HTTPStatus.BAD_REQUEST, tr("{field} 的記憶判斷不合法。", field=field))
         result["op"] = operation
+        if operation in ("has", "not_has"):
+            tag_id = str(result.get("id") or "").strip()
+            if not tag_id:
+                raise ApiError(HTTPStatus.BAD_REQUEST, tr("{field} 的記憶標籤不可為空。", field=field))
+            result["id"] = tag_id
+        else:
+            result.pop("id", None)
         result.pop("value", None)
         result.pop("scope", None)
         return result
@@ -856,12 +867,33 @@ def validate_condition_clause(value):
     return clause
 
 
-def validate_effect(effect, field="Effect"):
+def validate_effect(effect, field="Effect", allow_random=True):
     result = dict(effect)
     effect_type = str(result.get("type") or "stat").lower()
     if effect_type == "tag":
         effect_type = "memory"
     result["type"] = effect_type
+
+    if effect_type == "random":
+        if not allow_random:
+            raise ApiError(HTTPStatus.BAD_REQUEST, tr("{field} 不允許巢狀 Random Effect。", field=field))
+        choices = result.get("choices")
+        if not isinstance(choices, list) or not choices or not all(isinstance(choice, dict) for choice in choices):
+            raise ApiError(HTTPStatus.BAD_REQUEST, tr("{field} 的 Random choices 必須是非空 object 陣列。", field=field))
+        normalized_choices = []
+        for index, choice in enumerate(choices):
+            choice_field = "{} Random choice #{}".format(field, index + 1)
+            weight = choice.get("weight", 1)
+            if not is_positive_finite_random_weight(weight):
+                raise ApiError(HTTPStatus.BAD_REQUEST, tr("{field} 的 Random 權重必須是大於 0 的有限數字。", field=choice_field))
+            child = choice.get("effect")
+            if not isinstance(child, dict):
+                raise ApiError(HTTPStatus.BAD_REQUEST, tr("{field} 的 Random choice 必須包含 Effect object。", field=choice_field))
+            normalized_choices.append({
+                "weight": weight,
+                "effect": validate_effect(child, choice_field, False),
+            })
+        return {"type": "random", "choices": normalized_choices}
 
     if effect_type == "stat":
         if "left" in result:
@@ -913,6 +945,38 @@ def validate_effect(effect, field="Effect"):
         return result
 
     raise ApiError(HTTPStatus.BAD_REQUEST, tr("{field} 的類型不合法：{effect_type}。", field=field, effect_type=effect_type))
+
+
+def is_positive_finite_random_weight(value):
+    if not isinstance(value, (int, float)) or isinstance(value, bool):
+        return False
+    try:
+        return math.isfinite(value) and value > 0
+    except OverflowError:
+        return False
+
+
+def iter_effect_leaves(effects):
+    """Yield every possible leaf Effect, including children of Random groups."""
+    for effect, _path in iter_effect_entries(effects):
+        yield effect
+
+
+def iter_effect_entries(effects, prefix=()):
+    """Keep top-level reference indexes stable; child paths locate random choices."""
+    if not isinstance(effects, list):
+        return
+    for index, effect in enumerate(effects):
+        if not isinstance(effect, dict):
+            continue
+        path = prefix + (index,)
+        if str(effect.get("type") or "").lower() == "random":
+            choices = effect.get("choices")
+            if isinstance(choices, list):
+                children = [choice.get("effect") if isinstance(choice, dict) else None for choice in choices]
+                yield from iter_effect_entries(children, path)
+            continue
+        yield effect, path
 
 
 def validate_option_style_override(value):
@@ -1141,7 +1205,7 @@ def option_effect_references(node_id, element_id=None, item_id=None):
         except ApiError:
             continue
         for entry in detail["events"]:
-            for index, effect in enumerate(entry.get("data", {}).get("Effects", [])):
+            for effect, effect_path in iter_effect_entries(entry.get("data", {}).get("Effects", [])):
                 if str(effect.get("type") or "").lower() != "option":
                     continue
                 if effect.get("node") != node_id:
@@ -1158,7 +1222,8 @@ def option_effect_references(node_id, element_id=None, item_id=None):
                     "eventId": entry.get("data", {}).get("ID", entry["file"]),
                     "eventName": entry.get("data", {}).get("Name")
                     or entry.get("data", {}).get("ID", entry["file"]),
-                    "effectIndex": index,
+                    "effectIndex": effect_path[0],
+                    **({"effectPath": list(effect_path)} if len(effect_path) > 1 else {}),
                 })
     return references
 
@@ -1214,13 +1279,15 @@ def node_summary(directory, include_editor_details=True):
         parse_error = exc.message
     relative = directory.relative_to(PROJECT_ROOT / NODE_DIR).as_posix()
     events = list((directory / EVENT_DIR).glob("*.json")) if (directory / EVENT_DIR).exists() else []
+    group_path = group_path_for_document(data, validate_node_group)
     result = {
         "path": relative,
         "id": data.get("ID", directory.name),
         "name": data.get("Name", data.get("ID", directory.name)),
         "eventCount": len(events),
         "order": data.get("Order"),
-        "group": validate_node_group(data.get("Group")),
+        "group": group_path[-1] if group_path else DEFAULT_EVENT_GROUP,
+        "groupPath": group_path,
         "parseError": parse_error,
     }
     if not include_editor_details:
@@ -1357,7 +1424,7 @@ def scan_memory_tags(node_summaries=None):
             except ApiError:
                 continue
             effects = event.get("Effects") if isinstance(event, dict) else []
-            for effect in effects if isinstance(effects, list) else []:
+            for effect in iter_effect_leaves(effects):
                 if not isinstance(effect, dict):
                     continue
                 effect_type = str(effect.get("type") or "").casefold()
@@ -1541,6 +1608,44 @@ def validate_event_group(value):
     return group
 
 
+def validate_group_path(value, field):
+    """Validate authoring-only nested group metadata without interpreting names."""
+    if not isinstance(value, list) or len(value) > 3:
+        raise ApiError(HTTPStatus.BAD_REQUEST, tr("{field} 必須是最多三層的群組名稱陣列。", field=field))
+    result = []
+    for component in value:
+        if not isinstance(component, str):
+            raise ApiError(HTTPStatus.BAD_REQUEST, tr("{field} 的每一層都必須是群組名稱。", field=field))
+        name = component.strip()
+        if not name or len(name) > 80 or name == DEFAULT_EVENT_GROUP:
+            raise ApiError(HTTPStatus.BAD_REQUEST, tr("{field} 的群組名稱不合法。", field=field))
+        result.append(name)
+    return result
+
+
+def group_path_for_document(document, validate_group):
+    """Read explicit paths authoritatively, with the old Group field as a fallback."""
+    if "Group Path" in document:
+        return validate_group_path(document.get("Group Path"), "Group Path")
+    group = validate_group(document.get("Group"))
+    return [] if group == DEFAULT_EVENT_GROUP else [group]
+
+
+def apply_group_assignment(document, value, validate_group):
+    """Strings retain legacy serialization; arrays opt into Group Path serialization."""
+    updated = dict(document)
+    if isinstance(value, list):
+        path = validate_group_path(value, "Group Path")
+        updated["Group Path"] = path
+        updated["Group"] = path[-1] if path else DEFAULT_EVENT_GROUP
+    else:
+        if not isinstance(value, str):
+            raise ApiError(HTTPStatus.BAD_REQUEST, tr("群組指派必須是舊式名稱字串或 Group Path 陣列。"))
+        updated.pop("Group Path", None)
+        updated["Group"] = validate_group(value)
+    return updated
+
+
 def validate_editor_order(value, field="Order"):
     if not isinstance(value, int) or isinstance(value, bool) or value < 0:
         raise ApiError(HTTPStatus.BAD_REQUEST, tr("{field} 必須是非負整數。", field=field))
@@ -1550,7 +1655,7 @@ def validate_editor_order(value, field="Order"):
 def validate_event(event, global_scope=False, owner_node_id=None):
     if not isinstance(event, dict):
         raise ApiError(HTTPStatus.BAD_REQUEST, tr("Event 必須是 JSON object。"))
-    if type(event.get("Version", 1)) is not int or event.get("Version", 1) not in (1, 2):
+    if type(event.get("Version", 1)) is not int or event.get("Version", 1) not in (1, 2, 3):
         raise ApiError(HTTPStatus.BAD_REQUEST, tr("不支援的 Event Version。"))
     if global_scope and owner_node_id is None:
         owner_node_id = GLOBAL_NODE_ID
@@ -1584,8 +1689,12 @@ def validate_event(event, global_scope=False, owner_node_id=None):
             else validate_condition_clause(item.get("clause"))
         )
         validated_conditions.append(validated)
-    validated_effects = [validate_effect(item, "Event Effect") for item in effects]
-    for effect in validated_effects:
+    validated_effects = [
+        validate_effect(item, "Event Effect #{}".format(index + 1))
+        for index, item in enumerate(effects)
+    ]
+    leaf_effects = list(iter_effect_leaves(validated_effects))
+    for effect in leaf_effects:
         if (
             effect.get("type") == "option"
             and owner_node_id
@@ -1596,10 +1705,11 @@ def validate_event(event, global_scope=False, owner_node_id=None):
                 tr("Option Effect 只能控制同一個 Options 作用域內的 Option。"),
             )
 
+    group_path = group_path_for_document(event, validate_event_group)
     result = {
         "ID": event_id,
         "Name": str(event.get("Name") or event_id),
-        "Group": validate_event_group(event.get("Group")),
+        "Group": group_path[-1] if group_path else DEFAULT_EVENT_GROUP,
         "Trigger": trigger,
         "Priority": priority,
         "Once": bool(event.get("Once", False)),
@@ -1607,9 +1717,13 @@ def validate_event(event, global_scope=False, owner_node_id=None):
         "Effects": validated_effects,
         "Content": content,
     }
-    if event.get("Version") == 2 or any(
+    if "Group Path" in event:
+        result["Group Path"] = group_path
+    if event.get("Version") == 3 or any(effect.get("type") == "random" for effect in validated_effects):
+        result["Version"] = 3
+    elif event.get("Version") == 2 or any(
         "left" in rule or isinstance(rule.get("value"), dict)
-        for rule in validated_conditions + validated_effects
+        for rule in validated_conditions + leaf_effects
     ):
         result["Version"] = 2
     if "Order" in event:
@@ -1777,7 +1891,7 @@ def validate_project():
                         issues.append({"level": "warning", "location": event_location, "message": tr("找不到 Stat：{id}。", id=stat_id)})
                 if condition.get("type") == "memory" and condition.get("bank") not in memories:
                     issues.append({"level": "warning", "location": event_location, "message": tr("找不到記憶庫：{bank}。", bank=condition.get('bank', ''))})
-            for effect in event["Effects"]:
+            for effect in iter_effect_leaves(event["Effects"]):
                 for stat_id in rule_stat_ids(effect):
                     if stat_id not in stats:
                         issues.append({"level": "warning", "location": event_location, "message": tr("找不到 Stat：{id}。", id=stat_id)})
@@ -1873,7 +1987,11 @@ def save_node(payload):
     }
     if "Order" in previous:
         updated["Order"] = validate_editor_order(previous.get("Order"), "Scene Node Order")
-    if "Group" in previous:
+    if "Group Path" in previous:
+        group_path = group_path_for_document(previous, validate_node_group)
+        updated["Group Path"] = group_path
+        updated["Group"] = group_path[-1] if group_path else DEFAULT_EVENT_GROUP
+    elif "Group" in previous:
         updated["Group"] = validate_node_group(previous.get("Group"))
     if isinstance(previous.get("Content Order"), list):
         updated["Content Order"] = previous["Content Order"]
@@ -1931,30 +2049,13 @@ def save_node_groups(payload):
         path = node_path(relative) / "Node.json"
         data = read_json(path, {}) or {}
         if raw_path in assignments:
-            data["Group"] = validate_node_group(assignments[raw_path])
+            data = apply_group_assignment(data, assignments[raw_path], validate_node_group)
         if relative in order_indexes:
             data["Order"] = order_indexes[relative]
         updates.append((path, data))
+    # All assignments and order members have been resolved and validated above.
     write_event_updates(updates)
     return {"nodes": scan_nodes()}
-
-
-def dissolve_singleton_node_groups():
-    grouped = {}
-    for node in scan_nodes(False):
-        group = validate_node_group(node.get("group"))
-        if group != DEFAULT_EVENT_GROUP:
-            grouped.setdefault(group, []).append(node)
-    updates = []
-    for entries in grouped.values():
-        if len(entries) != 1:
-            continue
-        path = node_path(entries[0]["path"]) / "Node.json"
-        data = read_json(path, {}) or {}
-        data["Group"] = DEFAULT_EVENT_GROUP
-        updates.append((path, data))
-    write_event_updates(updates)
-    return scan_nodes()
 
 
 def save_content_order(payload):
@@ -1992,14 +2093,30 @@ def save_event(payload):
     if not (directory / "Node.json").exists():
         raise ApiError(HTTPStatus.NOT_FOUND, tr("找不到指定的 Global Node。") if global_scope else tr("找不到指定的 Scene Node。"))
     node = read_json(directory / "Node.json", {}) or {}
+    raw_event = payload.get("event")
+    if not isinstance(raw_event, dict):
+        raise ApiError(HTTPStatus.BAD_REQUEST, tr("Event 必須是 JSON object。"))
+    event_root = directory / EVENT_DIR
+    original = payload.get("originalId")
+    existing_path = None
+    if original:
+        existing_path = event_root / f"{clean_file_name(original, '.json')}.json"
+    else:
+        event_id = raw_event.get("ID")
+        if event_id:
+            existing_path = event_root / f"{clean_file_name(event_id, '.json')}.json"
+    # Form saves normally edit Event fields, not group membership. Keep an explicit
+    # path when an older frontend payload does not carry it yet.
+    if "Group Path" not in raw_event and existing_path and existing_path.exists():
+        previous = read_json(existing_path, {}) or {}
+        if "Group Path" in previous:
+            raw_event = {**raw_event, "Group Path": previous["Group Path"]}
     event = validate_event(
-        payload.get("event"),
+        raw_event,
         global_scope=global_scope,
         owner_node_id=GLOBAL_NODE_ID if global_scope else node.get("ID"),
     )
-    event_root = directory / EVENT_DIR
     event_root.mkdir(exist_ok=True)
-    original = payload.get("originalId")
     old_path_to_remove = None
     if original:
         original_name = clean_file_name(original, ".json")
@@ -2068,7 +2185,7 @@ def rename_event_group(payload):
             raw_event = read_json(path, {}) or {}
             updated = dict(raw_event)
             if raw_event_id in assignments:
-                updated["Group"] = validate_event_group(assignments[raw_event_id])
+                updated = apply_group_assignment(updated, assignments[raw_event_id], validate_event_group)
             if event_id in order_indexes:
                 updated["Order"] = order_indexes[event_id]
             validated = validate_event(
@@ -2094,10 +2211,16 @@ def rename_event_group(payload):
     if event_root.exists():
         for path in sorted(event_root.glob("*.json"), key=lambda value: value.name.casefold()):
             raw_event = read_json(path, {}) or {}
-            if validate_event_group(raw_event.get("Group")) != source:
+            group_path = group_path_for_document(raw_event, validate_event_group)
+            if (group_path[-1] if group_path else DEFAULT_EVENT_GROUP) != source:
                 continue
+            if "Group Path" in raw_event:
+                updated_path = [] if target == DEFAULT_EVENT_GROUP else [*group_path[:-1], target]
+                raw_event = {**raw_event, "Group Path": updated_path, "Group": target}
+            else:
+                raw_event = {**raw_event, "Group": target}
             validated = validate_event(
-                {**raw_event, "Group": target},
+                raw_event,
                 global_scope=global_scope,
                 owner_node_id=owner_node_id,
             )
@@ -2105,27 +2228,6 @@ def rename_event_group(payload):
 
     write_event_updates(updates)
     return {"source": source, "target": target, "events": [event for _, event in updates]}
-
-
-def dissolve_singleton_event_groups(directory):
-    event_root = directory / EVENT_DIR
-    grouped = {}
-    if not event_root.exists():
-        return []
-    for path in sorted(event_root.glob("*.json"), key=lambda value: value.name.casefold()):
-        event = read_json(path, {}) or {}
-        group = validate_event_group(event.get("Group"))
-        if group != DEFAULT_EVENT_GROUP:
-            grouped.setdefault(group, []).append((path, event))
-    updates = []
-    for entries in grouped.values():
-        if len(entries) != 1:
-            continue
-        path, event = entries[0]
-        event = {**event, "Group": DEFAULT_EVENT_GROUP}
-        write_json(path, event)
-        updates.append(event)
-    return updates
 
 
 def save_content_file(root, payload):
@@ -2194,7 +2296,7 @@ def node_references(relative):
                     "eventId": event.get("ID", entry["file"]),
                     "eventName": event.get("Name", event.get("ID", entry["file"])),
                 })
-            for index, effect in enumerate(event.get("Effects", [])):
+            for effect, effect_path in iter_effect_entries(event.get("Effects", [])):
                 if str(effect.get("type") or "").lower() != "option":
                     continue
                 if effect.get("node") != target_id:
@@ -2204,7 +2306,8 @@ def node_references(relative):
                     "nodeName": summary.get("name") or summary["id"],
                     "eventId": event.get("ID", entry["file"]),
                     "eventName": event.get("Name", event.get("ID", entry["file"])),
-                    "effectIndex": index,
+                    "effectIndex": effect_path[0],
+                    **({"effectPath": list(effect_path)} if len(effect_path) > 1 else {}),
                     "referenceType": "option-effect",
                 })
     return {"nodeId": target_id, "references": references}
@@ -2231,7 +2334,7 @@ def delete_node(relative):
         transaction.capture_tree(directory)
         transaction.capture_tree(target)
     shutil.move(str(directory), str(target))
-    return {"deleted": True, "backup": str(target), "nodes": dissolve_singleton_node_groups()}
+    return {"deleted": True, "backup": str(target), "nodes": scan_nodes()}
 
 
 class EditorHandler(BaseHTTPRequestHandler):
@@ -2490,8 +2593,6 @@ class EditorHandler(BaseHTTPRequestHandler):
                     node["Content Order"] = [entry for entry in order if entry != name]
                     write_json(node_file, node)
                 response = {"deleted": True}
-                if parsed.path == "/api/events":
-                    response["events"] = dissolve_singleton_event_groups(directory.parent)
             self.send_json(response)
         except ApiError as exc:
             self.send_error_json(exc)
